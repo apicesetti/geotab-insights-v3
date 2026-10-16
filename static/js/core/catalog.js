@@ -15,6 +15,7 @@
     { key: "distraccion", label: "Distracción", kind: "riesgo", weight: 1.4, color: "#d946ef" },
     { key: "fatiga", label: "Fatiga / bostezo", kind: "riesgo", weight: 1.5, color: "#6366f1" },
     { key: "colision", label: "Colisión / casi colisión", kind: "riesgo", weight: 2.0, color: "#dc2626" },
+    { key: "distancia", label: "Conducción cercana (distancia)", kind: "riesgo", weight: 1.4, color: "#be123c" },
     { key: "salida_carril", label: "Salida de carril / doble línea", kind: "riesgo", weight: 1.3, color: "#0ea5e9" },
     { key: "fumar_comer", label: "Fumar / comer / beber", kind: "riesgo", weight: 0.8, color: "#14b8a6" },
     { key: "reversa", label: "Marcha atrás", kind: "riesgo", weight: 0.6, color: "#64748b" },
@@ -33,6 +34,7 @@
     RuleSeatbeltId: "cinturon", RuleCameraDetectedDriverSeatbeltId: "cinturon",
     RulePhoneUsageId: "telefono", RuleDistractionId: "distraccion",
     RuleDriverFatigueId: "fatiga", RuleDriverYawningId: "fatiga", RuleDriverEyeRubbingId: "fatiga",
+    RuleFollowingDistanceId: "distancia", RuleTailgatingId: "distancia",
     RuleNearCollisionWarningId: "colision", RuleAccidentId: "colision",
     RuleEnhancedMajorCollisionId: "colision", RuleEnhancedMinorCollisionId: "colision",
     RuleDoubleSolidLineViolationId: "salida_carril", RuleLaneDepartureId: "salida_carril",
@@ -45,6 +47,7 @@
   // Por nombre (reglas custom, incluidas las SRF_ de Surfsight). Orden importa.
   const NAME_PATTERNS = [
     [/colisi|collision|choque/i, "colision"],
+    [/cercan|tailgat|following|distancia de seg/i, "distancia"],
     [/cintur|seat ?belt/i, "cinturon"],
     [/celular|tel[eé]fono|phone/i, "telefono"],
     [/distra/i, "distraccion"],
