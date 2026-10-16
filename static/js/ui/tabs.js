@@ -108,7 +108,7 @@
   function SummaryTab({ view, onGo }) {
     const [metric, setMetric] = useState("risk");
     const k = view.total;
-    const price = view.settings.fuel.price_per_liter;
+    const price = view.model.hasPrice;
     return html`<div>
       <div className="readouts">
         <${Kpi} label="Kilómetros" value=${n0(k.km)} sub=${html`<${Delta} value=${H.km(view).ch} /> <span>${VS}</span>`} />
@@ -119,7 +119,7 @@
         <${Kpi} label="Consumo" value=${k.l100 == null ? "–" : n1(k.l100)} unit="L/100 km" sub=${html`<${Delta} value=${H.l100(view).ch} goodWhenDown /> <span>${VS}</span>`}
           hint="Solo vehículos que reportan el contador de combustible." />
         <${Kpi} tone="accent" label="Ahorro posible" value=${price ? GI.fmtMoney(view.savings.cost) : n0(view.savings.totalL)} unit=${price ? null : "L"}
-          sub=${price ? n0(view.savings.totalL) + " L sobre objetivo" : html`<span>Cargá el precio del litro en Configuración para verlo en $</span>`}
+          sub=${price ? n0(view.savings.totalL) + " L sobre objetivo" : html`<span>Cargá el precio del diésel y la nafta en Configuración para verlo en $</span>`}
           hint="Litros por encima del ralentí máximo y del consumo de referencia (más la tolerancia) de cada perfil." />
       </div>
       ${summarySentence(view)}
@@ -157,7 +157,7 @@
   // ======================= COMBUSTIBLE =======================
   function FuelTab({ view, onVehicle }) {
     const k = view.total;
-    const price = view.settings.fuel.price_per_liter;
+    const price = view.model.hasPrice;
     const tol = view.settings.fuel.tolerance_pct != null ? view.settings.fuel.tolerance_pct : 10;
     const [mode, setMode] = useState("desvio");
     const [idleMode, setIdleMode] = useState("pct");
@@ -177,7 +177,7 @@
         <${Kpi} label="Combustible medido" value=${n0(k.fuelL)} unit="L" sub=${view.model.fuelDevices.size + " vehículos con medición"} />
         <${Kpi} label="Consumo promedio" value=${k.l100 == null ? "–" : n1(k.l100)} unit="L/100 km" sub=${html`<${Delta} value=${H.l100(view).ch} goodWhenDown /> <span>${VS}</span>`} />
         <${Kpi} label="Ralentí" value=${n0(k.idleH)} unit="h" sub=${html`<${Delta} value=${H.idlePct(view).ch} goodWhenDown /> <span>${GI.fmtPct(k.idlePct)} del tiempo</span>`} />
-        <${Kpi} label="Litros en ralentí" value=${n0(k.idleL)} unit="L" sub=${price ? GI.fmtMoney(k.idleL * price) : "sin precio cargado"}
+        <${Kpi} label="Litros en ralentí" value=${n0(k.idleL)} unit="L" sub=${price ? GI.fmtMoney(k.idleCost) : "sin precio cargado"}
           hint="Medido con el contador de combustible en ralentí; si el vehículo no lo reporta, se estima con horas × L/h de su tipo." />
         <${Kpi} tone="accent" label="Exceso sobre objetivo" value=${n0(view.savings.totalL)} unit="L"
           sub=${(price ? GI.fmtMoney(view.savings.cost) + ": " : "") + n0(view.savings.idleL) + " L ralentí y " + n0(view.savings.fuelL) + " L consumo"}
@@ -214,7 +214,7 @@
         <${DataTable} rowKey=${r => r.id} rows=${rows} limit=${12} onRowClick=${r => onVehicle(r.id)}
           defaultSort=${{ key: sortKey, dir: "desc" }} columns=${[
           { key: "name", label: "Vehículo" },
-          { key: "profile", label: "Perfil", fmt: r => GI.profileLabel(view.settings, r.profile) },
+          { key: "profile", label: "Perfil", fmt: r => html`${GI.profileLabel(view.settings, r.profile)}${r.fuelType ? html`<span className="tag">${GI.fuelLabel(view.settings, r.fuelType)}</span>` : ""}` },
           { key: "km", label: "Km", align: "num", fmt: r => n0(r.km) },
           { key: "l100", label: "L/100 km", align: "num", fmt: r => r.fuelMeasured ? n1(r.l100) : html`<span className="muted" title="El vehículo no reporta el contador de combustible">sin dato</span>` },
           { key: "fuelDevPct", label: "vs referencia", align: "num", title: "Diferencia contra la referencia de su perfil",
@@ -359,7 +359,7 @@
     const [minKm, setMinKm] = useState(view.settings.drivers.min_km_ranking);
     const [mode, setMode] = useState("risk");
     const [svc, setSvc] = useState("");
-    const price = view.settings.fuel.price_per_liter;
+    const price = view.model.hasPrice;
     const unknown = view.dRows.find(r => r.unknown);
     const totalKm = GI.sum(view.dRows, r => r.km);
     const coverage = totalKm ? 100 - ((unknown ? unknown.km : 0) / totalKm) * 100 : null;

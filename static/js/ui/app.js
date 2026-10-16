@@ -128,7 +128,7 @@
       return {
         model, ids, gran, settings, series, total, vRows, dRows, rRows, pRows, events, milestones,
         findings: GI.findings(model, ids, vRows, dRows),
-        savings: GI.savings(vRows, settings.fuel.price_per_liter),
+        savings: GI.savings(vRows),
       };
     }, [model, filter, mgGroups, gran, milestones]);
 
@@ -206,7 +206,7 @@
         ${error ? html`<${Info} tone="error">${error}<//>` : null}
         ${largeFleet && !mgGroups.length && !(settings.scope_group_ids || []).length && tab !== "config" ? html`<${Info} tone="warn">
           Esta base tiene ${GI.fmtNum(catalogs.devices.length)} vehículos. Para que cargue rápido, elegí uno o más grupos en el <b>filtro de grupos de MyGeotab</b> (arriba a la izquierda): se consulta solo ese alcance.
-          ${isAdmin ? " También podés fijar el alcance para todos en Configuración → Alcance y combustible." : ""}<//>` : null}
+          ${isAdmin ? " También podés fijar el alcance para todos en Configuración → Combustible y alcance." : ""}<//>` : null}
         ${tab === "config" ? html`<${GI.ConfigTab} api=${api} settings=${settings} catalogs=${catalogs} groups=${groupsFlat}
             model=${model} isAdmin=${isAdmin} userName=${userName} onSave=${saveSettings} />`
           : !view ? html`<div className="splash small"><div className="spinner"></div>Preparando el tablero…</div>`

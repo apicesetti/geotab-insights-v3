@@ -146,12 +146,12 @@
 
   // ---------- Construcción del modelo ----------
   function emptyCell() {
-    return { km: 0, dh: 0, ih: 0, fuel: 0, kmFuel: 0, idleL: 0, idleMeasured: 0, ev: {}, w: 0, n: 0 };
+    return { km: 0, dh: 0, ih: 0, fuel: 0, kmFuel: 0, idleL: 0, idleMeasured: 0, idleCost: 0, fuelCost: 0, ev: {}, w: 0, n: 0 };
   }
 
   function addCell(a, b) {
     a.km += b.km; a.dh += b.dh; a.ih += b.ih; a.fuel += b.fuel; a.kmFuel += b.kmFuel;
-    a.idleL += b.idleL; a.idleMeasured += b.idleMeasured; a.w += b.w; a.n += b.n;
+    a.idleL += b.idleL; a.idleMeasured += b.idleMeasured; a.idleCost += b.idleCost; a.fuelCost += b.fuelCost; a.w += b.w; a.n += b.n;
     for (const k in b.ev) a.ev[k] = (a.ev[k] || 0) + b.ev[k];
     return a;
   }
@@ -167,6 +167,8 @@
       fuelL: c.fuel,
       l100: c.kmFuel > 20 ? (c.fuel / c.kmFuel) * 100 : null,
       idleL: c.idleL,
+      idleCost: c.idleCost,
+      fuelCost: c.fuelCost,
       events: c.n,
       weighted: c.w,
       risk: c.km > 0 ? (c.w / c.km) * 100 : null,
@@ -194,6 +196,17 @@
     for (const d of devices) {
       const vt = vtypes.find(t => t.set.size && deviceInGroups(d, t.set));
       vtypeOf.set(d.id, vt ? vt.key : "sin_tipo");
+    }
+
+    // Combustible de cada vehículo (diésel / nafta...) y su precio por litro.
+    const fuelCfg = settings.fuel || {};
+    const ftypes = (fuelCfg.types || []).map(t => ({ ...t, set: gr.expand(t.groupIds) }));
+    const fuelTypeOf = new Map();
+    const priceOf = new Map();
+    for (const d of devices) {
+      const ft = ftypes.find(t => t.set.size && deviceInGroups(d, t.set)) || ftypes.find(t => t.key === fuelCfg.default_type) || null;
+      fuelTypeOf.set(d.id, ft ? ft.key : null);
+      priceOf.set(d.id, ft && ft.price > 0 ? ft.price : fuelCfg.price_per_liter || 0);
     }
 
     // Viajes por vehículo
@@ -275,6 +288,9 @@
         if (fd && fd.has(dk)) { c.fuel = fd.get(dk); c.kmFuel = c.km; }
         if (idd && idd.has(dk)) { c.idleL = idd.get(dk); c.idleMeasured = c.idleL; }
         else c.idleL = c.ih * (idleRate.get(vtypeOf.get(dev)) || 1.5);
+        const pr = priceOf.get(dev) || 0;
+        c.idleCost = c.idleL * pr;
+        c.fuelCost = c.fuel * pr;
       }
     }
 
@@ -314,13 +330,14 @@
         const [dev, dk] = ck.split("|");
         const vc = dd.get(dev) && dd.get(dev).get(dk);
         if (!vc) continue;
-        if (vc.km > 0 && vc.kmFuel > 0) { dc.fuel = vc.fuel * (dc.km / vc.km); dc.kmFuel = dc.km; }
-        if (vc.ih > 0) dc.idleL = vc.idleL * (dc.ih / vc.ih);
+        if (vc.km > 0 && vc.kmFuel > 0) { dc.fuel = vc.fuel * (dc.km / vc.km); dc.kmFuel = dc.km; dc.fuelCost = vc.fuelCost * (dc.km / vc.km); }
+        if (vc.ih > 0) { dc.idleL = vc.idleL * (dc.ih / vc.ih); dc.idleCost = vc.idleCost * (dc.ih / vc.ih); }
       }
     }
 
     return {
-      raw, cat, settings, gr, devices, devById, driverName, vtypeOf, serviceOf, serviceSource, profileOf,
+      raw, cat, settings, gr, devices, devById, driverName, vtypeOf, serviceOf, serviceSource, profileOf, fuelTypeOf, priceOf,
+      hasPrice: [...priceOf.values()].some(p => p > 0),
       dd, drvCells, events, journeys, dayKeys, hasFuel: fuelDeltas.size > 0,
       fuelDevices: new Set(fuelDeltas.keys()), idleMeasuredDevices: new Set(idleDeltas.keys()),
     };
@@ -386,7 +403,6 @@
 
   // Tabla por vehículo con su referencia de perfil.
   function vehicleRows(model, deviceIds) {
-    const price = model.settings.fuel.price_per_liter || 0;
     const rows = [];
     for (const id of deviceIds) {
       const c = aggregate(model, [id]);
@@ -396,6 +412,7 @@
       rows.push({
         id, name: d.name, profile: model.profileOf(id), vtype: model.vtypeOf.get(id), stype: model.serviceOf.get(id),
         serviceSource: model.serviceSource.get(id), fuelMeasured: model.fuelDevices.has(id),
+        fuelType: model.fuelTypeOf.get(id), price: model.priceOf.get(id) || 0,
         idleMeasured: model.idleMeasuredDevices.has(id), ...k,
       });
     }
@@ -419,9 +436,9 @@
       const idleAllowedH = (tgt.idle_pct_max / 100) * totalH;
       r.idleExcessH = Math.max(0, r.idleH - idleAllowedH);
       r.idleExcessL = r.idleH > 0 ? r.idleL * (r.idleExcessH / r.idleH) : 0;
-      r.idleCost = r.idleL * price;
+      r.idleCost = r.idleL * r.price;
       r.riskMax = tgt.risk_max;
-      r.excessCost = (r.fuelExcessL + r.idleExcessL) * price;
+      r.excessCost = (r.fuelExcessL + r.idleExcessL) * r.price;
       r.flags = [];
       if (r.fuelExcessL > 0) r.flags.push("consumo");
       if (r.idlePct != null && r.idlePct > r.idleMax) r.flags.push("ralenti");
@@ -431,7 +448,6 @@
   }
 
   function driverRows(model, deviceIds) {
-    const price = model.settings.fuel.price_per_liter || 0;
     const rows = [];
     for (const [drv, m] of model.drvCells) {
       const c = emptyCell();
@@ -451,7 +467,7 @@
         id: drv, unknown: drv === "_unknown",
         name: drv === "_unknown" ? "Sin conductor identificado" : model.driverName.get(drv) || drv,
         vehicles: vlist.length, stype: mainSvc ? mainSvc[0] : null,
-        idleCost: k.idleL * price, ...k,
+        ...k,
       });
     }
     return rows;
@@ -534,8 +550,7 @@
   // ---------- Hallazgos ----------
   function findings(model, deviceIds, vRows, dRows) {
     const out = [];
-    const price = model.settings.fuel.price_per_liter || 0;
-    const money = l => (price ? " (≈ " + GI.fmtMoney(l * price) + ")" : "");
+    const money = cost => (model.hasPrice && cost > 0 ? " (≈ " + GI.fmtMoney(cost) + ")" : "");
 
     const tol = model.settings.fuel.tolerance_pct != null ? model.settings.fuel.tolerance_pct : 10;
     const fuelOut = vRows.filter(r => r.fuelExcessL > 0).sort((a, b) => b.fuelExcessL - a.fuelExcessL);
@@ -543,7 +558,7 @@
       const l = GI.sum(fuelOut, r => r.fuelExcessL);
       out.push({ type: "oportunidad", sev: "alta", area: "combustible",
         title: fuelOut.length + " vehículos consumen más de " + tol + "% sobre su referencia",
-        text: "Exceso estimado " + GI.fmtNum(l) + " L" + money(l) + ". Mayores: " + fuelOut.slice(0, 3).map(r => r.name + " (+" + GI.fmtNum(r.fuelDevPct) + "%)").join(", ") + ".",
+        text: "Exceso estimado " + GI.fmtNum(l) + " L" + money(GI.sum(fuelOut, r => r.fuelExcessL * r.price)) + ". Mayores: " + fuelOut.slice(0, 3).map(r => r.name + " (+" + GI.fmtNum(r.fuelDevPct) + "%)").join(", ") + ".",
         target: { tab: "combustible" } });
     }
     const idleOut = vRows.filter(r => r.idleExcessH > 1).sort((a, b) => b.idleExcessL - a.idleExcessL);
@@ -551,7 +566,7 @@
       const l = GI.sum(idleOut, r => r.idleExcessL);
       out.push({ type: "oportunidad", sev: l > 500 ? "alta" : "media", area: "ralenti",
         title: idleOut.length + " vehículos superan el ralentí máximo de su perfil",
-        text: GI.fmtNum(GI.sum(idleOut, r => r.idleExcessH)) + " h de ralentí por encima del objetivo ≈ " + GI.fmtNum(l) + " L" + money(l) + ".",
+        text: GI.fmtNum(GI.sum(idleOut, r => r.idleExcessH)) + " h de ralentí por encima del objetivo ≈ " + GI.fmtNum(l) + " L" + money(GI.sum(idleOut, r => r.idleExcessL * r.price)) + ".",
         target: { tab: "combustible" } });
     }
     const known = dRows.filter(r => !r.unknown && r.km >= model.settings.drivers.min_km_ranking);
@@ -611,10 +626,11 @@
     return out;
   }
 
-  function savings(vRows, price) {
+  // Costo con el precio del combustible de cada vehículo (diésel / nafta).
+  function savings(vRows) {
     const idleL = GI.sum(vRows, r => r.idleExcessL);
     const fuelL = GI.sum(vRows, r => r.fuelExcessL);
-    return { idleL, fuelL, totalL: idleL + fuelL, cost: (idleL + fuelL) * (price || 0) };
+    return { idleL, fuelL, totalL: idleL + fuelL, cost: GI.sum(vRows, r => r.excessCost) };
   }
 
   Object.assign(GI, {

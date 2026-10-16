@@ -120,6 +120,18 @@
     return { corta: find(/corta/i), larga: find(/larga/i) };
   }
 
+  // Combustibles con precio propio. Por defecto se usan los grupos de sistema
+  // que MyGeotab asigna por VIN (Diesel / Gasoline or Petrol) más cualquier
+  // grupo del cliente cuyo nombre lo indique.
+  const FUEL_SYSTEM_GROUPS = { diesel: "GroupDieselId", nafta: "GroupGasolinePetrolId" };
+  function defaultFuelTypes(groups) {
+    const find = re => groups.filter(g => re.test(g.name || "") && !g.id.startsWith("Group")).map(g => g.id);
+    return [
+      { key: "diesel", label: "Diésel", price: 0, groupIds: [FUEL_SYSTEM_GROUPS.diesel, ...find(/diesel|di[eé]sel|gasoil|gas-oil/i)] },
+      { key: "nafta", label: "Nafta", price: 0, groupIds: [FUEL_SYSTEM_GROUPS.nafta, ...find(/nafta|naftero|gasolina/i)] },
+    ];
+  }
+
   function profileKey(vtype, stype) { return vtype + "|" + stype; }
 
   // Objetivos por perfil (tipo de vehículo × tipo de servicio). 0 / null =
@@ -164,7 +176,7 @@
         threshold_km: 150,
       },
       profile_targets: defaultProfileTargets(vehicleTypes),
-      fuel: { price_per_liter: 0, currency: "ARS", tolerance_pct: 10 },
+      fuel: { price_per_liter: 0, currency: "ARS", tolerance_pct: 10, types: defaultFuelTypes(groups), default_type: "diesel" },
       journeys: { break_hours: 10, min_km_route: 300, min_journeys_route: 3 },
       drivers: { min_km_ranking: 300 },
       ui: { default_days: 90, default_granularity: "week", milestone_window_days: 28 },
@@ -174,6 +186,6 @@
 
   Object.assign(GI, {
     CATEGORIES, CATEGORY_BY_KEY, CHART_SLOTS, OTHER_COLOR, SERIES_COLORS, STOCK_RULES, SERVICE_TYPES,
-    suggestCategory, isNoiseRule, riskRuleIds, defaultSettings, defaultProfileTargets, profileKey,
+    suggestCategory, isNoiseRule, riskRuleIds, defaultFuelTypes, FUEL_SYSTEM_GROUPS, defaultSettings, defaultProfileTargets, profileKey,
   });
 })(window.GI);

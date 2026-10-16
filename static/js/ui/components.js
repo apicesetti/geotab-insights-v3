@@ -234,6 +234,10 @@
     const t = settings.vehicle_types.find(v => v.key === key);
     return t ? t.label : key;
   }
+  function fuelLabel(settings, key) {
+    const t = ((settings.fuel || {}).types || []).find(x => x.key === key);
+    return t ? t.label : key;
+  }
   function stypeLabel(key) { return key === "larga" ? "Larga" : key === "corta" ? "Corta" : "–"; }
   function profileLabel(settings, p) {
     const [vt, st] = p.split("|");
@@ -242,6 +246,6 @@
 
   Object.assign(GI, {
     Kpi, Hint, Delta, Segmented, Panel, Info, Modal, DataTable, ChartView, milestoneMarks, GroupMultiSelect,
-    flattenGroups, Progress, catLabel, catColor, vtypeLabel, stypeLabel, profileLabel,
+    flattenGroups, Progress, catLabel, catColor, vtypeLabel, stypeLabel, fuelLabel, profileLabel,
   });
 })(window.GI);

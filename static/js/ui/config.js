@@ -12,7 +12,7 @@
     ["servicio", "Corta / larga distancia"],
     ["objetivos", "Objetivos por perfil"],
     ["pesos", "Pesos de riesgo"],
-    ["alcance", "Alcance y combustible"],
+    ["alcance", "Combustible y alcance"],
     ["general", "General"],
   ];
 
@@ -51,7 +51,7 @@
       servicio: html`<${ServiceSection} draft=${draft} set=${set} groups=${groups} ro=${ro} model=${model} />`,
       objetivos: html`<${TargetsSection} draft=${draft} set=${set} ro=${ro} model=${model} />`,
       pesos: html`<${WeightsSection} draft=${draft} set=${set} ro=${ro} />`,
-      alcance: html`<${ScopeSection} draft=${draft} set=${set} groups=${groups} ro=${ro} />`,
+      alcance: html`<${ScopeSection} draft=${draft} set=${set} groups=${groups} ro=${ro} model=${model} />`,
       general: html`<${GeneralSection} draft=${draft} set=${set} ro=${ro} />`,
     }[section];
 
@@ -256,20 +256,48 @@
     <//>`;
   }
 
-  // ---------- Alcance ----------
-  function ScopeSection({ draft, set, groups, ro }) {
-    return html`<${Panel} title="Alcance del análisis y combustible">
-      <div className="form">
-        <div className="field"><span>Analizar solo estos grupos <span className="muted">(vacío = toda la base)</span></span>
-          <${GroupMultiSelect} groups=${groups} disabled=${ro} value=${draft.scope_group_ids} onChange=${v => set(["scope_group_ids"], v)} placeholder="Toda la base" /></div>
-        <div className="field"><span>Excluir siempre estos grupos</span>
-          <${GroupMultiSelect} groups=${groups} disabled=${ro} value=${draft.excluded_group_ids} onChange=${v => set(["excluded_group_ids"], v)} /></div>
-        <label className="inline">Precio del litro de combustible <input type="number" className="num-in wide" disabled=${ro} value=${draft.fuel.price_per_liter}
-          onChange=${e => set(["fuel", "price_per_liter"], +e.target.value)} /> $/L</label>
-        <label className="inline">Tolerancia de consumo sobre la referencia <input type="number" className="num-in" disabled=${ro} value=${draft.fuel.tolerance_pct != null ? draft.fuel.tolerance_pct : 10}
-          onChange=${e => set(["fuel", "tolerance_pct"], +e.target.value)} /> % <span className="muted small">(por debajo no se cuenta como exceso)</span></label>
-      </div>
-    <//>`;
+  // ---------- Alcance y combustible ----------
+  function ScopeSection({ draft, set, groups, ro, model }) {
+    const types = (draft.fuel.types && draft.fuel.types.length) ? draft.fuel.types : GI.defaultFuelTypes([]);
+    // Los grupos de sistema por combustible (los asigna MyGeotab según el VIN) se suman al selector.
+    const fuelGroups = [
+      { id: GI.FUEL_SYSTEM_GROUPS.diesel, name: "Diésel (asignado por MyGeotab)", depth: 0 },
+      { id: GI.FUEL_SYSTEM_GROUPS.nafta, name: "Nafta (asignado por MyGeotab)", depth: 0 },
+      ...groups,
+    ];
+    const counts = useMemo(() => {
+      const c = {};
+      if (model) for (const v of model.fuelTypeOf.values()) c[v || "_none"] = (c[v || "_none"] || 0) + 1;
+      return c;
+    }, [model]);
+    const upd = (i, patch) => set(["fuel", "types"], types.map((t, j) => (j === i ? { ...t, ...patch } : t)));
+    return html`<div>
+      <${Panel} title="Precio del combustible"
+        hint="Cada vehículo toma el primer combustible cuyos grupos contenga. Por defecto se usan los grupos Diesel y Gasoline que MyGeotab asigna automáticamente según el VIN. Los vehículos sin clasificar usan el combustible por defecto.">
+        <div className="table-wrap"><table className="tbl">
+          <thead><tr><th>Combustible</th><th className="num">Precio por litro</th><th>Grupos</th><th className="num">Vehículos</th><th>Por defecto</th></tr></thead>
+          <tbody>${types.map((t, i) => html`<tr key=${t.key}>
+            <td><input disabled=${ro} value=${t.label} onInput=${e => upd(i, { label: e.target.value })} style=${{ width: "120px" }} /></td>
+            <td className="num"><input type="number" min="0" className="num-in wide" disabled=${ro} value=${t.price} onChange=${e => upd(i, { price: +e.target.value })} /> $</td>
+            <td><${GroupMultiSelect} groups=${fuelGroups} disabled=${ro} value=${t.groupIds} onChange=${v => upd(i, { groupIds: v })} placeholder="Sin grupos" /></td>
+            <td className="num">${counts[t.key] || 0}</td>
+            <td><input type="radio" name="fueldef" disabled=${ro} checked=${draft.fuel.default_type === t.key} onChange=${() => set(["fuel", "default_type"], t.key)} aria-label=${"Usar " + t.label + " por defecto"} /></td>
+          </tr>`)}</tbody>
+        </table></div>
+        <div className="form" style=${{ marginTop: "14px" }}>
+          <label className="inline">Tolerancia de consumo sobre la referencia <input type="number" className="num-in" disabled=${ro} value=${draft.fuel.tolerance_pct != null ? draft.fuel.tolerance_pct : 10}
+            onChange=${e => set(["fuel", "tolerance_pct"], +e.target.value)} /> % <span className="muted small">(por debajo no se cuenta como exceso)</span></label>
+        </div>
+      <//>
+      <${Panel} title="Alcance del análisis">
+        <div className="form">
+          <div className="field"><span>Analizar solo estos grupos <span className="muted">(vacío = toda la base)</span></span>
+            <${GroupMultiSelect} groups=${groups} disabled=${ro} value=${draft.scope_group_ids} onChange=${v => set(["scope_group_ids"], v)} placeholder="Toda la base" /></div>
+          <div className="field"><span>Excluir siempre estos grupos</span>
+            <${GroupMultiSelect} groups=${groups} disabled=${ro} value=${draft.excluded_group_ids} onChange=${v => set(["excluded_group_ids"], v)} /></div>
+        </div>
+      <//>
+    </div>`;
   }
 
   // ---------- General ----------

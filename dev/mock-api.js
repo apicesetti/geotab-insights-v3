@@ -13,7 +13,9 @@
 
   const groups = [
     { id: "GroupCompanyId", name: "Company Group", children: [{ id: "gY" }, { id: "gOut" }, { id: "GroupAssetInformationId" }] },
-    { id: "GroupAssetInformationId", name: "Asset Information", children: [] },
+    { id: "GroupAssetInformationId", name: "Asset Information", children: [{ id: "GroupDieselId" }, { id: "GroupGasolinePetrolId" }] },
+    { id: "GroupDieselId", name: "Diesel", children: [] },
+    { id: "GroupGasolinePetrolId", name: "Gasoline or Petrol", children: [] },
     { id: "gY", name: "Yusen Logistics", children: [{ id: "gUN" }, { id: "gTS" }] },
     { id: "gUN", name: "Unidades de negocio", children: [{ id: "gVeh" }, { id: "gCond" }] },
     { id: "gVeh", name: "Vehiculos", children: [{ id: "gPes" }, { id: "gLiv" }, { id: "gBit" }] },
@@ -56,7 +58,7 @@
   for (const [type, svc, count] of fleetSpec) {
     for (let i = 0; i < count; i++) {
       n++;
-      const g = type === "bitren" ? ["gBit", "gPes"] : type === "camion" ? ["gPes"] : ["gLiv"];
+      const g = type === "bitren" ? ["gBit", "gPes", "GroupDieselId"] : type === "camion" ? ["gPes", "GroupDieselId"] : ["gLiv", "GroupGasolinePetrolId"];
       if (svc === "larga" && type !== "bitren" && i % 2 === 0) g.push("gLarga"); // algunos por grupo, otros automáticos
       devices.push({ id: "b" + (100 + n), name: (type === "bitren" ? "BIT" : type === "camion" ? "CAM" : "LIV") + "-" + pad(n),
         serialNumber: "G9" + (1000 + n), groups: g.map(id => ({ id })), _type: type, _svc: svc,
