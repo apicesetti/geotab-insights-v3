@@ -128,11 +128,20 @@
     let pending = calls.map(c => ({ ...c, from, to }));
     while (pending.length) {
       const batch = pending.splice(0, 20);
-      const res = await api.multiCall(batch.map(c => ["Get", {
+      const build = withSel => batch.map(c => ["Get", {
         typeName: c.typeName,
         resultsLimit: LIMIT,
         search: { ...c.search, fromDate: c.from.toISOString(), toDate: c.to.toISOString() },
-      }]));
+        ...(withSel && c.fields ? { propertySelector: { fields: c.fields, isIncluded: true } } : {}),
+      }]);
+      let res;
+      try {
+        res = await api.multiCall(build(true));
+      } catch (e) {
+        // Si la base no acepta propertySelector para algún tipo, se repite sin él.
+        if (!batch.some(c => c.fields)) throw e;
+        res = await api.multiCall(build(false));
+      }
       batch.forEach((c, i) => {
         const page = res[i] || [];
         if (page.length >= LIMIT && c.to - c.from > 60000) {
@@ -204,7 +213,7 @@
     await GI.pool(runs, CONCURRENCY, async run => {
       const from = GI.parseDayKey(run.days[0]);
       const to = GI.addDays(GI.parseDayKey(run.days[run.days.length - 1]), 1);
-      const calls = run.datasets.map(ds => ({ key: ds.scope, typeName: ds.typeName, search: ds.search }));
+      const calls = run.datasets.map(ds => ({ key: ds.scope, typeName: ds.typeName, search: ds.search, fields: ds.fields }));
       const fetched = await getRangeMulti(api, calls, from, to);
       const toStore = [];
       const at = Date.now();
@@ -287,19 +296,27 @@
 
   // ---------- Carga principal ----------
   // ruleIds: reglas mapeadas. Devuelve datos crudos compactados por día.
-  async function loadPeriod(api, database, fromKey, toKey, ruleIds, onProgress) {
+  // scopeGroupIds: si viene, la API filtra por esos grupos (deviceSearch) y
+  // la caché se guarda aparte para ese alcance. Clave en flotas grandes.
+  async function loadPeriod(api, database, fromKey, toKey, ruleIds, onProgress, scopeGroupIds) {
     const dayKeys = GI.dayRange(fromKey, toKey);
+    const scopeIds = (scopeGroupIds || []).filter(Boolean).slice().sort();
+    const scopeKey = scopeIds.length ? "|g:" + scopeIds.join(",") : "";
+    const devSearch = scopeIds.length ? { deviceSearch: { groups: scopeIds.map(id => ({ id })) } } : {};
     // Combustible: 3 días extra hacia atrás para tener el valor del contador
     // al arrancar el período.
     const fuelDays = GI.dayRange(GI.dayKey(GI.addDays(GI.parseDayKey(fromKey), -3)), toKey);
 
-    const tripsDs = [{ scope: "trip", typeName: "Trip", search: {}, dateOf: r => new Date(r.start), compact: compactTrips }];
+    // Trip con propertySelector: solo los campos que se usan (~5 veces menos datos).
+    const tripsDs = [{ scope: "trip" + scopeKey, typeName: "Trip", search: { ...devSearch },
+      fields: ["id", "device", "driver", "start", "stop", "distance", "drivingDuration", "idlingDuration", "stopPoint"],
+      dateOf: r => new Date(r.start), compact: compactTrips }];
     const excDs = ruleIds.map(rid => ({
-      scope: "exc:" + rid, typeName: "ExceptionEvent", search: { ruleSearch: { id: rid } },
+      scope: "exc:" + rid + scopeKey, typeName: "ExceptionEvent", search: { ruleSearch: { id: rid }, ...devSearch },
       dateOf: r => new Date(r.activeFrom), compact: compactExceptions,
     }));
     const fuelDs = [FUEL_DIAG, IDLE_FUEL_DIAG].map(diag => ({
-      scope: "sd:" + diag, typeName: "StatusData", search: { diagnosticSearch: { id: diag } },
+      scope: "sd:" + diag + scopeKey, typeName: "StatusData", search: { diagnosticSearch: { id: diag }, ...devSearch },
       dateOf: r => new Date(r.dateTime), compact: compactCounter,
     }));
 
@@ -320,19 +337,20 @@
 
     const exceptions = [];
     for (const rid of ruleIds) {
-      const m = exc["exc:" + rid];
+      const m = exc["exc:" + rid + scopeKey];
       if (!m) continue;
       for (const arr of m.values()) for (const ev of arr) exceptions.push({ ...ev, rule: rid });
     }
     const tripList = [];
-    for (const arr of trips.trip.values()) for (const t of arr) tripList.push(t);
+    for (const arr of trips["trip" + scopeKey].values()) for (const t of arr) tripList.push(t);
 
     return {
       fromKey, toKey, dayKeys,
       trips: tripList,
       exceptions,
-      fuelDaily: fuel["sd:" + FUEL_DIAG] || new Map(),
-      idleFuelDaily: fuel["sd:" + IDLE_FUEL_DIAG] || new Map(),
+      fuelDaily: fuel["sd:" + FUEL_DIAG + scopeKey] || new Map(),
+      idleFuelDaily: fuel["sd:" + IDLE_FUEL_DIAG + scopeKey] || new Map(),
+      scopeGroupIds: scopeIds,
       fuelDays,
     };
   }
@@ -350,12 +368,14 @@
       else missing.push(ev);
     }
     const batches = [];
-    for (let i = 0; i < missing.length; i += 50) batches.push(missing.slice(i, i + 50));
+    // Lotes de 100 consultas por multiCall, 4 en paralelo, ventana de ±45 s.
+    for (let i = 0; i < missing.length; i += 100) batches.push(missing.slice(i, i + 100));
     let done = 0;
-    await GI.pool(batches, 2, async batch => {
+    if (onProgress) onProgress(missing.length ? 0 : 1, out);
+    await GI.pool(batches, 4, async batch => {
       const res = await api.multiCall(batch.map(ev => ["Get", {
-        typeName: "LogRecord", resultsLimit: 5,
-        search: { deviceSearch: { id: ev.d }, fromDate: new Date(ev.t - 60000).toISOString(), toDate: new Date(ev.t + 120000).toISOString() },
+        typeName: "LogRecord", resultsLimit: 4,
+        search: { deviceSearch: { id: ev.d }, fromDate: new Date(ev.t - 45000).toISOString(), toDate: new Date(ev.t + 45000).toISOString() },
       }]));
       const store = [];
       batch.forEach((ev, i) => {
@@ -370,7 +390,8 @@
       });
       await idbPutMany("locs", store);
       done += batch.length;
-      if (onProgress) onProgress(done / missing.length);
+      // Se informa el avance con lo ya ubicado, así el mapa se va dibujando.
+      if (onProgress) onProgress(done / missing.length, out);
     });
     return out;
   }

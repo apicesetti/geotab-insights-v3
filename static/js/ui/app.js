@@ -26,6 +26,8 @@
     return out;
   }
 
+  const LARGE_FLEET = window.GI_LARGE_FLEET || 300; // vehículos: a partir de acá el grupo filtra en la API
+
   function rangeFor(days) {
     const to = GI.dayKey(new Date());
     return { from: GI.dayKey(GI.addDays(new Date(), -(days - 1))), to };
@@ -47,6 +49,9 @@
     const [tab, setTab] = useState("resumen");
     const [detail, setDetail] = useState(null);
     const loadId = useRef(0);
+    const groupRef = useRef("");
+    const [loadingLabel, setLoadingLabel] = useState("");
+    const [largeFleet, setLargeFleet] = useState(false);
 
     // ---- Arranque: catálogos + config compartida ----
     useEffect(() => {
@@ -58,7 +63,12 @@
           const admin = await GI.resolveIsAdmin(api, userName, s);
           setCatalogs(cat); setSettings(s); setMilestones(shared.milestones); setIsAdmin(admin);
           setGran(s.ui.default_granularity);
-          const p = { preset: s.ui.default_days, ...rangeFor(s.ui.default_days) };
+          // Flota grande sin alcance definido: arranca con 30 días; el grupo
+          // elegido arriba pasa a filtrar en la API (no en el navegador).
+          const large = cat.devices.length > LARGE_FLEET;
+          setLargeFleet(large);
+          const days = large && !(s.scope_group_ids || []).length ? Math.min(30, s.ui.default_days) : s.ui.default_days;
+          const p = { preset: days, ...rangeFor(days) };
           setPeriod(p);
           setPhase("ready");
           if (!s.configured && admin) setTab("config");
@@ -69,18 +79,30 @@
       })();
     }, []);
 
+    // Carga en dos tiempos cuando el período es largo: primero los últimos 14
+    // días (el tablero ya se puede usar) y después el resto del historial,
+    // que reutiliza lo ya descargado.
     async function load(s, p, cat, force) {
       const id = ++loadId.current;
       setLoading(0); setError(null);
       try {
         if (force) await GI.loadCatalogs(api, database, true).then(c => { setCatalogs(c); cat = c; });
         const ruleIds = Object.keys(s.rule_mapping);
+        const large = cat.devices.length > LARGE_FLEET;
+        const scope = large && groupRef.current ? [groupRef.current] : s.scope_group_ids;
         const t0 = performance.now();
-        const r = await GI.loadPeriod(api, database, p.from, p.to, ruleIds, v => { if (id === loadId.current) setLoading(v); });
-        if (id !== loadId.current) return;
-        r.loadedMs = performance.now() - t0;
-        r.ruleIds = new Set(ruleIds);
-        setRaw(r);
+        const quickFrom = GI.dayKey(GI.addDays(GI.parseDayKey(p.to), -13));
+        const steps = quickFrom > p.from ? [{ from: quickFrom, label: "Cargando los últimos 14 días" }, { from: p.from, label: "Completando el historial; ya podés usar el tablero" }]
+          : [{ from: p.from, label: "Descargando datos" }];
+        for (const st of steps) {
+          setLoadingLabel(st.label); setLoading(0);
+          const r = await GI.loadPeriod(api, database, st.from, p.to, ruleIds, v => { if (id === loadId.current) setLoading(v); }, scope);
+          if (id !== loadId.current) return;
+          r.loadedMs = performance.now() - t0;
+          r.ruleIds = new Set(ruleIds);
+          r.complete = st.from === p.from;
+          setRaw(r);
+        }
       } catch (e) {
         if (id === loadId.current) setError("Error consultando MyGeotab: " + (e.message || e));
       }
@@ -115,6 +137,12 @@
       if (needsReload) load(saved, period, catalogs);
       return saved;
     }
+
+    // Flota grande: cambiar de grupo vuelve a consultar solo ese grupo.
+    useEffect(() => {
+      groupRef.current = filter.groupId;
+      if (phase === "ready" && largeFleet && settings) load(settings, period, catalogs);
+    }, [filter.groupId]);
 
     function applyPreset(v) {
       if (v === "custom") { setCustomDraft({ from: period.from, to: period.to }); return; }
@@ -170,10 +198,13 @@
         ${activeFilters.map(f => html`<span key=${f.key} className="fchip">${f.label}<button aria-label=${"Quitar " + f.label} onClick=${f.clear}>×</button></span>`)}
         <button className="btn link small" onClick=${() => setFilter({ groupId: "", vtype: "", stype: "" })}>Ver toda la flota</button>
       </div>` : null}
-      ${loading != null ? html`<${Progress} value=${loading} label=${raw ? "Actualizando datos" : "Descargando datos. La primera vez tarda más; después queda guardado"} />` : null}
+      ${loading != null ? html`<${Progress} value=${loading} label=${loadingLabel || "Descargando datos"} />` : null}
       <nav className="tabs">${TABS.map(([k, l]) => html`<button key=${k} className=${tab === k ? "on" : ""} onClick=${() => setTab(k)}>${l}</button>`)}</nav>
       <div className="gi-main">
         ${error ? html`<${Info} tone="error">${error}<//>` : null}
+        ${largeFleet && !filter.groupId && !(settings.scope_group_ids || []).length && tab !== "config" ? html`<${Info} tone="warn">
+          Esta base tiene ${GI.fmtNum(catalogs.devices.length)} vehículos. Para que cargue rápido, elegí un <b>Grupo</b> arriba: se consulta solo ese grupo.
+          ${isAdmin ? " También podés fijar el alcance para todos en Configuración → Alcance y combustible." : ""}<//>` : null}
         ${tab === "config" ? html`<${GI.ConfigTab} api=${api} settings=${settings} catalogs=${catalogs} groups=${groupsFlat}
             model=${model} isAdmin=${isAdmin} userName=${userName} onSave=${saveSettings} />`
           : !view ? html`<div className="splash small"><div className="spinner"></div>Preparando el tablero…</div>`
@@ -187,7 +218,7 @@
               onUpdate=${async m => { await GI.updateMilestone(api, m); setMilestones(ms => ms.map(x => (x.id === m.id ? m : x))); }}
               onDelete=${async id => { await GI.removeMilestone(api, id); setMilestones(ms => ms.filter(x => x.id !== id)); }} />`
           : null}
-        ${raw ? html`<footer className="foot">${GI.fmtNum(raw.trips.length)} viajes · ${GI.fmtNum(raw.exceptions.length)} eventos · datos ${period.from} a ${period.to} · cargado en ${GI.fmtNum(raw.loadedMs / 1000, 1)} s</footer>` : null}
+        ${raw ? html`<footer className="foot">Datos del ${raw.fromKey} al ${raw.toKey}${raw.complete ? "" : " (completando el resto del período)"}: ${GI.fmtNum(raw.trips.length)} viajes y ${GI.fmtNum(raw.exceptions.length)} eventos, cargados en ${GI.fmtNum(raw.loadedMs / 1000, 1)} s.</footer>` : null}
       </div>
       ${detail && view && detail.type === "v" ? html`<${GI.VehicleDetail} view=${view} id=${detail.id} onClose=${() => setDetail(null)} />` : null}
       ${detail && view && detail.type === "d" ? html`<${GI.DriverDetail} view=${view} id=${detail.id} onClose=${() => setDetail(null)} />` : null}

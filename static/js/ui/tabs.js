@@ -421,51 +421,70 @@
     </div>`;
   }
 
+  // Mapa de calor: se ubica cada evento (LogRecord más cercano) solo al
+  // pedirlo, con un tope configurable, y el mapa se va dibujando a medida que
+  // llegan los lotes. Las ubicaciones quedan guardadas en el navegador.
+  const HEAT_LIMITS = [250, 500, 1000, 2000, 5000];
+
   function HeatmapPanel({ view, api }) {
     const [cat, setCat] = useState("");
+    const [limit, setLimit] = useState(500);
     const [progress, setProgress] = useState(null);
     const [points, setPoints] = useState(null);
     const [err, setErr] = useState(null);
     const mapRef = React.useRef(null);
     const mapObj = React.useRef(null);
-    const MAX = 3000;
+    const runRef = React.useRef(0);
     const evs = view.events.filter(e => e.w > 0 && (!cat || e.cat === cat));
-    const sample = [...evs].sort((a, b) => b.t - a.t).slice(0, MAX);
+    const sample = [...evs].sort((a, b) => b.t - a.t).slice(0, limit);
 
+    const toPoints = locs => sample.map(e => (locs.get(e.i) ? [...locs.get(e.i), e.w] : null)).filter(Boolean);
     async function load() {
-      setErr(null); setProgress(0);
+      const id = ++runRef.current;
+      setErr(null); setProgress(0); setPoints([]);
       try {
-        const locs = await GI.loadEventLocations(api, sample, p => setProgress(p));
-        setPoints(sample.map(e => locs.get(e.i) ? [...locs.get(e.i), e.w] : null).filter(Boolean));
+        let last = 0;
+        const locs = await GI.loadEventLocations(api, sample, (p, partial) => {
+          if (id !== runRef.current) return;
+          setProgress(p);
+          // Redibuja como máximo cada 10% para no trabar la página.
+          if (p - last >= 0.1 || p === 1) { last = p; setPoints(toPoints(partial)); }
+        });
+        if (id === runRef.current) setPoints(toPoints(locs));
       } catch (e) { setErr("No se pudieron ubicar los eventos: " + (e.message || e)); }
-      setProgress(null);
+      if (id === runRef.current) setProgress(null);
     }
-    useEffect(() => { setPoints(null); }, [cat, view]);
+    useEffect(() => { runRef.current++; setPoints(null); setProgress(null); }, [cat, limit, view]);
     useEffect(() => {
       if (!points || !mapRef.current) return;
       if (!mapObj.current) {
         mapObj.current = L.map(mapRef.current);
         L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 18, attribution: "© OpenStreetMap" }).addTo(mapObj.current);
+        mapObj.current._fitted = false;
       }
       const m = mapObj.current;
       if (m._heat) m.removeLayer(m._heat);
       m._heat = L.heatLayer(points, { radius: 14, blur: 18, maxZoom: 12, max: 2 }).addTo(m);
-      if (points.length) m.fitBounds(L.latLngBounds(points.map(p => [p[0], p[1]])), { padding: [20, 20] });
-      else m.setView([-34.6, -58.4], 6);
+      if (points.length && (!m._fitted || progress == null)) { m.fitBounds(L.latLngBounds(points.map(p => [p[0], p[1]])), { padding: [20, 20] }); m._fitted = true; }
+      else if (!points.length) m.setView([-34.6, -58.4], 5);
+      setTimeout(() => m.invalidateSize(), 0);
     }, [points]);
 
     const cats = GI.CATEGORIES.filter(c => c.kind === "riesgo" && view.events.some(e => e.cat === c.key));
     return html`<${Panel} title="Dónde ocurren las infracciones"
-      hint="La ubicación de cada evento se busca la primera vez que cargás el mapa y queda guardada en este navegador."
+      hint="Cada evento se ubica buscando la posición GPS más cercana a su hora. Es la parte más lenta: por eso se limita a los eventos más recientes y las ubicaciones ya buscadas quedan guardadas en este navegador (la segunda vez es instantáneo)."
       actions=${html`<select value=${cat} onChange=${e => setCat(e.target.value)} aria-label="Categoría">
           <option value="">Todas las categorías</option>${cats.map(c => html`<option key=${c.key} value=${c.key}>${c.label}</option>`)}
         </select>
+        <select value=${limit} onChange=${e => setLimit(+e.target.value)} aria-label="Cantidad de eventos">
+          ${HEAT_LIMITS.map(n => html`<option key=${n} value=${n}>Últimos ${n0(n)} eventos</option>`)}
+        </select>
         <button className="btn primary" disabled=${progress != null || !sample.length} onClick=${load}>${points ? "Actualizar mapa" : "Mostrar mapa"}</button>`}>
-      ${progress != null ? html`<${GI.Progress} value=${progress} label="Ubicando eventos" />` : null}
+      ${progress != null ? html`<${GI.Progress} value=${progress} label=${"Ubicando " + n0(sample.length) + " eventos"} />` : null}
       ${err ? html`<${Info} tone="error">${err}<//>` : null}
       <div ref=${mapRef} className=${"map" + (points ? "" : " hidden")}></div>
       ${!points && progress == null ? html`<div className="empty">${sample.length
-        ? (evs.length > MAX ? "Se van a ubicar los " + n0(MAX) + " eventos más recientes de " + n0(evs.length) + "." : n0(evs.length) + " eventos para ubicar.") + " El mapa se carga a pedido para no demorar el resto del tablero."
+        ? "Se van a ubicar los " + n0(sample.length) + " eventos más recientes" + (evs.length > sample.length ? " de " + n0(evs.length) : "") + ". Para ver un patrón alcanza con 500; más eventos tardan más la primera vez."
         : "No hay infracciones en este período."}</div>` : null}
     <//>`;
   }
