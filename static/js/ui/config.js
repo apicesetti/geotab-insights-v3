@@ -83,7 +83,7 @@
       .filter(r => !q || r.name.toLowerCase().includes(q.toLowerCase()))
       .filter(r => !onlyUnmapped || !mapping[r.id])
       .sort((a, b) => (counts ? (counts[b.id] || 0) - (counts[a.id] || 0) : 0) || a.name.localeCompare(b.name, "es"));
-    const pending = rules.filter(r => !GI.isNoiseRule(r) && !mapping[r.id] && GI.suggestCategory(r));
+    const pending = rules.filter(r => !GI.isNoiseRule(r) && !mapping[r.id] && GI.suggestCategory(r) && GI.CATEGORY_BY_KEY[GI.suggestCategory(r)].kind === "riesgo");
     const ruleName = new Map(rules.map(r => [r.id, r.name]));
     const dupes = [...GI.groupBy(Object.keys(mapping), id => mapping[id]).entries()]
       .filter(([c, ids]) => ids.length > 1 && (GI.CATEGORY_BY_KEY[c] || {}).kind === "riesgo")
@@ -111,7 +111,7 @@
     }
 
     return html`<${Panel} title="Reglas de MyGeotab → categoría"
-      sub="Cada regla incluida suma eventos a su categoría. Las reglas stock y las de cámara (SRF_) se sugieren solas; las de prueba (Dummy, [TEST]) quedan ocultas.">
+      sub="Asigná a una categoría de riesgo las reglas que miden infracciones. Solo esas se descargan: el ralentí se calcula con los viajes, así que no hace falta mapear reglas de ralentí ni operativas (y en flotas grandes son la mayor parte del volumen). Las de prueba (Dummy, [TEST], .test) quedan ocultas.">
       <div className="toolbar">
         <input placeholder="Buscar regla…" value=${q} onInput=${e => setQ(e.target.value)} />
         <label className="inline"><input type="checkbox" checked=${onlyUnmapped} onChange=${e => setOnlyUnmapped(e.target.checked)} /> Solo sin categoría</label>

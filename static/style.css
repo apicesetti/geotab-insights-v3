@@ -88,6 +88,11 @@
 #gi3-root .controls { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: flex-end; min-width: 0; }
 #gi3-root .ctl { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; color: var(--text-2); font-weight: 500; }
 #gi3-root .ctl select { min-width: 140px; max-width: 220px; }
+#gi3-root .mg-groups {
+  display: inline-flex; align-items: center; min-height: 34px; max-width: 280px; padding: 6px 10px; border-radius: 6px;
+  background: var(--sunken); border: 1px dashed var(--rule-strong); color: var(--text); font-size: 14px; font-weight: 500;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: help;
+}
 #gi3-root .ctl.dates { flex-direction: row; gap: 6px; align-items: center; }
 
 #gi3-root .filterbar {

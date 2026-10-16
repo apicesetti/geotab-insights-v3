@@ -74,7 +74,7 @@
   ];
 
   // Reglas que no conviene ni mostrar en el mapeo por defecto.
-  const NOISE_RULE = /^dummy rule|\[test\]|\(test\)|\btest\b|application exception|adjustment required|late arrival|engine abuse/i;
+  const NOISE_RULE = /^dummy rule|\[test\]|\(test\)|\btest\b|\.test\b|^test[._ ]|#deprecated|application exception|adjustment required|late arrival|engine abuse/i;
   const NOISE_STOCK_IDS = new Set(["RuleApplicationExceptionId", "RuleRoadCameraAdjustmentRequiredId"]);
 
   function suggestCategory(rule) {
@@ -82,6 +82,11 @@
     const name = rule.name || "";
     for (const [re, cat] of NAME_PATTERNS) if (re.test(name)) return cat;
     return null;
+  }
+
+  // Reglas que se descargan: solo las mapeadas a una categoría de riesgo.
+  function riskRuleIds(mapping) {
+    return Object.keys(mapping || {}).filter(id => (CATEGORY_BY_KEY[mapping[id]] || {}).kind === "riesgo");
   }
 
   function isNoiseRule(rule) {
@@ -139,7 +144,10 @@
     for (const r of rules) {
       if (isNoiseRule(r)) continue;
       const cat = suggestCategory(r);
-      if (cat) ruleMapping[r.id] = cat;
+      // Solo se sugieren infracciones. Ralentí y eventos operativos no hacen
+      // falta (el ralentí sale de los viajes) y en flotas grandes son la
+      // mayoría del volumen.
+      if (cat && CATEGORY_BY_KEY[cat].kind === "riesgo") ruleMapping[r.id] = cat;
     }
     const excluded = groups.filter(g => /fuera de servicio|baja|inactiv|prueba|test/i.test(g.name || "")).map(g => g.id);
     return {
@@ -166,6 +174,6 @@
 
   Object.assign(GI, {
     CATEGORIES, CATEGORY_BY_KEY, CHART_SLOTS, OTHER_COLOR, SERIES_COLORS, STOCK_RULES, SERVICE_TYPES,
-    suggestCategory, isNoiseRule, defaultSettings, defaultProfileTargets, profileKey,
+    suggestCategory, isNoiseRule, riskRuleIds, defaultSettings, defaultProfileTargets, profileKey,
   });
 })(window.GI);

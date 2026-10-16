@@ -43,13 +43,16 @@
     const [period, setPeriod] = useState({ preset: 90, ...rangeFor(90) });
     const [customDraft, setCustomDraft] = useState(null);
     const [gran, setGran] = useState("week");
-    const [filter, setFilter] = useState({ groupId: "", vtype: "", stype: "" });
+    const [filter, setFilter] = useState({ vtype: "", stype: "" });
+    // Grupos del filtro de MyGeotab (barra "Grupos" de arriba). Vacío = toda la flota.
+    const [mgGroups, setMgGroups] = useState(GI._mgGroups || []);
+    useEffect(() => { GI._onMgGroups = ids => setMgGroups(ids); return () => { GI._onMgGroups = null; }; }, []);
     const [raw, setRaw] = useState(null);
     const [loading, setLoading] = useState(null);
     const [tab, setTab] = useState("resumen");
     const [detail, setDetail] = useState(null);
     const loadId = useRef(0);
-    const groupRef = useRef("");
+    const groupRef = useRef(GI._mgGroups || []);
     const [loadingLabel, setLoadingLabel] = useState("");
     const [largeFleet, setLargeFleet] = useState(false);
 
@@ -87,9 +90,9 @@
       setLoading(0); setError(null);
       try {
         if (force) await GI.loadCatalogs(api, database, true).then(c => { setCatalogs(c); cat = c; });
-        const ruleIds = Object.keys(s.rule_mapping);
+        const ruleIds = GI.riskRuleIds(s.rule_mapping);
         const large = cat.devices.length > LARGE_FLEET;
-        const scope = large && groupRef.current ? [groupRef.current] : s.scope_group_ids;
+        const scope = large && groupRef.current.length ? groupRef.current : s.scope_group_ids;
         const t0 = performance.now();
         const quickFrom = GI.dayKey(GI.addDays(GI.parseDayKey(p.to), -13));
         const steps = quickFrom > p.from ? [{ from: quickFrom, label: "Cargando los últimos 14 días" }, { from: p.from, label: "Completando el historial; ya podés usar el tablero" }]
@@ -114,7 +117,7 @@
 
     const view = useMemo(() => {
       if (!model) return null;
-      const ids = GI.filterDevices(model, { groupId: filter.groupId, vtype: filter.vtype, stype: filter.stype });
+      const ids = GI.filterDevices(model, { groupIds: mgGroups, vtype: filter.vtype, stype: filter.stype });
       const series = GI.series(model, ids, gran);
       const total = GI.kpis(GI.aggregate(model, ids));
       const vRows = GI.vehicleRows(model, ids);
@@ -127,22 +130,23 @@
         findings: GI.findings(model, ids, vRows, dRows),
         savings: GI.savings(vRows, settings.fuel.price_per_liter),
       };
-    }, [model, filter, gran, milestones]);
+    }, [model, filter, mgGroups, gran, milestones]);
 
     async function saveSettings(next) {
       const saved = await GI.saveSettings(api, next);
       const prevRules = raw ? raw.ruleIds : new Set();
-      const needsReload = Object.keys(saved.rule_mapping).some(r => !prevRules.has(r));
+      const needsReload = GI.riskRuleIds(saved.rule_mapping).some(r => !prevRules.has(r));
       setSettings(saved);
       if (needsReload) load(saved, period, catalogs);
       return saved;
     }
 
-    // Flota grande: cambiar de grupo vuelve a consultar solo ese grupo.
+    // Flota grande: al cambiar el filtro de grupos de MyGeotab se consulta solo ese alcance.
+    const mgKey = mgGroups.slice().sort().join(",");
     useEffect(() => {
-      groupRef.current = filter.groupId;
+      groupRef.current = mgGroups;
       if (phase === "ready" && largeFleet && settings) load(settings, period, catalogs);
-    }, [filter.groupId]);
+    }, [mgKey]);
 
     function applyPreset(v) {
       if (v === "custom") { setCustomDraft({ from: period.from, to: period.to }); return; }
@@ -156,7 +160,8 @@
 
     const vtypes = [...settings.vehicle_types, { key: "sin_tipo", label: "Sin tipo" }];
     const activeFilters = [];
-    if (filter.groupId) activeFilters.push({ key: "g", label: "Grupo " + ((groupsFlat.find(g => g.id === filter.groupId) || {}).name || filter.groupId), clear: () => setFilter(f => ({ ...f, groupId: "" })) });
+    const groupName = id => ((catalogs.groups.find(g => g.id === id) || {}).name || id);
+    const mgLabel = mgGroups.length ? mgGroups.slice(0, 3).map(groupName).join(", ") + (mgGroups.length > 3 ? " y " + (mgGroups.length - 3) + " más" : "") : "Toda la flota";
     if (filter.vtype) activeFilters.push({ key: "v", label: (vtypes.find(v => v.key === filter.vtype) || {}).label || filter.vtype, clear: () => setFilter(f => ({ ...f, vtype: "" })) });
     if (filter.stype) activeFilters.push({ key: "s", label: filter.stype === "larga" ? "Larga distancia" : "Corta distancia", clear: () => setFilter(f => ({ ...f, stype: "" })) });
     return html`<div className="app">
@@ -176,11 +181,8 @@
           </span>` : null}
           <label className="ctl">Agrupar
             <${Segmented} value=${gran} onChange=${setGran} options=${[{ value: "day", label: "Día" }, { value: "week", label: "Semana" }, { value: "month", label: "Mes" }]} /></label>
-          <label className="ctl">Grupo
-            <select value=${filter.groupId} onChange=${e => setFilter(f => ({ ...f, groupId: e.target.value }))}>
-              <option value="">Toda la flota</option>
-              ${groupsFlat.map(g => html`<option key=${g.id} value=${g.id}>${"  ".repeat(g.depth) + g.name}</option>`)}
-            </select></label>
+          <div className="ctl">Grupos
+            <span className="mg-groups" title="Se toma del filtro de grupos de MyGeotab (arriba a la izquierda). Cambialo ahí y el tablero se actualiza solo.">${mgLabel}</span></div>
           <label className="ctl">Tipo
             <select value=${filter.vtype} onChange=${e => setFilter(f => ({ ...f, vtype: e.target.value }))}>
               <option value="">Todos</option>${vtypes.map(v => html`<option key=${v.key} value=${v.key}>${v.label}</option>`)}
@@ -196,14 +198,14 @@
       ${activeFilters.length ? html`<div className="filterbar" role="status">
         <span>Mostrando:</span>
         ${activeFilters.map(f => html`<span key=${f.key} className="fchip">${f.label}<button aria-label=${"Quitar " + f.label} onClick=${f.clear}>×</button></span>`)}
-        <button className="btn link small" onClick=${() => setFilter({ groupId: "", vtype: "", stype: "" })}>Ver toda la flota</button>
+        <button className="btn link small" onClick=${() => setFilter({ vtype: "", stype: "" })}>Quitar filtros</button>
       </div>` : null}
       ${loading != null ? html`<${Progress} value=${loading} label=${loadingLabel || "Descargando datos"} />` : null}
       <nav className="tabs">${TABS.map(([k, l]) => html`<button key=${k} className=${tab === k ? "on" : ""} onClick=${() => setTab(k)}>${l}</button>`)}</nav>
       <div className="gi-main">
         ${error ? html`<${Info} tone="error">${error}<//>` : null}
-        ${largeFleet && !filter.groupId && !(settings.scope_group_ids || []).length && tab !== "config" ? html`<${Info} tone="warn">
-          Esta base tiene ${GI.fmtNum(catalogs.devices.length)} vehículos. Para que cargue rápido, elegí un <b>Grupo</b> arriba: se consulta solo ese grupo.
+        ${largeFleet && !mgGroups.length && !(settings.scope_group_ids || []).length && tab !== "config" ? html`<${Info} tone="warn">
+          Esta base tiene ${GI.fmtNum(catalogs.devices.length)} vehículos. Para que cargue rápido, elegí uno o más grupos en el <b>filtro de grupos de MyGeotab</b> (arriba a la izquierda): se consulta solo ese alcance.
           ${isAdmin ? " También podés fijar el alcance para todos en Configuración → Alcance y combustible." : ""}<//>` : null}
         ${tab === "config" ? html`<${GI.ConfigTab} api=${api} settings=${settings} catalogs=${catalogs} groups=${groupsFlat}
             model=${model} isAdmin=${isAdmin} userName=${userName} onSave=${saveSettings} />`
@@ -246,7 +248,14 @@
           done();
         });
       },
-      focus: function () {},
+      // MyGeotab llama a focus al cargar y cada vez que cambia el filtro de grupos.
+      focus: function (api, state) {
+        let ids = [];
+        try { ids = ((state && state.getGroupFilter && state.getGroupFilter()) || []).map(g => (typeof g === "string" ? g : g && g.id)).filter(Boolean); } catch (e) { ids = []; }
+        if (ids.includes("GroupCompanyId")) ids = [];
+        GI._mgGroups = ids;
+        if (GI._onMgGroups) GI._onMgGroups(ids);
+      },
       blur: function () {},
     };
   };

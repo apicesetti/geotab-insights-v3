@@ -5,7 +5,7 @@
 <title>Geotab Insights</title>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <link rel="stylesheet" href="../static/vendor/leaflet.css">
-<link rel="stylesheet" href="../static/style.css?v=3.2.0">
+<link rel="stylesheet" href="../static/style.css?v=3.3.0">
 </head>
 <body>
 <div id="gi3-root"><div class="splash">Esta página está pensada para abrirse como Add-In dentro de MyGeotab.</div></div>
@@ -17,20 +17,26 @@
 <script src="../static/vendor/leaflet.js"></script>
 <script src="../static/vendor/leaflet-heat.js"></script>
 
-<script src="../static/js/core/util.js?v=3.2.0"></script>
-<script src="../static/js/core/catalog.js?v=3.2.0"></script>
-<script src="../static/js/core/storage.js?v=3.2.0"></script>
-<script src="../static/js/core/data.js?v=3.2.0"></script>
-<script src="../static/js/core/model.js?v=3.2.0"></script>
-<script src="../static/js/ui/components.js?v=3.2.0"></script>
-<script src="../static/js/ui/tabs.js?v=3.2.0"></script>
-<script src="../static/js/ui/milestones.js?v=3.2.0"></script>
-<script src="../static/js/ui/config.js?v=3.2.0"></script>
-<script src="../static/js/ui/app.js?v=3.2.0"></script>
+<script src="../static/js/core/util.js?v=3.3.0"></script>
+<script src="../static/js/core/catalog.js?v=3.3.0"></script>
+<script src="../static/js/core/storage.js?v=3.3.0"></script>
+<script src="../static/js/core/data.js?v=3.3.0"></script>
+<script src="../static/js/core/model.js?v=3.3.0"></script>
+<script src="../static/js/ui/components.js?v=3.3.0"></script>
+<script src="../static/js/ui/tabs.js?v=3.3.0"></script>
+<script src="../static/js/ui/milestones.js?v=3.3.0"></script>
+<script src="../static/js/ui/config.js?v=3.3.0"></script>
+<script src="../static/js/ui/app.js?v=3.3.0"></script>
 <script src="mock-api.js"></script>
 <script>
   // Arranque como lo haría MyGeotab
-  geotab.addin.cesettiInsightsV3().initialize(mockApi, {}, function () {});
+  // Simula el filtro de grupos de MyGeotab: ?grupos=gBit,gLiv
+  var mgGroups = (new URLSearchParams(location.search).get("grupos") || "").split(",").filter(Boolean).map(function (id) { return { id: id }; });
+  var mockState = { getGroupFilter: function () { return mgGroups.length ? mgGroups : [{ id: "GroupCompanyId" }]; } };
+  var addin = geotab.addin.cesettiInsightsV3();
+  addin.initialize(mockApi, mockState, function () { addin.focus(mockApi, mockState); });
+  // Para probar cambios de filtro desde la consola: setGrupos("gBit")
+  window.setGrupos = function (ids) { mgGroups = (ids || "").split(",").filter(Boolean).map(function (id) { return { id: id }; }); addin.focus(mockApi, mockState); };
 </script>
 </body>
 </html>

@@ -327,10 +327,11 @@
   }
 
   // ---------- Vistas ----------
-  // filter: { groupId, vtype, stype } -> Set de deviceIds
+  // filter: { groupIds, vtype, stype } -> Set de deviceIds. groupIds: grupos
+  // elegidos en el filtro de MyGeotab (unión, con subgrupos); vacío = todos.
   function filterDevices(model, filter) {
     const set = new Set();
-    const g = filter && filter.groupId ? model.gr.descendants(filter.groupId) : null;
+    const g = filter && filter.groupIds && filter.groupIds.length ? model.gr.expand(filter.groupIds) : null;
     for (const d of model.devices) {
       if (g && !deviceInGroups(d, g)) continue;
       if (filter && filter.vtype && model.vtypeOf.get(d.id) !== filter.vtype) continue;
