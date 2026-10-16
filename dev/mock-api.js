@@ -161,12 +161,13 @@
       let out;
       switch (p.typeName) {
         case "Group": out = groups; break;
-        case "Device": out = devices.map(({ id, name, serialNumber, groups }) => ({ id, name, serialNumber, groups })); break;
+        case "Device": out = devices.filter(d => !s.groups || inGroups({ id: d.id }, { deviceSearch: { groups: s.groups } })).map(({ id, name, serialNumber, groups }) => ({ id, name, serialNumber, groups })); break;
         case "Rule": out = rules; break;
         case "User": out = s.name ? [{ id: "admin", name: s.name, securityGroups: [{ id: "GroupEverythingSecurityId" }] }] : drivers; break;
         case "Zone": out = zones; break;
         case "ZoneType": out = [{ id: "ztPuerto", name: "Puerto" }]; break;
-        case "Trip": out = trips.filter(t => inRange(t.start, s) && inGroups(t.device, s)); break;
+        // Como el servidor real: Trip ignora deviceSearch.groups; solo filtra por id.
+        case "Trip": out = trips.filter(t => inRange(t.start, s) && (!s.deviceSearch || !s.deviceSearch.id || t.device.id === s.deviceSearch.id)); break;
         case "ExceptionEvent": out = exceptions.filter(e => inRange(e.activeFrom, s) && inGroups(e.device, s) && (!s.ruleSearch || e.rule.id === s.ruleSearch.id)); break;
         case "StatusData": out = status.filter(r => inRange(r.dateTime, s) && inGroups(r.device, s) && (!s.diagnosticSearch || r.diagnostic.id === s.diagnosticSearch.id)); break;
         case "AddInData": out = addInData.filter(a => a.addInId === s.addInId); break;

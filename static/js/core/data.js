@@ -21,6 +21,18 @@
   const CATALOG_TTL_MS = 6 * 3600 * 1000;
   const MAX_RUN_DAYS = 7;
   const CONCURRENCY = 3;
+  const PER_DEVICE_MAX = 600;
+
+  // Vehículos de los grupos del alcance (Device sí respeta groups e incluye
+  // subgrupos). fromDate: también los que estuvieron activos en el período.
+  async function scopeDeviceIds(api, groupIds, from) {
+    const res = await api.call("Get", {
+      typeName: "Device",
+      search: { groups: groupIds.map(id => ({ id })), fromDate: from.toISOString() },
+      propertySelector: { fields: ["id"], isIncluded: true },
+    });
+    return [...new Set((res || []).map(d => d.id).filter(Boolean))];
+  }
 
   const FUEL_DIAG = "DiagnosticDeviceTotalFuelId";
   const IDLE_FUEL_DIAG = "DiagnosticDeviceTotalIdleFuelId";
@@ -226,7 +238,7 @@
     const out = new Map(calls.map(c => [c.key, []]));
     let pending = calls.map(c => ({ ...c, from, to }));
     while (pending.length) {
-      const batch = pending.splice(0, 20);
+      const batch = pending.splice(0, 50);
       const build = withSel => batch.map(c => ["Get", {
         typeName: c.typeName,
         resultsLimit: LIMIT,
@@ -317,7 +329,13 @@
     await GI.pool(runs, CONCURRENCY, async run => {
       const from = GI.parseDayKey(run.days[0]);
       const to = GI.addDays(GI.parseDayKey(run.days[run.days.length - 1]), 1);
-      const calls = run.datasets.map(ds => ({ key: ds.scope, typeName: ds.typeName, search: ds.search, fields: ds.fields }));
+      // perDevice: la API no filtra ese tipo por grupo (Trip), así que se
+      // pide un Get por vehículo del alcance, todos en el mismo multiCall.
+      const calls = [];
+      for (const ds of run.datasets) {
+        if (ds.perDevice) for (const id of ds.perDevice) calls.push({ key: ds.scope, typeName: ds.typeName, search: { ...ds.search, deviceSearch: { id } }, fields: ds.fields });
+        else calls.push({ key: ds.scope, typeName: ds.typeName, search: ds.search, fields: ds.fields });
+      }
       const fetched = await getRangeMulti(api, calls, from, to);
       const toStore = [];
       const at = Date.now();
@@ -327,6 +345,7 @@
         for (const rec of fetched.get(ds.scope) || []) {
           if (rec.id && seen.has(rec.id)) continue;
           if (rec.id) seen.add(rec.id);
+          if (ds.keep && !ds.keep(rec)) continue;
           const d = ds.dateOf(rec);
           if (!d) continue;
           const bucket = byDay.get(GI.dayKey(d));
@@ -414,8 +433,19 @@
     // al arrancar el período.
     const fuelDays = GI.dayRange(GI.dayKey(GI.addDays(GI.parseDayKey(fromKey), -3)), toKey);
 
+    // Trip ignora deviceSearch.groups (devuelve toda la flota). Con alcance por
+    // grupo se resuelven los vehículos del grupo y se pide por vehículo; si son
+    // muchos, se trae la flota y se filtra acá.
+    let tripExtra = {};
+    if (scopeIds.length) {
+      const devIds = await scopeDeviceIds(api, scopeIds, GI.parseDayKey(fromKey));
+      const set = new Set(devIds);
+      tripExtra = devIds.length <= PER_DEVICE_MAX
+        ? { perDevice: devIds }
+        : { keep: r => set.has(GI.idOf(r.device)) };
+    }
     // Trip con propertySelector: solo los campos que se usan (~5 veces menos datos).
-    const tripsDs = [{ scope: "trip" + scopeKey, typeName: "Trip", search: { ...devSearch },
+    const tripsDs = [{ scope: "trip2" + scopeKey, typeName: "Trip", search: {}, ...tripExtra,
       fields: ["id", "device", "driver", "start", "stop", "distance", "drivingDuration", "idlingDuration", "stopPoint"],
       dateOf: r => new Date(r.start), compact: compactTrips }];
     const excDs = ruleIds.map(rid => ({
@@ -449,7 +479,7 @@
       for (const arr of m.values()) for (const ev of arr) exceptions.push({ ...ev, rule: rid });
     }
     const tripList = [];
-    for (const arr of trips["trip" + scopeKey].values()) for (const t of arr) tripList.push(t);
+    for (const arr of trips["trip2" + scopeKey].values()) for (const t of arr) tripList.push(t);
 
     return {
       fromKey, toKey, dayKeys,
