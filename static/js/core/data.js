@@ -505,7 +505,10 @@
   // En vez de bajar todas las lecturas del contador, se pide su valor a las
   // 00:00 de cada día (Get con fromDate = toDate devuelve el valor
   // interpolado en ese instante). Día N = valor(N+1 00:00) - valor(N 00:00).
-  const BOUNDARY_FLEET_MIN = 300;
+  // Desactivado por defecto: cada corte es una llamada y Geotab admite 5.000
+  // por minuto por usuario (en tsbsa, toda la flota = ~95.000 llamadas y
+  // OverLimitException). Se deja solo para pruebas con window.GI_FUEL_BOUNDARY_MIN.
+  const BOUNDARY_FLEET_MIN = Infinity;
   const BOUNDARY_BATCH = 250;
   const BOUNDARY_CONCURRENCY = 4;
 
