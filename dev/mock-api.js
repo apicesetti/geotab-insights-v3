@@ -193,6 +193,8 @@
         out = [...out].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
         if (p.sort.offset) out = out.filter(r => r.id > p.sort.offset);
       }
+      // Como el servidor real, Trip corta antes del resultsLimit (allá 25.000; acá 100).
+      if (p.typeName === "Trip" && !p.sort) out = [...out].sort((a, b) => (a.start < b.start ? -1 : 1)).slice(0, 100);
       return p.resultsLimit ? out.slice(0, p.resultsLimit) : out;
     }
     if (method === "Add") { const id = "ad" + (++aid); addInData.push({ ...JSON.parse(JSON.stringify(p.entity)), id }); return id; }

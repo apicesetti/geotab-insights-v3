@@ -22,6 +22,7 @@
   const MAX_RUN_DAYS = 7;
   const CONCURRENCY = 3;
   const PER_DEVICE_MAX = 600;
+  const CAP_STEP = () => window.GI_CAP_STEP || 1000;
 
   // Vehículos de los grupos del alcance (Device sí respeta groups e incluye
   // subgrupos). fromDate: también los que estuvieron activos en el período.
@@ -255,17 +256,24 @@
       }
       batch.forEach((c, i) => {
         const page = res[i] || [];
-        if (page.length >= LIMIT && c.to - c.from > 60000) {
-          // Llegó al límite: se parte en 4 tramos que van juntos en el próximo multiCall.
+        const arr = out.get(c.key);
+        for (const r of page) arr.push(r);
+        // El servidor puede cortar antes del resultsLimit pedido (Trip: 25.000),
+        // así que una página "redonda" se toma como cortada. Se sigue desde la
+        // fecha del último registro (los duplicados se descartan por id).
+        const cut = page.length >= LIMIT || (page.length >= CAP_STEP() && page.length % CAP_STEP() === 0);
+        if (!cut) return;
+        const lastT = c.dateOf ? (c.dateOf(page[page.length - 1]) || new Date(NaN)).getTime() : NaN;
+        if (lastT > c.from.getTime() && lastT < c.to.getTime()) {
+          pending.push({ ...c, from: new Date(lastT) });
+        } else if (c.to - c.from > 60000) {
+          // Sin avance posible: se parte en 4 tramos.
           const step = Math.floor((c.to - c.from) / 4);
           for (let q = 0; q < 4; q++) {
             const f = new Date(c.from.getTime() + q * step);
             const t = q === 3 ? c.to : new Date(c.from.getTime() + (q + 1) * step);
             pending.push({ ...c, from: f, to: t });
           }
-        } else {
-          const arr = out.get(c.key);
-          for (const r of page) arr.push(r);
         }
       });
       if (onProgress) onProgress();
@@ -298,7 +306,7 @@
   // Genérico: datasets = [{scope, typeName, search, dateOf(rec)->Date, compact(recs)->value}]
   // Devuelve { [scope]: Map(dayKey -> compact value) }.
   async function fetchDaily(api, database, datasets, dayKeys, progress) {
-    const keyOf = (scope, dk) => database + "|" + scope + "|" + dk;
+    const keyOf = (scope, dk) => database + "|v3|" + scope + "|" + dk;
     const allKeys = [];
     for (const ds of datasets) for (const dk of dayKeys) allKeys.push(keyOf(ds.scope, dk));
     const cached = await idbGetMany("days", allKeys);
@@ -333,8 +341,8 @@
       // pide un Get por vehículo del alcance, todos en el mismo multiCall.
       const calls = [];
       for (const ds of run.datasets) {
-        if (ds.perDevice) for (const id of ds.perDevice) calls.push({ key: ds.scope, typeName: ds.typeName, search: { ...ds.search, deviceSearch: { id } }, fields: ds.fields });
-        else calls.push({ key: ds.scope, typeName: ds.typeName, search: ds.search, fields: ds.fields });
+        if (ds.perDevice) for (const id of ds.perDevice) calls.push({ key: ds.scope, typeName: ds.typeName, search: { ...ds.search, deviceSearch: { id } }, fields: ds.fields, dateOf: ds.dateOf });
+        else calls.push({ key: ds.scope, typeName: ds.typeName, search: ds.search, fields: ds.fields, dateOf: ds.dateOf });
       }
       const fetched = await getRangeMulti(api, calls, from, to);
       const toStore = [];

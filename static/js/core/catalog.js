@@ -176,7 +176,11 @@
     // Las reglas arrancan sin categoría: las asigna el administrador. Las
     // sugerencias se muestran como ayuda en Configuración → Reglas.
     const ruleMapping = {};
-    const excluded = groups.filter(g => /fuera de servicio|baja|inactiv|prueba|test/i.test(g.name || "")).map(g => g.id);
+    // Solo grupos "hoja" (o casi): un grupo de prueba que cuelga encima de
+    // cientos de subgrupos reales no se excluye automáticamente.
+    const byId = new Map(groups.map(g => [g.id, g]));
+    const subtree = id => { const seen = new Set([id]); const q = [id]; while (q.length) { const g = byId.get(q.shift()); for (const c of (g && g.children) || []) { const cid = typeof c === "string" ? c : c && c.id; if (cid && !seen.has(cid)) { seen.add(cid); q.push(cid); } } } return seen.size; };
+    const excluded = groups.filter(g => /fuera de servicio|baja|inactiv|prueba|test/i.test(g.name || "") && subtree(g.id) <= 5).map(g => g.id);
     return {
       version: 3,
       configured: false,

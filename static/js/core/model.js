@@ -203,12 +203,22 @@
   // raw: salida de loadPeriod; cat: catálogos; settings: config compartida.
   function buildModel(raw, cat, settings) {
     const gr = makeGroupResolver(cat.groups);
-    const excluded = gr.expand(settings.excluded_group_ids);
+    // Un grupo elegido explícitamente (filtro de MyGeotab o alcance) gana sobre
+    // una exclusión que lo contiene: no se excluye un grupo "padre" del elegido.
+    const chosen = [...(raw.scopeGroupIds || []), ...(settings.scope_group_ids || [])];
+    const exclIds = (settings.excluded_group_ids || []).filter(id => !chosen.some(c => gr.descendants(id).has(c)));
+    const excluded = gr.expand(exclIds);
     const scope = settings.scope_group_ids && settings.scope_group_ids.length ? gr.expand(settings.scope_group_ids) : null;
 
-    const devices = cat.devices.filter(d =>
-      !["", "000-000-0000"].includes(d.serial.trim())
-      && !deviceInGroups(d, excluded)
+    const withSerial = cat.devices.filter(d => !["", "000-000-0000"].includes(d.serial.trim()));
+    // Cuántos vehículos deja afuera cada grupo excluido (para avisar).
+    const exclusionImpact = exclIds.map(id => {
+      const set = gr.descendants(id);
+      return { id, name: (gr.byId.get(id) || {}).name || id, devices: withSerial.filter(d => deviceInGroups(d, set)).length };
+    }).filter(x => x.devices > 0).sort((a, b) => b.devices - a.devices);
+    const excludedCount = withSerial.filter(d => deviceInGroups(d, excluded)).length;
+    const devices = withSerial.filter(d =>
+      !deviceInGroups(d, excluded)
       && (!scope || deviceInGroups(d, scope)));
     const devById = new Map(devices.map(d => [d.id, d]));
     const driverName = new Map(cat.drivers.map(u => [u.id, u.name]));
@@ -365,6 +375,7 @@
 
     return {
       raw, cat, settings, gr, devices, devById, driverName, vtypeOf, serviceOf, serviceSource, profileOf, fuelTypeOf, priceOf,
+      exclusionImpact, excludedCount, fleetCount: withSerial.length,
       hasPrice: [...priceOf.values()].some(p => p > 0),
       dd, drvCells, events, journeys, dayKeys, hasFuel: fuelDeltas.size > 0,
       fuelDevices: new Set(fuelDeltas.keys()), idleMeasuredDevices: new Set(idleDeltas.keys()),

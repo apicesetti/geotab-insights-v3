@@ -250,6 +250,10 @@
         ${largeFleet && !mgGroups.length && !(settings.scope_group_ids || []).length && tab !== "config" ? html`<${Info} tone="warn">
           Esta base tiene ${GI.fmtNum(catalogs.devices.length)} vehículos. Para que cargue rápido, elegí uno o más grupos en el <b>filtro de grupos de MyGeotab</b> (arriba a la izquierda): se consulta solo ese alcance.
           ${isAdmin ? " También podés fijar el alcance para todos en Configuración → Combustible y alcance." : ""}<//>` : null}
+        ${model && model.fleetCount && model.excludedCount / model.fleetCount > 0.3 && tab !== "config" ? html`<${Info} tone="warn">
+          Los grupos excluidos dejan afuera <b>${GI.fmtNum(model.excludedCount)} de ${GI.fmtNum(model.fleetCount)} vehículos</b>
+          (${model.exclusionImpact.slice(0, 3).map(x => `${x.name}: ${GI.fmtNum(x.devices)}`).join(" · ")}).
+          ${isAdmin ? " Revisalo en Configuración → Combustible y alcance → Excluir siempre estos grupos." : " Pedile a un administrador que revise los grupos excluidos."}<//>` : null}
         <${ErrorBoundary} key=${tab}>
         ${tab === "config" ? html`<${GI.ConfigTab} api=${api} settings=${settings} catalogs=${catalogs} groups=${groupsFlat}
             model=${model} isAdmin=${isAdmin} userName=${userName} onSave=${saveSettings} />`
