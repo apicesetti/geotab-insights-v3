@@ -214,6 +214,8 @@
 #gi3-root .tbl tr.clickable:hover td { background: var(--sunken); }
 #gi3-root .tbl tr.clickable td:first-child { font-weight: 600; color: var(--ink); }
 #gi3-root .tbl tr.muted-row td { color: var(--muted); }
+#gi3-root .tbl tr.selected td { background: var(--marking-soft); }
+#gi3-root .filterbar.inset { border: 1px solid var(--rule); border-radius: 6px; padding: 8px 12px; margin-bottom: 12px; }
 #gi3-root .tbl select { max-width: 260px; }
 #gi3-root .dot { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 8px; vertical-align: -1px; }
 #gi3-root .tag { font-size: 11.5px; background: var(--sunken); border: 1px solid var(--rule); color: var(--text-2); padding: 0 6px; border-radius: 4px; margin-left: 6px; }

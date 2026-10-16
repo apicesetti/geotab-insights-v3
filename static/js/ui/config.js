@@ -2,16 +2,17 @@
 // resto la ve en modo lectura.
 (function (GI) {
   "use strict";
-  const { useState, useMemo } = React;
+  const { useState, useMemo, useEffect } = React;
   const html = GI.html;
   const { Panel, Info, GroupMultiSelect } = GI;
 
   const SECTIONS = [
-    ["reglas", "Reglas → categorías"],
+    ["categorias", "Categorías"],
+    ["reglas", "Reglas y objetivos"],
     ["tipos", "Tipos de vehículo"],
     ["servicio", "Corta / larga distancia"],
     ["objetivos", "Objetivos por perfil"],
-    ["pesos", "Pesos de riesgo"],
+    ["recorridos", "Recorridos"],
     ["alcance", "Combustible y alcance"],
     ["general", "General"],
   ];
@@ -20,7 +21,7 @@
 
   function ConfigTab({ api, settings, catalogs, groups, model, isAdmin, userName, onSave }) {
     const [draft, setDraft] = useState(() => clone(settings));
-    const [section, setSection] = useState("reglas");
+    const [section, setSection] = useState("categorias");
     const [saving, setSaving] = useState(false);
     const [msg, setMsg] = useState(null);
     const dirty = JSON.stringify({ ...draft, _rev: 0, updated_at: 0 }) !== JSON.stringify({ ...settings, _rev: 0, updated_at: 0 });
@@ -50,14 +51,15 @@
       tipos: html`<${TypesSection} draft=${draft} set=${set} groups=${groups} ro=${ro} model=${model} />`,
       servicio: html`<${ServiceSection} draft=${draft} set=${set} groups=${groups} ro=${ro} model=${model} />`,
       objetivos: html`<${TargetsSection} draft=${draft} set=${set} ro=${ro} model=${model} />`,
-      pesos: html`<${WeightsSection} draft=${draft} set=${set} ro=${ro} />`,
+      categorias: html`<${CategoriesSection} draft=${draft} set=${set} ro=${ro} />`,
+      recorridos: html`<${RoutesSection} api=${api} draft=${draft} set=${set} ro=${ro} />`,
       alcance: html`<${ScopeSection} draft=${draft} set=${set} groups=${groups} ro=${ro} model=${model} />`,
       general: html`<${GeneralSection} draft=${draft} set=${set} ro=${ro} />`,
     }[section];
 
     return html`<div className="config">
       ${ro ? html`<${Info}>Modo lectura: solo los administradores de la base (o los editores definidos en General) pueden modificar la configuración. Usuario actual: <b>${userName}</b>.<//>` : null}
-      ${!settings.configured && !ro ? html`<${Info} tone="warn"><b>Primera configuración.</b> Se cargaron sugerencias automáticas (reglas, tipos de vehículo por nombre de grupo, grupos a excluir). Revisá cada sección y guardá: a partir de ahí todos los usuarios ven lo mismo.<//>` : null}
+      ${!settings.configured && !ro ? html`<${Info} tone="warn"><b>Primera configuración.</b> Revisá las categorías y asigná cada regla de MyGeotab a una categoría en "Reglas y objetivos" (solo se analizan las reglas asignadas). Los tipos de vehículo y los grupos a excluir vienen sugeridos por nombre de grupo. Al guardar, todos los usuarios ven lo mismo.<//>` : null}
       <div className="config-layout">
         <nav className="config-nav">${SECTIONS.map(([k, l]) => html`<button key=${k} className=${section === k ? "on" : ""} onClick=${() => setSection(k)}>${l}</button>`)}</nav>
         <div className="config-body">${body}</div>
@@ -72,6 +74,14 @@
 
   // ---------- Reglas ----------
   function RulesSection({ api, draft, set, rules, ro }) {
+    const cats = draft.categories || GI.DEFAULT_CATEGORIES;
+    const catKind = k => (cats.find(c => c.key === k) || {}).kind;
+    const targets = draft.rule_targets || {};
+    const setTarget = (id, v) => {
+      const t = { ...targets };
+      if (v === "" || v == null || Number.isNaN(+v)) delete t[id]; else t[id] = +v;
+      set(["rule_targets"], t);
+    };
     const [q, setQ] = useState("");
     const [showNoise, setShowNoise] = useState(false);
     const [onlyUnmapped, setOnlyUnmapped] = useState(false);
@@ -83,10 +93,11 @@
       .filter(r => !q || r.name.toLowerCase().includes(q.toLowerCase()))
       .filter(r => !onlyUnmapped || !mapping[r.id])
       .sort((a, b) => (counts ? (counts[b.id] || 0) - (counts[a.id] || 0) : 0) || a.name.localeCompare(b.name, "es"));
-    const pending = rules.filter(r => !GI.isNoiseRule(r) && !mapping[r.id] && GI.suggestCategory(r) && GI.CATEGORY_BY_KEY[GI.suggestCategory(r)].kind === "riesgo");
+    const sugOf = r => { const k = GI.suggestCategory(r); return k && catKind(k) === "riesgo" ? k : null; };
+    const pending = rules.filter(r => !GI.isNoiseRule(r) && !mapping[r.id] && sugOf(r));
     const ruleName = new Map(rules.map(r => [r.id, r.name]));
     const dupes = [...GI.groupBy(Object.keys(mapping), id => mapping[id]).entries()]
-      .filter(([c, ids]) => ids.length > 1 && (GI.CATEGORY_BY_KEY[c] || {}).kind === "riesgo")
+      .filter(([c, ids]) => ids.length > 1 && catKind(c) === "riesgo")
       .map(([c, ids]) => [c, ids.map(id => ruleName.get(id) || id)]);
 
     async function count() {
@@ -119,14 +130,15 @@
         <button className="btn" disabled=${counting} onClick=${count}>${counting ? "Contando…" : "Contar eventos (30 días)"}</button>
         ${!ro && pending.length ? html`<button className="btn primary" onClick=${() => {
           const m = { ...mapping };
-          for (const r of pending) m[r.id] = GI.suggestCategory(r);
+          for (const r of pending) m[r.id] = sugOf(r);
           set(["rule_mapping"], m);
-        }}>Aplicar ${pending.length} sugerencias</button>` : null}
+        }}>Completar ${pending.length} con la sugerencia</button>` : null}
       </div>
       <div className="table-wrap"><table className="tbl">
-        <thead><tr><th>Regla</th><th>Tipo</th>${counts ? html`<th className="num">Eventos 30 d</th>` : null}<th>Categoría</th></tr></thead>
+        <thead><tr><th>Regla</th><th>Tipo</th>${counts ? html`<th className="num">Eventos 30 d</th>` : null}<th>Categoría</th>
+          <th className="num" title="Máximo de eventos cada 100 km. Se usa en Seguridad → Pronóstico.">Objetivo /100 km</th></tr></thead>
         <tbody>${list.map(r => {
-          const sug = GI.suggestCategory(r);
+          const sug = sugOf(r);
           const cur = mapping[r.id] || "";
           return html`<tr key=${r.id} className=${cur ? "" : "muted-row"}>
             <td>${r.name}${GI.isNoiseRule(r) ? html` <span className="tag">prueba</span>` : null}</td>
@@ -134,8 +146,10 @@
             ${counts ? html`<td className="num">${GI.fmtNum(counts[r.id] || 0)}</td>` : null}
             <td><select disabled=${ro} value=${cur} onChange=${e => setRule(r.id, e.target.value)}>
               <option value="">— No incluir —</option>
-              ${GI.CATEGORIES.map(c => html`<option key=${c.key} value=${c.key}>${c.label}${c.key === sug && c.key !== cur ? " (sugerida)" : ""}</option>`)}
-            </select></td></tr>`;
+              ${cats.map(c => html`<option key=${c.key} value=${c.key}>${c.label}${c.kind !== "riesgo" ? " (no se descarga)" : ""}${c.key === sug && c.key !== cur ? " (sugerida)" : ""}</option>`)}
+            </select></td>
+            <td className="num">${cur && catKind(cur) === "riesgo" ? html`<input type="number" step="0.01" min="0" className="num-in" disabled=${ro} placeholder="–"
+              value=${targets[r.id] != null ? targets[r.id] : ""} onChange=${e => setTarget(r.id, e.target.value)} />` : null}</td></tr>`;
         })}</tbody></table></div>
       ${dupes.length ? html`<${Info} tone="warn">Hay varias reglas en la misma categoría: ${dupes.map(([c, rs]) => GI.catLabel(c) + " (" + rs.join(", ") + ")").join(" · ")}.
         Si miden la misma situación (ej. "Speeding" y "Speeding (New)", o una regla stock y una custom equivalente) el evento se cuenta dos veces. Usá "Contar eventos" para ver cuál está activa y dejá solo una.<//>` : null}
@@ -245,14 +259,69 @@
   }
 
   // ---------- Pesos ----------
-  function WeightsSection({ draft, set, ro }) {
-    const w = draft.category_weights;
-    return html`<${Panel} title="Peso de cada categoría en el índice de riesgo"
-      sub="Índice de riesgo = suma de (eventos × peso) cada 100 km. Las categorías operativas (ralentí, desvíos, zonas) tienen peso 0 y no suman.">
-      <div className="weights">${GI.CATEGORIES.map(c => html`<label key=${c.key} className="weight">
-        <span><span className="dot" style=${{ background: c.color }}></span>${c.label}</span>
-        <input type="number" step="0.1" min="0" className="num-in" disabled=${ro || c.kind !== "riesgo"} value=${w[c.key] != null ? w[c.key] : c.weight}
-          onChange=${e => set(["category_weights"], { ...w, [c.key]: +e.target.value })} /></label>`)}</div>
+  // ---------- Categorías (editables) ----------
+  function CategoriesSection({ draft, set, ro }) {
+    const cats = draft.categories || GI.DEFAULT_CATEGORIES.map(c => ({ key: c.key, label: c.label, kind: c.kind }));
+    const w = draft.category_weights || {};
+    const mapping = draft.rule_mapping || {};
+    const usage = k => Object.values(mapping).filter(v => v === k).length;
+    let slot = 0;
+    const colorOf = c => (c.kind === "riesgo" && slot < 8 ? ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"][slot++] : GI.OTHER_COLOR);
+    const colors = cats.map(colorOf);
+    const upd = (i, patch) => set(["categories"], cats.map((c, j) => (j === i ? { ...c, ...patch } : c)));
+    const move = (i, d) => { const a = [...cats]; const [x] = a.splice(i, 1); a.splice(i + d, 0, x); set(["categories"], a); };
+    function remove(i) {
+      const c = cats[i];
+      const n = usage(c.key);
+      if (n && !confirm("La categoría \"" + c.label + "\" tiene " + n + " reglas asignadas. Si la quitás, esas reglas quedan sin categoría. ¿Continuar?")) return;
+      const m = { ...mapping };
+      for (const [rid, k] of Object.entries(m)) if (k === c.key) delete m[rid];
+      set(["rule_mapping"], m);
+      set(["categories"], cats.filter((_, j) => j !== i));
+    }
+    function add() {
+      const key = "cat_" + Date.now().toString(36);
+      set(["categories"], [...cats, { key, label: "Nueva categoría", kind: "riesgo" }]);
+      set(["category_weights"], { ...w, [key]: 1 });
+    }
+    return html`<${Panel} title="Categorías"
+      hint="Las categorías de riesgo se descargan, suman al índice de riesgo y se muestran en Seguridad. Las operativas no se descargan ni suman. Las primeras 8 de riesgo tienen color propio en los gráficos (en este orden); el resto aparece como 'Otras'.">
+      <div className="table-wrap"><table className="tbl">
+        <thead><tr><th></th><th>Nombre</th><th>Tipo</th><th className="num">Peso en el índice</th><th className="num">Reglas</th><th></th></tr></thead>
+        <tbody>${cats.map((c, i) => html`<tr key=${c.key}>
+          <td style=${{ whiteSpace: "nowrap" }}>${!ro ? html`<button className="btn small" disabled=${i === 0} onClick=${() => move(i, -1)} aria-label="Subir">▲</button>
+            <button className="btn small" disabled=${i === cats.length - 1} onClick=${() => move(i, 1)} aria-label="Bajar">▼</button>` : null}</td>
+          <td><span className="dot" style=${{ background: colors[i], borderRadius: "50%" }}></span><input disabled=${ro} value=${c.label} onInput=${e => upd(i, { label: e.target.value })} style=${{ width: "260px" }} /></td>
+          <td><select disabled=${ro} value=${c.kind} onChange=${e => upd(i, { kind: e.target.value })}>
+            <option value="riesgo">Riesgo (seguridad)</option><option value="operativo">Operativo (no suma)</option></select></td>
+          <td className="num"><input type="number" step="0.1" min="0" className="num-in" disabled=${ro || c.kind !== "riesgo"} value=${c.kind !== "riesgo" ? 0 : w[c.key] != null ? w[c.key] : 1}
+            onChange=${e => set(["category_weights"], { ...w, [c.key]: +e.target.value })} /></td>
+          <td className="num">${usage(c.key)}</td>
+          <td>${!ro ? html`<button className="btn small danger" onClick=${() => remove(i)}>Quitar</button>` : null}</td>
+        </tr>`)}</tbody></table></div>
+      ${!ro ? html`<button className="btn" style=${{ marginTop: "12px" }} onClick=${add}>+ Agregar categoría</button>` : null}
+    <//>`;
+  }
+
+  // ---------- Recorridos ----------
+  function RoutesSection({ api, draft, set, ro }) {
+    const [types, setTypes] = useState(null);
+    useEffect(() => { GI.loadZoneTypes(api).then(setTypes); }, []);
+    const j = draft.journeys;
+    const sel = j.zone_type_ids || [];
+    const toggle = id => set(["journeys", "zone_type_ids"], sel.includes(id) ? sel.filter(x => x !== id) : [...sel, id]);
+    return html`<${Panel} title="Recorridos"
+      hint="Un recorrido va de una zona a otra. Las paradas más cortas que el mínimo (ej. 5 min en una estación de servicio) no lo cortan: Añelo → Neuquén sigue siendo un solo recorrido.">
+      <div className="form two-col">
+        <label>Parada mínima para terminar un recorrido en una zona (min)<input type="number" min="0" disabled=${ro} value=${j.min_stop_minutes != null ? j.min_stop_minutes : 20} onChange=${e => set(["journeys", "min_stop_minutes"], +e.target.value)} /></label>
+        <label>Cortar el recorrido fuera de zona tras una parada de (h)<input type="number" min="1" disabled=${ro} value=${j.break_hours} onChange=${e => set(["journeys", "break_hours"], +e.target.value)} /></label>
+        <label>Ranking: mínimo de recorridos por tramo<input type="number" disabled=${ro} value=${j.min_journeys_route} onChange=${e => set(["journeys", "min_journeys_route"], +e.target.value)} /></label>
+        <label>Ranking: km acumulados mínimos por tramo<input type="number" disabled=${ro} value=${j.min_km_route} onChange=${e => set(["journeys", "min_km_route"], +e.target.value)} /></label>
+      </div>
+      <h3>Tipos de zona que cuentan como origen o destino</h3>
+      <p className="muted small">Si no elegís ninguno, cuentan todas las zonas.</p>
+      ${types == null ? html`<div className="muted">Cargando tipos de zona…</div>` : html`<div className="checks">${types.map(t => html`<label key=${t.id} className="check">
+        <input type="checkbox" disabled=${ro} checked=${sel.includes(t.id)} onChange=${() => toggle(t.id)} /> ${t.name}</label>`)}</div>`}
     <//>`;
   }
 
@@ -310,9 +379,6 @@
         <label>Agrupación por defecto<select disabled=${ro} value=${draft.ui.default_granularity} onChange=${e => set(["ui", "default_granularity"], e.target.value)}>
           <option value="day">Día</option><option value="week">Semana</option><option value="month">Mes</option></select></label>
         <label>Ventana de impacto de hitos (días)<input type="number" disabled=${ro} value=${draft.ui.milestone_window_days} onChange=${e => set(["ui", "milestone_window_days"], +e.target.value)} /></label>
-        <label>Cortar recorrido tras parada de (h)<input type="number" disabled=${ro} value=${draft.journeys.break_hours} onChange=${e => set(["journeys", "break_hours"], +e.target.value)} /></label>
-        <label>Ranking de recorridos: mínimo de recorridos<input type="number" disabled=${ro} value=${draft.journeys.min_journeys_route} onChange=${e => set(["journeys", "min_journeys_route"], +e.target.value)} /></label>
-        <label>Ranking de recorridos: km acumulados mínimos<input type="number" disabled=${ro} value=${draft.journeys.min_km_route} onChange=${e => set(["journeys", "min_km_route"], +e.target.value)} /></label>
         <label>Ranking de conductores: km mínimos<input type="number" disabled=${ro} value=${draft.drivers.min_km_ranking} onChange=${e => set(["drivers", "min_km_ranking"], +e.target.value)} /></label>
         <label>Editores adicionales (usuarios MyGeotab, separados por coma)<input disabled=${ro} value=${editors}
           onInput=${e => setEditors(e.target.value)} onBlur=${() => set(["editors"], editors.split(",").map(s => s.trim()).filter(Boolean))} /></label>

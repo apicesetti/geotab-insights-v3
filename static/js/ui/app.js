@@ -22,6 +22,8 @@
     for (const k of ["service", "fuel", "journeys", "drivers", "ui"]) out[k] = { ...defaults[k], ...(saved[k] || {}) };
     out.service.group_ids = { ...defaults.service.group_ids, ...((saved.service || {}).group_ids || {}) };
     out.category_weights = { ...defaults.category_weights, ...(saved.category_weights || {}) };
+    out.categories = saved.categories && saved.categories.length ? saved.categories : defaults.categories;
+    out.rule_targets = saved.rule_targets || {};
     out.profile_targets = { ...GI.defaultProfileTargets(out.vehicle_types), ...(saved.profile_targets || {}) };
     return out;
   }
@@ -64,6 +66,7 @@
           const [cat, shared] = await Promise.all([GI.loadCatalogs(api, database), GI.loadShared(api)]);
           const defaults = GI.defaultSettings(cat.groups, cat.rules);
           const s = mergeDefaults(shared.settings, defaults);
+          GI.applyCategories(s.categories);
           const admin = await GI.resolveIsAdmin(api, userName, s);
           setCatalogs(cat); setSettings(s); setMilestones(shared.milestones); setIsAdmin(admin);
           setGran(s.ui.default_granularity);
@@ -166,6 +169,7 @@
 
     async function saveSettings(next) {
       const saved = await GI.saveSettings(api, next);
+      GI.applyCategories(saved.categories);
       const prevRules = raw ? raw.ruleIds : new Set();
       const needsReload = GI.riskRuleIds(saved.rule_mapping).some(r => !prevRules.has(r));
       setSettings(saved);
@@ -252,7 +256,7 @@
           : !view ? html`<div className="splash small"><div className="spinner"></div>Preparando el tablero…</div>`
           : tab === "resumen" ? html`<${GI.SummaryTab} view=${view} onGo=${setTab} />`
           : tab === "combustible" ? html`<${GI.FuelTab} view=${view} onVehicle=${id => setDetail({ type: "v", id })} />`
-          : tab === "seguridad" ? html`<${GI.SafetyTab} view=${view} onVehicle=${id => setDetail({ type: "v", id })} />`
+          : tab === "seguridad" ? html`<${GI.SafetyTab} view=${view} onVehicle=${id => setDetail({ type: "v", id })} onDriver=${id => setDetail({ type: "d", id })} />`
           : tab === "conductores" ? html`<${GI.DriversTab} view=${view} onDriver=${id => setDetail({ type: "d", id })} />`
           : tab === "recorridos" ? html`<${GI.RoutesTab} view=${view} api=${api} />`
           : tab === "hitos" ? html`<${GI.MilestonesTab} view=${view} milestones=${milestones} isAdmin=${isAdmin} groups=${groupsFlat}
@@ -283,6 +287,24 @@
     }
   }
 
+  // Navega a la página de eventos de MyGeotab con los filtros del caso.
+  // MyGeotab no documenta los parámetros de "eventsInsights": se envían los
+  // habituales (rango de fechas, reglas, vehículos, conductores) y la página
+  // toma los que reconoce. El filtro de grupos de MyGeotab sigue aplicado.
+  GI.EVENTS_PAGE = "eventsInsights";
+  GI.openEventsPage = function (o) {
+    const st = GI._mgState;
+    const few = arr => (arr && arr.length && arr.length <= 100 ? arr : undefined);
+    const args = {
+      dateRange: { startDate: o.from + "T00:00:00.000Z", endDate: o.to + "T23:59:59.999Z" },
+      rules: few(o.ruleIds), ruleIds: few(o.ruleIds),
+      devices: few(o.deviceIds), deviceIds: few(o.deviceIds),
+      drivers: few(o.driverIds), driverIds: few(o.driverIds),
+    };
+    if (st && typeof st.gotoPage === "function") st.gotoPage(GI.EVENTS_PAGE, args);
+    else console.info("[Geotab Insights] gotoPage", GI.EVENTS_PAGE, args);
+  };
+
   GI.App = App;
 
   // ---------- Entry point del Add-In ----------
@@ -296,6 +318,7 @@
   window.geotab.addin.cesettiInsightsV3 = function () {
     return {
       initialize: function (api, state, done) {
+        GI._mgState = state;
         api.getSession(function (credentials, server) {
           if (!root) {
             root = ReactDOM.createRoot(document.getElementById("gi3-root"));
@@ -306,6 +329,7 @@
       },
       // MyGeotab llama a focus al cargar y cada vez que cambia el filtro de grupos.
       focus: function (api, state) {
+        if (state) GI._mgState = state;
         let ids = [];
         try { ids = ((state && state.getGroupFilter && state.getGroupFilter()) || []).map(g => (typeof g === "string" ? g : g && g.id)).filter(Boolean); } catch (e) { ids = []; }
         if (ids.includes("GroupCompanyId")) ids = [];

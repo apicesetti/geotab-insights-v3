@@ -88,8 +88,12 @@
   // Un recorrido arranca al salir de una zona y termina al llegar a una zona
   // (cualquiera) o tras una parada más larga que break_hours. Viajes que
   // terminan fuera de zona (paradas en ruta) se encadenan al mismo recorrido.
-  function buildJourneys(tripsByDevice, zoneAt, breakHours) {
+  // minStopMin: una parada más corta que esto (ej. 5 min en una estación de
+  // servicio que es zona) NO corta el recorrido: Añelo → Neuquén sigue siendo
+  // un solo recorrido aunque haya parado en el camino.
+  function buildJourneys(tripsByDevice, zoneAt, breakHours, minStopMin) {
     const breakMs = breakHours * 3600000;
+    const minStopMs = (minStopMin != null ? minStopMin : 20) * 60000;
     const journeys = [];
     for (const [deviceId, trips] of tripsByDevice) {
       let prevStop = null;
@@ -105,14 +109,17 @@
           };
         }
         cur.e = t.e; cur.km += t.km; cur.dh += t.dh; cur.ih += t.ih; cur.n++;
-        const dz = zoneAt(t.x, t.y);
         const next = trips[i + 1];
-        const longStop = !next || next.s - t.e > breakMs;
+        const stopMs = next ? next.s - t.e : Infinity;
+        const zoneHit = zoneAt(t.x, t.y);
+        const dz = zoneHit && stopMs >= minStopMs ? zoneHit : null;
+        const longStop = stopMs > breakMs;
         if (dz || longStop) {
-          cur.dest = dz ? dz.id : "_none";
-          cur.destName = dz ? dz.name : "Sin zona";
+          const endZone = dz || zoneHit;
+          cur.dest = endZone ? endZone.id : "_none";
+          cur.destName = endZone ? endZone.name : "Sin zona";
           cur.open = !dz && !next;
-          cur.internal = !!dz && dz.id === cur.o;
+          cur.internal = !!endZone && endZone.id === cur.o;
           journeys.push(cur);
           cur = null;
         }
@@ -161,13 +168,14 @@
 
   // ---------- Construcción del modelo ----------
   function emptyCell() {
-    return { km: 0, dh: 0, ih: 0, fuel: 0, kmFuel: 0, idleL: 0, idleMeasured: 0, idleCost: 0, fuelCost: 0, ev: {}, w: 0, n: 0 };
+    return { km: 0, dh: 0, ih: 0, fuel: 0, kmFuel: 0, idleL: 0, idleMeasured: 0, idleCost: 0, fuelCost: 0, ev: {}, er: {}, w: 0, n: 0 };
   }
 
   function addCell(a, b) {
     a.km += b.km; a.dh += b.dh; a.ih += b.ih; a.fuel += b.fuel; a.kmFuel += b.kmFuel;
     a.idleL += b.idleL; a.idleMeasured += b.idleMeasured; a.idleCost += b.idleCost; a.fuelCost += b.fuelCost; a.w += b.w; a.n += b.n;
     for (const k in b.ev) a.ev[k] = (a.ev[k] || 0) + b.ev[k];
+    for (const k in b.er) a.er[k] = (a.er[k] || 0) + b.er[k];
     return a;
   }
 
@@ -188,6 +196,7 @@
       weighted: c.w,
       risk: c.km > 0 ? (c.w / c.km) * 100 : null,
       evByCat: c.ev,
+      evByRule: c.er,
     };
   }
 
@@ -203,7 +212,9 @@
       && (!scope || deviceInGroups(d, scope)));
     const devById = new Map(devices.map(d => [d.id, d]));
     const driverName = new Map(cat.drivers.map(u => [u.id, u.name]));
-    const zoneAt = makeZoneLocator(cat.zones || []);
+    // Solo cuentan para recorridos las zonas de los tipos elegidos (vacío = todas).
+    const ztypes = new Set((settings.journeys && settings.journeys.zone_type_ids) || []);
+    const zoneAt = makeZoneLocator((cat.zones || []).filter(z => !ztypes.size || (z.types || []).some(t => ztypes.has(t))));
 
     // Tipo de vehículo
     const vtypes = settings.vehicle_types.map(vt => ({ ...vt, set: gr.expand(vt.groupIds) }));
@@ -233,7 +244,7 @@
     }
     for (const arr of tripsByDevice.values()) arr.sort((a, b) => a.s - b.s);
 
-    const journeys = buildJourneys(tripsByDevice, zoneAt, settings.journeys.break_hours);
+    const journeys = buildJourneys(tripsByDevice, zoneAt, settings.journeys.break_hours, settings.journeys.min_stop_minutes);
     const journeysByDevice = GI.groupBy(journeys, j => j.d);
 
     // Tipo de servicio: grupo > automático por km mediano de recorrido
@@ -331,9 +342,11 @@
       events.push(e);
       const c = cell(ev.d, dk);
       c.ev[catKey] = (c.ev[catKey] || 0) + 1;
+      c.er[ev.rule] = (c.er[ev.rule] || 0) + 1;
       if (w > 0) { c.w += w; c.n += 1; }
       const dc = drvCell(drv, ev.d, dk);
       dc.ev[catKey] = (dc.ev[catKey] || 0) + 1;
+      dc.er[ev.rule] = (dc.er[ev.rule] || 0) + 1;
       if (w > 0) { dc.w += w; dc.n += 1; }
       if (j) { j.w = (j.w || 0) + w; j.nEv = (j.nEv || 0) + (w > 0 ? 1 : 0); }
     }
@@ -562,6 +575,53 @@
     };
   }
 
+  // ---------- Proyección ----------
+  // Tendencia lineal (mínimos cuadrados) sobre los últimos períodos
+  // completos. Devuelve la pendiente por período, el valor actual estimado y
+  // la proyección "horizon" períodos hacia adelante (nunca negativa).
+  function linearTrend(values, maxPoints) {
+    const pts = [];
+    values.forEach((v, i) => { if (v != null && !Number.isNaN(v)) pts.push([i, v]); });
+    const use = pts.slice(-(maxPoints || 8));
+    if (use.length < 3) return null;
+    const n = use.length;
+    const mx = GI.sum(use, p => p[0]) / n, my = GI.sum(use, p => p[1]) / n;
+    const sxx = GI.sum(use, p => (p[0] - mx) ** 2);
+    if (!sxx) return null;
+    const slope = GI.sum(use, p => (p[0] - mx) * (p[1] - my)) / sxx;
+    const lastX = use[n - 1][0];
+    const fit = x => Math.max(0, my + slope * (x - mx));
+    const current = fit(lastX);
+    const resid = Math.sqrt(GI.sum(use, p => (p[1] - fit(p[0])) ** 2) / Math.max(1, n - 2));
+    return {
+      slope, current, mean: my, points: n,
+      slopePct: my > 0 ? (slope / my) * 100 : null,
+      at: h => fit(lastX + h),
+      noise: resid,
+      // Cuántos períodos faltan para cruzar un umbral (si la tendencia sube).
+      periodsTo: target => (slope > 0 && current < target ? Math.ceil((target - current) / slope) : null),
+    };
+  }
+
+  // Serie de tasa (eventos cada 100 km) por período para un conjunto de
+  // celdas filtradas (por regla, categoría o conductor).
+  function rateSeries(model, deviceIds, gran, pickEvents, cellsSource) {
+    const buckets = new Map();
+    for (const dk of model.dayKeys) {
+      const bk = GI.bucketKey(dk, gran);
+      if (!buckets.has(bk)) buckets.set(bk, { km: 0, n: 0, days: 0 });
+      buckets.get(bk).days++;
+    }
+    const add = (dk, c) => { const b = buckets.get(GI.bucketKey(dk, gran)); if (b) { b.km += c.km; b.n += pickEvents(c); } };
+    if (cellsSource) {
+      for (const [ck, c] of cellsSource) { const [dev, dk] = ck.split("|"); if (deviceIds.has(dev)) add(dk, c); }
+    } else {
+      for (const dev of deviceIds) { const m = model.dd.get(dev); if (m) for (const [dk, c] of m) add(dk, c); }
+    }
+    const expected = bk => (gran === "day" ? 1 : gran === "week" ? 7 : new Date(+bk.slice(0, 4), +bk.slice(5, 7), 0).getDate());
+    return [...buckets.entries()].map(([bk, b]) => ({ key: bk, km: b.km, n: b.n, partial: b.days < expected(bk), rate: b.km > 0 ? (b.n / b.km) * 100 : null }));
+  }
+
   // ---------- Hallazgos ----------
   function findings(model, deviceIds, vRows, dRows) {
     const out = [];
@@ -651,6 +711,6 @@
   Object.assign(GI, {
     makeGroupResolver, pointInPolygon, makeZoneLocator, buildJourneys, counterDeltas,
     buildModel, filterDevices, aggregate, series, kpis, vehicleRows, driverRows, routeRows, profileRows,
-    milestoneImpact, findings, savings, targetFor, deviceInGroups,
+    milestoneImpact, findings, savings, linearTrend, rateSeries, targetFor, deviceInGroups,
   });
 })(window.GI);

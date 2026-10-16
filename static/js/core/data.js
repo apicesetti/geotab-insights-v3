@@ -127,20 +127,32 @@
     return [x0, y0, x1, y1];
   }
 
+  // Tipos de zona (para elegir cuáles cuentan en los recorridos).
+  const BUILTIN_ZONE_TYPES = [
+    { id: "ZoneTypeCustomerId", name: "Cliente" }, { id: "ZoneTypeOfficeId", name: "Oficina" }, { id: "ZoneTypeHomeId", name: "Casa" },
+  ];
+  async function loadZoneTypes(api) {
+    let list = [];
+    try { list = (await api.call("Get", { typeName: "ZoneType" })) || []; } catch (e) { list = []; }
+    const out = list.map(t => ({ id: t.id, name: t.name || t.id }));
+    for (const b of BUILTIN_ZONE_TYPES) if (!out.some(t => t.id === b.id)) out.unshift(b);
+    return out;
+  }
+
   async function loadZones(api, database, area) {
     const r = v => Math.round(v * 2) / 2;
     const box = area ? { left: r(area[0]) - 0.5, bottom: r(area[1]) - 0.5, right: r(area[2]) + 0.5, top: r(area[3]) + 0.5 } : null;
-    const k = database + "|zones|" + (box ? [box.left, box.bottom, box.right, box.top].join(",") : "all");
+    const k = database + "|zones2|" + (box ? [box.left, box.bottom, box.right, box.top].join(",") : "all");
     const hit = (await idbGetMany("meta", [k])).get(k);
     if (hit && Date.now() - hit.at < CATALOG_TTL_MS) return hit.v;
-    const fields = { propertySelector: { fields: ["id", "name", "points"], isIncluded: true } };
+    const fields = { propertySelector: { fields: ["id", "name", "points", "zoneTypes"], isIncluded: true } };
     const search = box ? { search: { searchArea: box } } : {};
     let raw;
     try { raw = await api.call("Get", { typeName: "Zone", resultsLimit: 50000, ...search, ...fields }); }
     catch (e) { raw = await api.call("Get", { typeName: "Zone", resultsLimit: 50000, ...search }); }
     const v = (raw || []).filter(z => (z.points || []).length >= 3).map(z => {
       const pts = z.points.map(p => [p.x, p.y]);
-      return { id: z.id, name: z.name || z.id, pts, bbox: zoneBbox(pts) };
+      return { id: z.id, name: z.name || z.id, pts, bbox: zoneBbox(pts), types: (z.zoneTypes || []).map(GI.idOf).filter(Boolean) };
     });
     await idbPutMany("meta", [{ k, v, at: Date.now() }]);
     return v;
@@ -444,7 +456,7 @@
   }
 
   Object.assign(GI, {
-    loadCatalogs, loadZones, loadPeriod, loadFuel, loadEventLocations, clearCache,
+    loadCatalogs, loadZones, loadZoneTypes, loadPeriod, loadFuel, loadEventLocations, clearCache,
     _compactTrips: compactTrips, _compactExceptions: compactExceptions, _compactCounter: compactCounter, _missingRuns: missingRuns,
   });
 })(window.GI);

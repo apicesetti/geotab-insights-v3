@@ -40,9 +40,13 @@ const zones = [
 const cat = { groups, devices, rules, drivers: [{ id: "u1", name: "Juan" }, { id: "u2", name: "Pedro" }], zones };
 
 const settings = GI.defaultSettings(groups, rules);
-assert.strictEqual(settings.rule_mapping.RuleSeatbeltId, "cinturon");
-assert.strictEqual(settings.rule_mapping.aX, "telefono");
-assert.ok(!settings.rule_mapping.aD && !settings.rule_mapping.aT, "dummy/test rules excluded");
+// Las reglas ya no se asignan solas: arrancan vacías y se sugieren.
+assert.strictEqual(Object.keys(settings.rule_mapping).length, 0);
+assert.strictEqual(GI.suggestCategory(rules[0]), "cinturon");
+assert.strictEqual(GI.suggestCategory(rules[2]), "telefono");
+assert.ok(GI.isNoiseRule(rules[3]) && GI.isNoiseRule(rules[4]), "dummy/test rules are noise");
+settings.rule_mapping = { RuleSeatbeltId: "cinturon", aX: "telefono", RuleIdlingId: "ralenti" };
+assert.strictEqual(GI.riskRuleIds(settings.rule_mapping).sort().join(), "RuleSeatbeltId,aX");
 assert.deepStrictEqual(settings.excluded_group_ids, ["gOut"]);
 assert.deepStrictEqual(settings.service.group_ids.larga, ["gL"]);
 assert.deepStrictEqual(settings.vehicle_types.find(v => v.key === "bitren").groupIds, ["gB"]);
@@ -136,4 +140,26 @@ console.log("savings", GI.savings(vr, 1000));
 assert.strictEqual(GI.bucketKey("2026-09-03", "week"), "2026-08-31");
 assert.strictEqual(GI.durationToHours("1.02:00:00"), 26);
 assert.strictEqual(GI.durationToHours("00:11:42.0300000").toFixed(4), (11 / 60 + 42.03 / 3600).toFixed(4));
+// Parada corta en una zona intermedia no corta el recorrido
+{
+  const zs = [{ id: "zA", name: "A", pts: sq(0, 0, 1), bbox: [0, 0, 1, 1] }, { id: "zM", name: "M", pts: sq(5, 5, 1), bbox: [5, 5, 6, 6] }, { id: "zB", name: "B", pts: sq(10, 10, 1), bbox: [10, 10, 11, 11] }];
+  const zoneAt = GI.makeZoneLocator(zs);
+  const t0 = Date.UTC(2026, 8, 1, 10);
+  const tr = [
+    { s: t0 - 3600000, e: t0 - 3000000, km: 1, dh: .1, ih: 0, x: .5, y: .5 },             // termina en A
+    { s: t0, e: t0 + 3600000, km: 100, dh: 1, ih: 0, x: 5.5, y: 5.5 },                       // llega a M
+    { s: t0 + 3600000 + 5 * 60000, e: t0 + 7200000, km: 100, dh: 1, ih: 0, x: 10.5, y: 10.5 }, // 5 min en M y sigue a B
+  ];
+  const js = GI.buildJourneys(new Map([["d", tr]]), zoneAt, 10, 20);
+  const main = js.find(j => j.km >= 200);
+  assert.ok(main, "A→B en un solo recorrido");
+  assert.strictEqual(main.oName + "→" + main.destName, "A→B");
+  const js2 = GI.buildJourneys(new Map([["d", tr]]), zoneAt, 10, 2);
+  assert.ok(js2.some(j => j.destName === "M"), "con mínimo 2 min sí corta en M");
+}
+// Tendencia lineal
+{
+  const t = GI.linearTrend([1, 2, 3, 4, 5]);
+  assert.ok(Math.abs(t.slope - 1) < 1e-9 && Math.abs(t.at(2) - 7) < 1e-9 && t.periodsTo(8) === 3);
+}
 console.log("OK");

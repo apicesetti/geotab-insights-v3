@@ -32,7 +32,7 @@
     { id: "zPto", name: "Puerto Buenos Aires", c: [-58.37, -34.58] },
     { id: "zCba", name: "Planta Córdoba", c: [-64.18, -31.42] },
     { id: "zRos", name: "Terminal Rosario", c: [-60.64, -32.95] },
-  ].map(z => ({ id: z.id, name: z.name, c: z.c, points: [[-.02, -.02], [.02, -.02], [.02, .02], [-.02, .02]].map(([dx, dy]) => ({ x: z.c[0] + dx, y: z.c[1] + dy })) }));
+  ].map(z => ({ id: z.id, name: z.name, c: z.c, zoneTypes: [{ id: z.id === "zCam" ? "ZoneTypeOfficeId" : "ZoneTypeCustomerId" }], points: [[-.02, -.02], [.02, -.02], [.02, .02], [-.02, .02]].map(([dx, dy]) => ({ x: z.c[0] + dx, y: z.c[1] + dy })) }));
   const zc = Object.fromEntries(zones.map(z => [z.id, z.c]));
 
   const rules = [
@@ -164,6 +164,7 @@
         case "Rule": out = rules; break;
         case "User": out = s.name ? [{ id: "admin", name: s.name, securityGroups: [{ id: "GroupEverythingSecurityId" }] }] : drivers; break;
         case "Zone": out = zones; break;
+        case "ZoneType": out = [{ id: "ztPuerto", name: "Puerto" }]; break;
         case "Trip": out = trips.filter(t => inRange(t.start, s) && inGroups(t.device, s)); break;
         case "ExceptionEvent": out = exceptions.filter(e => inRange(e.activeFrom, s) && inGroups(e.device, s) && (!s.ruleSearch || e.rule.id === s.ruleSearch.id)); break;
         case "StatusData": out = status.filter(r => inRange(r.dateTime, s) && inGroups(r.device, s) && (!s.diagnosticSearch || r.diagnostic.id === s.diagnosticSearch.id)); break;

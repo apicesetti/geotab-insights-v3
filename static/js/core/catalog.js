@@ -3,36 +3,56 @@
 (function (GI) {
   "use strict";
 
-  // kind: "riesgo" suma al índice de riesgo; "operativo" no (ralentí, desvío
-  // de ruta, tiempos en zona...). weight: peso por defecto en el índice.
-  const CATEGORIES = [
-    { key: "velocidad", label: "Exceso de velocidad", kind: "riesgo", weight: 1.5, color: "#2a78d6" },
-    { key: "frenado_brusco", label: "Frenado brusco", kind: "riesgo", weight: 1.3, color: "#e87ba4" },
-    { key: "aceleracion_brusca", label: "Aceleración brusca", kind: "riesgo", weight: 1.2, color: "#008300" },
-    { key: "giro_brusco", label: "Giro brusco", kind: "riesgo", weight: 1.2, color: "#6250d6" },
-    { key: "cinturon", label: "Cinturón de seguridad", kind: "riesgo", weight: 1.5, color: "#eb6834" },
-    { key: "telefono", label: "Uso de celular", kind: "riesgo", weight: 1.6, color: "#1baf7a" },
-    { key: "distraccion", label: "Distracción", kind: "riesgo", weight: 1.4, color: "#eda100" },
-    { key: "fatiga", label: "Fatiga / bostezo", kind: "riesgo", weight: 1.5, color: "#9a9893" },
-    { key: "colision", label: "Colisión / casi colisión", kind: "riesgo", weight: 2.0, color: "#e34948" },
-    { key: "distancia", label: "Conducción cercana (distancia)", kind: "riesgo", weight: 1.4, color: "#9a9893" },
-    { key: "salida_carril", label: "Salida de carril / doble línea", kind: "riesgo", weight: 1.3, color: "#9a9893" },
-    { key: "fumar_comer", label: "Fumar / comer / beber", kind: "riesgo", weight: 0.8, color: "#9a9893" },
-    { key: "reversa", label: "Marcha atrás", kind: "riesgo", weight: 0.6, color: "#9a9893" },
-    { key: "camara", label: "Cámara obstruida / manipulada", kind: "riesgo", weight: 1.0, color: "#9a9893" },
-    { key: "ralenti", label: "Ralentí", kind: "operativo", weight: 0, color: "#9a9893" },
-    { key: "operativo", label: "Otro operativo (ruta, zonas, horario)", kind: "operativo", weight: 0, color: "#9a9893" },
+  // Categorías por defecto. Son editables (Configuración → Categorías): se
+  // pueden renombrar, agregar o quitar. kind: "riesgo" suma al índice de
+  // riesgo y se muestra en Seguridad; "operativo" no.
+  const DEFAULT_CATEGORIES = [
+    { key: "velocidad", label: "Exceso de velocidad", kind: "riesgo", weight: 1.5 },
+    { key: "cinturon", label: "Cinturón de seguridad", kind: "riesgo", weight: 1.5 },
+    { key: "telefono", label: "Uso de celular", kind: "riesgo", weight: 1.6 },
+    { key: "distraccion", label: "Distracción", kind: "riesgo", weight: 1.4 },
+    { key: "frenado_brusco", label: "Frenado brusco", kind: "riesgo", weight: 1.3 },
+    { key: "aceleracion_brusca", label: "Aceleración brusca", kind: "riesgo", weight: 1.2 },
+    { key: "giro_brusco", label: "Giro brusco", kind: "riesgo", weight: 1.2 },
+    { key: "colision", label: "Colisión / casi colisión", kind: "riesgo", weight: 2.0 },
+    { key: "distancia", label: "Conducción cercana (distancia)", kind: "riesgo", weight: 1.4 },
+    { key: "fatiga", label: "Fatiga / bostezo", kind: "riesgo", weight: 1.5 },
+    { key: "salida_carril", label: "Salida de carril / doble línea", kind: "riesgo", weight: 1.3 },
+    { key: "fumar_comer", label: "Fumar / comer / beber", kind: "riesgo", weight: 0.8 },
+    { key: "reversa", label: "Marcha atrás", kind: "riesgo", weight: 0.6 },
+    { key: "camara", label: "Cámara obstruida / manipulada", kind: "riesgo", weight: 1.0 },
+    { key: "ralenti", label: "Ralentí", kind: "operativo", weight: 0 },
+    { key: "operativo", label: "Otro operativo (ruta, zonas, horario)", kind: "operativo", weight: 0 },
   ];
-  const CATEGORY_BY_KEY = Object.fromEntries(CATEGORIES.map(c => [c.key, c]));
 
   // Colores de gráficos: paleta categórica validada para daltonismo (8
-  // tonos), asignada FIJA a las 8 infracciones principales en este orden (el
-  // orden es parte de la validación: tonos vecinos en una pila se
-  // distinguen). El resto se agrupa como "Otras" en gris.
-  const CHART_SLOTS = ["velocidad", "cinturon", "telefono", "distraccion", "frenado_brusco", "aceleracion_brusca", "giro_brusco", "colision"];
+  // tonos, en este orden: tonos vecinos en una pila se distinguen). Se asigna
+  // a las primeras 8 categorías de riesgo según el orden de la configuración;
+  // el resto se agrupa como "Otras" en gris.
+  const PALETTE = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"];
   const OTHER_COLOR = "#9a9893";
-  // Paleta para series que no son categorías (tipos de vehículo, etc.).
-  const SERIES_COLORS = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"];
+  const SERIES_COLORS = PALETTE;
+
+  // Estado vivo (se reemplaza en el lugar con applyCategories).
+  const CATEGORIES = [];
+  const CATEGORY_BY_KEY = {};
+  const CHART_SLOTS = [];
+
+  function applyCategories(list) {
+    const src = list && list.length ? list : DEFAULT_CATEGORIES;
+    CATEGORIES.length = 0;
+    CHART_SLOTS.length = 0;
+    for (const k of Object.keys(CATEGORY_BY_KEY)) delete CATEGORY_BY_KEY[k];
+    let slot = 0;
+    for (const c of src) {
+      const color = c.kind === "riesgo" && slot < PALETTE.length ? PALETTE[slot] : OTHER_COLOR;
+      if (c.kind === "riesgo" && slot < PALETTE.length) { CHART_SLOTS.push(c.key); slot++; }
+      const cat = { key: c.key, label: c.label, kind: c.kind, weight: c.weight != null ? c.weight : 1, color };
+      CATEGORIES.push(cat);
+      CATEGORY_BY_KEY[c.key] = cat;
+    }
+  }
+  applyCategories(DEFAULT_CATEGORIES);
 
   // Reglas stock de Geotab -> categoría.
   const STOCK_RULES = {
@@ -78,9 +98,10 @@
   const NOISE_STOCK_IDS = new Set(["RuleApplicationExceptionId", "RuleRoadCameraAdjustmentRequiredId"]);
 
   function suggestCategory(rule) {
-    if (STOCK_RULES[rule.id]) return STOCK_RULES[rule.id];
+    const ok = k => (k && CATEGORY_BY_KEY[k] ? k : null);
+    if (STOCK_RULES[rule.id]) return ok(STOCK_RULES[rule.id]);
     const name = rule.name || "";
-    for (const [re, cat] of NAME_PATTERNS) if (re.test(name)) return cat;
+    for (const [re, cat] of NAME_PATTERNS) if (re.test(name)) return ok(cat);
     return null;
   }
 
@@ -152,21 +173,17 @@
 
   function defaultSettings(groups, rules) {
     const vehicleTypes = defaultVehicleTypes(groups);
+    // Las reglas arrancan sin categoría: las asigna el administrador. Las
+    // sugerencias se muestran como ayuda en Configuración → Reglas.
     const ruleMapping = {};
-    for (const r of rules) {
-      if (isNoiseRule(r)) continue;
-      const cat = suggestCategory(r);
-      // Solo se sugieren infracciones. Ralentí y eventos operativos no hacen
-      // falta (el ralentí sale de los viajes) y en flotas grandes son la
-      // mayoría del volumen.
-      if (cat && CATEGORY_BY_KEY[cat].kind === "riesgo") ruleMapping[r.id] = cat;
-    }
     const excluded = groups.filter(g => /fuera de servicio|baja|inactiv|prueba|test/i.test(g.name || "")).map(g => g.id);
     return {
       version: 3,
       configured: false,
       rule_mapping: ruleMapping,
-      category_weights: Object.fromEntries(CATEGORIES.map(c => [c.key, c.weight])),
+      categories: DEFAULT_CATEGORIES.map(c => ({ key: c.key, label: c.label, kind: c.kind })),
+      category_weights: Object.fromEntries(DEFAULT_CATEGORIES.map(c => [c.key, c.weight])),
+      rule_targets: {},
       scope_group_ids: [],
       excluded_group_ids: excluded,
       vehicle_types: vehicleTypes,
@@ -177,7 +194,7 @@
       },
       profile_targets: defaultProfileTargets(vehicleTypes),
       fuel: { price_per_liter: 0, currency: "ARS", tolerance_pct: 10, types: defaultFuelTypes(groups), default_type: "diesel" },
-      journeys: { break_hours: 10, min_km_route: 300, min_journeys_route: 3 },
+      journeys: { break_hours: 10, min_km_route: 300, min_journeys_route: 3, min_stop_minutes: 20, zone_type_ids: [] },
       drivers: { min_km_ranking: 300 },
       ui: { default_days: 90, default_granularity: "week", milestone_window_days: 28 },
       editors: [],
@@ -185,7 +202,7 @@
   }
 
   Object.assign(GI, {
-    CATEGORIES, CATEGORY_BY_KEY, CHART_SLOTS, OTHER_COLOR, SERIES_COLORS, STOCK_RULES, SERVICE_TYPES,
+    CATEGORIES, CATEGORY_BY_KEY, CHART_SLOTS, OTHER_COLOR, SERIES_COLORS, DEFAULT_CATEGORIES, applyCategories, STOCK_RULES, SERVICE_TYPES,
     suggestCategory, isNoiseRule, riskRuleIds, defaultFuelTypes, FUEL_SYSTEM_GROUPS, defaultSettings, defaultProfileTargets, profileKey,
   });
 })(window.GI);
