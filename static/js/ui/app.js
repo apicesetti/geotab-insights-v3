@@ -163,7 +163,7 @@
       </header>
       ${loading != null ? html`<${Progress} value=${loading} label=${raw ? "Actualizando datos…" : "Descargando datos (la primera vez tarda más; después queda en caché)…"} />` : null}
       <nav className="tabs">${TABS.map(([k, l]) => html`<button key=${k} className=${tab === k ? "on" : ""} onClick=${() => setTab(k)}>${l}</button>`)}</nav>
-      <main>
+      <div className="gi-main">
         ${error ? html`<${Info} tone="error">${error}<//>` : null}
         ${tab === "config" ? html`<${GI.ConfigTab} api=${api} settings=${settings} catalogs=${catalogs} groups=${groupsFlat}
             model=${model} isAdmin=${isAdmin} userName=${userName} onSave=${saveSettings} />`
@@ -179,7 +179,7 @@
               onDelete=${async id => { await GI.removeMilestone(api, id); setMilestones(ms => ms.filter(x => x.id !== id)); }} />`
           : null}
         ${raw ? html`<footer className="foot">${GI.fmtNum(raw.trips.length)} viajes · ${GI.fmtNum(raw.exceptions.length)} eventos · datos ${period.from} a ${period.to} · cargado en ${GI.fmtNum(raw.loadedMs / 1000, 1)} s</footer>` : null}
-      </main>
+      </div>
       ${detail && view && detail.type === "v" ? html`<${GI.VehicleDetail} view=${view} id=${detail.id} onClose=${() => setDetail(null)} />` : null}
       ${detail && view && detail.type === "d" ? html`<${GI.DriverDetail} view=${view} id=${detail.id} onClose=${() => setDetail(null)} />` : null}
     </div>`;
@@ -200,7 +200,7 @@
       initialize: function (api, state, done) {
         api.getSession(function (credentials, server) {
           if (!root) {
-            root = ReactDOM.createRoot(document.getElementById("root"));
+            root = ReactDOM.createRoot(document.getElementById("gi3-root"));
             root.render(html`<${App} api=${GI.wrapApi(api)} database=${credentials.database} userName=${credentials.userName} />`);
           }
           done();
