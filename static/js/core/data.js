@@ -81,43 +81,69 @@
     });
   }
 
-  // ---------- Catálogos (Device, Group, Rule, User, Zone) ----------
-  async function cachedCatalog(api, database, typeName, params, force) {
-    const k = database + "|cat|" + typeName;
+  // ---------- Catálogos (Device, Group, Rule, User) ----------
+  // Se piden solo los campos necesarios (propertySelector) y se guarda en
+  // caché la versión compacta: en bases grandes (miles de usuarios) el objeto
+  // completo pesa decenas de MB.
+  async function cachedCatalog(api, database, typeName, params, fields, compact, force) {
+    const k = database + "|cat2|" + typeName;
     if (!force) {
       const hit = (await idbGetMany("meta", [k])).get(k);
       if (hit && Date.now() - hit.at < CATALOG_TTL_MS) return hit.v;
     }
-    const v = (await api.call("Get", { typeName, ...(params || {}) })) || [];
+    const base = { typeName, ...(params || {}) };
+    let raw;
+    try {
+      raw = await api.call("Get", fields ? { ...base, propertySelector: { fields, isIncluded: true } } : base);
+    } catch (e) {
+      if (!fields) throw e;
+      raw = await api.call("Get", base);
+    }
+    const v = (raw || []).map(compact);
     await idbPutMany("meta", [{ k, v, at: Date.now() }]);
     return v;
   }
 
   async function loadCatalogs(api, database, force) {
-    const [groups, devices, rules, users, zones] = await Promise.all([
-      cachedCatalog(api, database, "Group", null, force),
-      cachedCatalog(api, database, "Device", null, force),
-      cachedCatalog(api, database, "Rule", null, force),
-      cachedCatalog(api, database, "User", { search: { isDriver: true } }, force).catch(() => []),
-      cachedCatalog(api, database, "Zone", null, force).catch(() => []),
+    const [groups, devices, rules, drivers] = await Promise.all([
+      cachedCatalog(api, database, "Group", null, ["id", "name", "children"],
+        g => ({ id: g.id, name: g.name || g.id, children: (g.children || []).map(GI.idOf) }), force),
+      cachedCatalog(api, database, "Device", null, ["id", "name", "serialNumber", "groups"],
+        d => ({ id: d.id, name: d.name || d.id, serial: d.serialNumber || "", groups: (d.groups || []).map(GI.idOf) }), force),
+      cachedCatalog(api, database, "Rule", null, ["id", "name", "baseType"],
+        r => ({ id: r.id, name: r.name || r.id, baseType: r.baseType }), force),
+      cachedCatalog(api, database, "User", { search: { isDriver: true } }, ["id", "name", "firstName", "lastName"],
+        u => ({ id: u.id, name: [u.firstName, u.lastName].filter(Boolean).join(" ").trim() || u.name || u.id, login: u.name || "" }), force).catch(() => []),
     ]);
-    return {
-      groups: groups.map(g => ({ id: g.id, name: g.name || g.id, children: (g.children || []).map(GI.idOf) })),
-      devices: devices.map(d => ({ id: d.id, name: d.name || d.id, serial: d.serialNumber || "", groups: (d.groups || []).map(GI.idOf) })),
-      rules: rules.map(r => ({ id: r.id, name: r.name || r.id, baseType: r.baseType })),
-      drivers: users.map(u => ({
-        id: u.id,
-        name: [u.firstName, u.lastName].filter(Boolean).join(" ").trim() || u.name || u.id,
-        login: u.name || "",
-      })),
-      zones: zones
-        .filter(z => (z.points || []).length >= 3)
-        .map(z => {
-          const pts = z.points.map(p => [p.x, p.y]);
-          const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
-          return { id: z.id, name: z.name || z.id, pts, bbox: [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)] };
-        }),
-    };
+    return { groups, devices, rules, drivers, zones: null };
+  }
+
+  // ---------- Zonas (para recorridos) ----------
+  // Hay bases con decenas de miles de zonas: se piden solo las del área donde
+  // anduvieron los vehículos (searchArea) y después de mostrar el tablero.
+  function zoneBbox(points) {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const p of points) { if (p[0] < x0) x0 = p[0]; if (p[0] > x1) x1 = p[0]; if (p[1] < y0) y0 = p[1]; if (p[1] > y1) y1 = p[1]; }
+    return [x0, y0, x1, y1];
+  }
+
+  async function loadZones(api, database, area) {
+    const r = v => Math.round(v * 2) / 2;
+    const box = area ? { left: r(area[0]) - 0.5, bottom: r(area[1]) - 0.5, right: r(area[2]) + 0.5, top: r(area[3]) + 0.5 } : null;
+    const k = database + "|zones|" + (box ? [box.left, box.bottom, box.right, box.top].join(",") : "all");
+    const hit = (await idbGetMany("meta", [k])).get(k);
+    if (hit && Date.now() - hit.at < CATALOG_TTL_MS) return hit.v;
+    const fields = { propertySelector: { fields: ["id", "name", "points"], isIncluded: true } };
+    const search = box ? { search: { searchArea: box } } : {};
+    let raw;
+    try { raw = await api.call("Get", { typeName: "Zone", resultsLimit: 50000, ...search, ...fields }); }
+    catch (e) { raw = await api.call("Get", { typeName: "Zone", resultsLimit: 50000, ...search }); }
+    const v = (raw || []).filter(z => (z.points || []).length >= 3).map(z => {
+      const pts = z.points.map(p => [p.x, p.y]);
+      return { id: z.id, name: z.name || z.id, pts, bbox: zoneBbox(pts) };
+    });
+    await idbPutMany("meta", [{ k, v, at: Date.now() }]);
+    return v;
   }
 
   // ---------- Fetch por rango con partición automática ----------
@@ -298,7 +324,10 @@
   // ruleIds: reglas mapeadas. Devuelve datos crudos compactados por día.
   // scopeGroupIds: si viene, la API filtra por esos grupos (deviceSearch) y
   // la caché se guarda aparte para ese alcance. Clave en flotas grandes.
-  async function loadPeriod(api, database, fromKey, toKey, ruleIds, onProgress, scopeGroupIds) {
+  // opts.withFuel = false: no espera el combustible (se carga aparte con
+  // loadFuel), así el tablero aparece con viajes e infracciones primero.
+  async function loadPeriod(api, database, fromKey, toKey, ruleIds, onProgress, scopeGroupIds, opts) {
+    const withFuel = !opts || opts.withFuel !== false;
     const dayKeys = GI.dayRange(fromKey, toKey);
     const scopeIds = (scopeGroupIds || []).filter(Boolean).slice().sort();
     const scopeKey = scopeIds.length ? "|g:" + scopeIds.join(",") : "";
@@ -320,19 +349,19 @@
       dateOf: r => new Date(r.dateTime), compact: compactCounter,
     }));
 
-    const steps = { trip: [0, 1], exc: [0, 1], fuel: [0, 1] };
+    const steps = { trip: [0, 1], exc: [0, excDs.length ? 1 : 0], fuel: [0, withFuel ? 1 : 0] };
     const report = () => {
       if (!onProgress) return;
       const done = steps.trip[0] + steps.exc[0] + steps.fuel[0];
       const total = steps.trip[1] + steps.exc[1] + steps.fuel[1];
-      onProgress(total ? done / total : 1);
+      onProgress(total ? done / total : 1, steps);
     };
     const prog = name => (d, t) => { steps[name] = [d, t || 0]; report(); };
 
     const [trips, exc, fuel] = await Promise.all([
       fetchDaily(api, database, tripsDs, dayKeys, prog("trip")),
       excDs.length ? fetchDaily(api, database, excDs, dayKeys, prog("exc")) : Promise.resolve({}),
-      fetchDaily(api, database, fuelDs, fuelDays, prog("fuel")).catch(() => ({})),
+      withFuel ? fetchDaily(api, database, fuelDs, fuelDays, prog("fuel")).catch(() => ({})) : Promise.resolve({}),
     ]);
 
     const exceptions = [];
@@ -351,6 +380,24 @@
       fuelDaily: fuel["sd:" + FUEL_DIAG + scopeKey] || new Map(),
       idleFuelDaily: fuel["sd:" + IDLE_FUEL_DIAG + scopeKey] || new Map(),
       scopeGroupIds: scopeIds,
+      fuelDays,
+      fuelPending: !withFuel,
+    };
+  }
+
+  async function loadFuel(api, database, fromKey, toKey, scopeGroupIds, onProgress) {
+    const scopeIds = (scopeGroupIds || []).filter(Boolean).slice().sort();
+    const scopeKey = scopeIds.length ? "|g:" + scopeIds.join(",") : "";
+    const devSearch = scopeIds.length ? { deviceSearch: { groups: scopeIds.map(id => ({ id })) } } : {};
+    const fuelDays = GI.dayRange(GI.dayKey(GI.addDays(GI.parseDayKey(fromKey), -3)), toKey);
+    const fuelDs = [FUEL_DIAG, IDLE_FUEL_DIAG].map(diag => ({
+      scope: "sd:" + diag + scopeKey, typeName: "StatusData", search: { diagnosticSearch: { id: diag }, ...devSearch },
+      dateOf: r => new Date(r.dateTime), compact: compactCounter,
+    }));
+    const fuel = await fetchDaily(api, database, fuelDs, fuelDays, (d, t) => onProgress && onProgress(t ? d / t : 1)).catch(() => ({}));
+    return {
+      fuelDaily: fuel["sd:" + FUEL_DIAG + scopeKey] || new Map(),
+      idleFuelDaily: fuel["sd:" + IDLE_FUEL_DIAG + scopeKey] || new Map(),
       fuelDays,
     };
   }
@@ -397,7 +444,7 @@
   }
 
   Object.assign(GI, {
-    loadCatalogs, loadPeriod, loadEventLocations, clearCache,
+    loadCatalogs, loadZones, loadPeriod, loadFuel, loadEventLocations, clearCache,
     _compactTrips: compactTrips, _compactExceptions: compactExceptions, _compactCounter: compactCounter, _missingRuns: missingRuns,
   });
 })(window.GI);

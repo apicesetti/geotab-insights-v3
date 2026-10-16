@@ -49,14 +49,29 @@
     return inside;
   }
 
+  // Índice en grilla de 0,25° para no recorrer miles de zonas por punto.
   function makeZoneLocator(zones) {
+    const CELL = 0.25;
+    const grid = new Map();
+    const big = [];
+    for (const z of zones || []) {
+      const b = z.bbox;
+      const cx0 = Math.floor(b[0] / CELL), cx1 = Math.floor(b[2] / CELL), cy0 = Math.floor(b[1] / CELL), cy1 = Math.floor(b[3] / CELL);
+      if ((cx1 - cx0 + 1) * (cy1 - cy0 + 1) > 64) { big.push(z); continue; }
+      for (let cx = cx0; cx <= cx1; cx++) for (let cy = cy0; cy <= cy1; cy++) {
+        const k = cx + ":" + cy;
+        if (!grid.has(k)) grid.set(k, []);
+        grid.get(k).push(z);
+      }
+    }
     const cache = new Map();
     return function zoneAt(x, y) {
       if (x == null || y == null) return null;
       const k = x.toFixed(4) + "," + y.toFixed(4);
       if (cache.has(k)) return cache.get(k);
       let found = null, foundArea = Infinity;
-      for (const z of zones) {
+      const cand = (grid.get(Math.floor(x / CELL) + ":" + Math.floor(y / CELL)) || []).concat(big);
+      for (const z of cand) {
         const b = z.bbox;
         if (x < b[0] || x > b[2] || y < b[1] || y > b[3]) continue;
         if (pointInPolygon(x, y, z.pts)) {
@@ -188,7 +203,7 @@
       && (!scope || deviceInGroups(d, scope)));
     const devById = new Map(devices.map(d => [d.id, d]));
     const driverName = new Map(cat.drivers.map(u => [u.id, u.name]));
-    const zoneAt = makeZoneLocator(cat.zones);
+    const zoneAt = makeZoneLocator(cat.zones || []);
 
     // Tipo de vehículo
     const vtypes = settings.vehicle_types.map(vt => ({ ...vt, set: gr.expand(vt.groupIds) }));

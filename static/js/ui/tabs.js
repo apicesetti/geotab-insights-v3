@@ -402,7 +402,8 @@
     const [showNoZone, setShowNoZone] = useState(false);
     const rows = view.rRows.filter(r => r.n >= s.min_journeys_route && r.km >= s.min_km_route && (showNoZone || !r.noZone));
     return html`<div>
-      ${!view.model.cat.zones.length ? html`<${Info} tone="warn">La base no tiene zonas cargadas, así que no se pueden armar recorridos de origen a destino. Cargá las zonas de depósitos, clientes y puertos en MyGeotab.<//>` : null}
+      ${view.model.cat.zones == null ? html`<${Info}>Cargando las zonas del área recorrida para armar los recorridos…<//>` : null}
+      ${view.model.cat.zones && !view.model.cat.zones.length ? html`<${Info} tone="warn">No hay zonas en el área recorrida, así que no se pueden armar recorridos de origen a destino. Cargá las zonas de depósitos, clientes y puertos en MyGeotab.<//>` : null}
       <${Panel} title="Recorridos con más infracciones por km"
         hint=${"Un recorrido va desde que el vehículo sale de una zona hasta que llega a otra (o hace una parada de más de " + s.break_hours + " h). Se muestran los que tienen al menos " + s.min_journeys_route + " recorridos y " + s.min_km_route + " km acumulados; se ajusta en Configuración → General."}
         actions=${html`<label className="inline"><input type="checkbox" checked=${showNoZone} onChange=${e => setShowNoZone(e.target.checked)} /> Incluir recorridos que empiezan o terminan fuera de una zona</label>`}>

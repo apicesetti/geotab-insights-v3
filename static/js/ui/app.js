@@ -52,6 +52,7 @@
     const [tab, setTab] = useState("resumen");
     const [detail, setDetail] = useState(null);
     const loadId = useRef(0);
+    const zonesAreaRef = useRef(false);
     const groupRef = useRef(GI._mgGroups || []);
     const [loadingLabel, setLoadingLabel] = useState("");
     const [largeFleet, setLargeFleet] = useState(false);
@@ -89,34 +90,64 @@
       const id = ++loadId.current;
       setLoading(0); setError(null);
       try {
-        if (force) await GI.loadCatalogs(api, database, true).then(c => { setCatalogs(c); cat = c; });
+        if (force) { zonesAreaRef.current = false; await GI.loadCatalogs(api, database, true).then(c => { setCatalogs(c); cat = c; }); }
         const ruleIds = GI.riskRuleIds(s.rule_mapping);
         const large = cat.devices.length > LARGE_FLEET;
         const scope = large && groupRef.current.length ? groupRef.current : s.scope_group_ids;
         const t0 = performance.now();
         const quickFrom = GI.dayKey(GI.addDays(GI.parseDayKey(p.to), -13));
-        const steps = quickFrom > p.from ? [{ from: quickFrom, label: "Cargando los últimos 14 días" }, { from: p.from, label: "Completando el historial; ya podés usar el tablero" }]
-          : [{ from: p.from, label: "Descargando datos" }];
+        const steps = quickFrom > p.from ? [{ from: quickFrom, label: "Viajes e infracciones de los últimos 14 días" }, { from: p.from, label: "Resto del período (ya podés usar el tablero)" }]
+          : [{ from: p.from, label: "Viajes e infracciones" }];
+        let last = null;
         for (const st of steps) {
           setLoadingLabel(st.label); setLoading(0);
-          const r = await GI.loadPeriod(api, database, st.from, p.to, ruleIds, v => { if (id === loadId.current) setLoading(v); }, scope);
+          const r = await GI.loadPeriod(api, database, st.from, p.to, ruleIds, v => { if (id === loadId.current) setLoading(v); }, scope, { withFuel: false });
           if (id !== loadId.current) return;
           r.loadedMs = performance.now() - t0;
           r.ruleIds = new Set(ruleIds);
           r.complete = st.from === p.from;
+          last = r;
           setRaw(r);
+          if (st === steps[0]) loadZonesFor(r, id);
         }
+        // Combustible al final: es lo más pesado y no bloquea el resto del tablero.
+        setLoadingLabel("Combustible"); setLoading(0);
+        const f = await GI.loadFuel(api, database, p.from, p.to, scope, v => { if (id === loadId.current) setLoading(v); });
+        if (id !== loadId.current) return;
+        setRaw({ ...last, ...f, fuelPending: false, loadedMs: performance.now() - t0 });
       } catch (e) {
         if (id === loadId.current) setError("Error consultando MyGeotab: " + (e.message || e));
       }
       if (id === loadId.current) setLoading(null);
     }
 
-    const model = useMemo(() => (raw && catalogs && settings ? GI.buildModel(raw, catalogs, settings) : null), [raw, catalogs, settings]);
+    // Zonas: solo las del área recorrida y después de mostrar el tablero.
+    async function loadZonesFor(r, id) {
+      if (zonesAreaRef.current) return;
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (const t of r.trips) if (t.x != null) { x0 = Math.min(x0, t.x); x1 = Math.max(x1, t.x); y0 = Math.min(y0, t.y); y1 = Math.max(y1, t.y); }
+      const area = x0 === Infinity ? null : [x0, y0, x1, y1];
+      zonesAreaRef.current = true;
+      try {
+        const zones = await GI.loadZones(api, database, area);
+        setCatalogs(c => ({ ...c, zones }));
+      } catch (e) {
+        setCatalogs(c => ({ ...c, zones: [] }));
+      }
+    }
+
+    // Errores de cálculo: se muestran en pantalla (y en la consola) en vez de dejarla en blanco.
+    const [calcError, setCalcError] = useState(null);
+    const model = useMemo(() => {
+      if (!(raw && catalogs && settings)) return null;
+      try { return GI.buildModel(raw, catalogs, settings); }
+      catch (e) { console.error("[Geotab Insights] buildModel", e); setTimeout(() => setCalcError(e), 0); return null; }
+    }, [raw, catalogs, settings]);
     const groupsFlat = useMemo(() => (catalogs ? GI.flattenGroups(catalogs.groups) : []), [catalogs]);
 
     const view = useMemo(() => {
       if (!model) return null;
+      try {
       const ids = GI.filterDevices(model, { groupIds: mgGroups, vtype: filter.vtype, stype: filter.stype });
       const series = GI.series(model, ids, gran);
       const total = GI.kpis(GI.aggregate(model, ids));
@@ -130,6 +161,7 @@
         findings: GI.findings(model, ids, vRows, dRows),
         savings: GI.savings(vRows),
       };
+      } catch (e) { console.error("[Geotab Insights] view", e); setTimeout(() => setCalcError(e), 0); return null; }
     }, [model, filter, mgGroups, gran, milestones]);
 
     async function saveSettings(next) {
@@ -145,7 +177,11 @@
     const mgKey = mgGroups.slice().sort().join(",");
     useEffect(() => {
       groupRef.current = mgGroups;
-      if (phase === "ready" && largeFleet && settings) load(settings, period, catalogs);
+      if (phase === "ready" && largeFleet && settings) {
+        zonesAreaRef.current = false;
+        setCatalogs(c => (c ? { ...c, zones: null } : c));
+        load(settings, period, catalogs);
+      }
     }, [mgKey]);
 
     function applyPreset(v) {
@@ -204,9 +240,13 @@
       <nav className="tabs">${TABS.map(([k, l]) => html`<button key=${k} className=${tab === k ? "on" : ""} onClick=${() => setTab(k)}>${l}</button>`)}</nav>
       <div className="gi-main">
         ${error ? html`<${Info} tone="error">${error}<//>` : null}
+        ${calcError ? html`<${Info} tone="error"><b>Error al calcular el tablero:</b> ${String(calcError.message || calcError)}
+          <details><summary>Detalle técnico</summary><pre style=${{ whiteSpace: "pre-wrap", fontSize: "12px" }}>${String(calcError.stack || "")}</pre></details><//>` : null}
+        ${raw && raw.fuelPending && (tab === "combustible" || tab === "resumen") ? html`<${Info}>Los datos de combustible se están cargando; los litros y costos se completan en unos segundos.<//>` : null}
         ${largeFleet && !mgGroups.length && !(settings.scope_group_ids || []).length && tab !== "config" ? html`<${Info} tone="warn">
           Esta base tiene ${GI.fmtNum(catalogs.devices.length)} vehículos. Para que cargue rápido, elegí uno o más grupos en el <b>filtro de grupos de MyGeotab</b> (arriba a la izquierda): se consulta solo ese alcance.
           ${isAdmin ? " También podés fijar el alcance para todos en Configuración → Combustible y alcance." : ""}<//>` : null}
+        <${ErrorBoundary} key=${tab}>
         ${tab === "config" ? html`<${GI.ConfigTab} api=${api} settings=${settings} catalogs=${catalogs} groups=${groupsFlat}
             model=${model} isAdmin=${isAdmin} userName=${userName} onSave=${saveSettings} />`
           : !view ? html`<div className="splash small"><div className="spinner"></div>Preparando el tablero…</div>`
@@ -220,11 +260,27 @@
               onUpdate=${async m => { await GI.updateMilestone(api, m); setMilestones(ms => ms.map(x => (x.id === m.id ? m : x))); }}
               onDelete=${async id => { await GI.removeMilestone(api, id); setMilestones(ms => ms.filter(x => x.id !== id)); }} />`
           : null}
+        <//>
         ${raw ? html`<footer className="foot">Datos del ${raw.fromKey} al ${raw.toKey}${raw.complete ? "" : " (completando el resto del período)"}: ${GI.fmtNum(raw.trips.length)} viajes y ${GI.fmtNum(raw.exceptions.length)} eventos, cargados en ${GI.fmtNum(raw.loadedMs / 1000, 1)} s.</footer>` : null}
       </div>
       ${detail && view && detail.type === "v" ? html`<${GI.VehicleDetail} view=${view} id=${detail.id} onClose=${() => setDetail(null)} />` : null}
       ${detail && view && detail.type === "d" ? html`<${GI.DriverDetail} view=${view} id=${detail.id} onClose=${() => setDetail(null)} />` : null}
     </div>`;
+  }
+
+  // Si algo falla al dibujar una pestaña, se muestra el error en vez de
+  // dejar la pantalla en blanco.
+  class ErrorBoundary extends React.Component {
+    constructor(props) { super(props); this.state = { err: null }; }
+    static getDerivedStateFromError(err) { return { err }; }
+    componentDidCatch(err, info) { console.error("[Geotab Insights]", err, info); }
+    render() {
+      if (!this.state.err) return this.props.children;
+      const e = this.state.err;
+      return html`<${Info} tone="error"><b>No se pudo mostrar esta pestaña.</b> ${String(e && e.message || e)}
+        <details style=${{ marginTop: "8px" }}><summary>Detalle técnico (para soporte)</summary><pre style=${{ whiteSpace: "pre-wrap", fontSize: "12px" }}>${String(e && e.stack || "")}</pre></details>
+        <button className="btn small" style=${{ marginTop: "8px" }} onClick=${() => this.setState({ err: null })}>Reintentar</button><//>`;
+    }
   }
 
   GI.App = App;
