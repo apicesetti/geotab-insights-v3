@@ -2,7 +2,8 @@
     "id": "a2jBAg7PpaFdQpimkOJ7Ajg",
     "name": "Geotab Insights v3 - Cesetti",
     "supportEmail": "mt@cesetti.com.ar",
-    "version": "3.0.0",
+    "version": "3.2.0",
+    "enableViewSecurityId": true,
     "items": [
         {
             "url": "https://apicesetti.github.io/geotab-insights-v3/static/index.html",

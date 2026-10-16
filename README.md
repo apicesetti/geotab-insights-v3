@@ -76,6 +76,14 @@ dev/
 
 La v2 puede seguir instalada en paralelo mientras se valida.
 
+## Quién puede verlo
+
+`addin-config.json` incluye `"enableViewSecurityId": true`. Con eso MyGeotab
+crea el permiso *Ver "Geotab Insights v3 - Cesetti"* en las autorizaciones
+(clearances). Viene activado solo para Administrador; para darlo a otros
+perfiles hay que crear una sub-autorización con ese permiso activado y
+asignarla a los usuarios. Quien no lo tenga no ve el ítem en el menú.
+
 ## Probar sin MyGeotab
 
 ```
