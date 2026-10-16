@@ -21,7 +21,7 @@
   const CATALOG_TTL_MS = 6 * 3600 * 1000;
   const MAX_RUN_DAYS = 7;
   const CONCURRENCY = 3;
-  const PER_DEVICE_MAX = 600;
+  const PER_DEVICE_MAX = 150; // cada vehículo es 1 llamada (cuota Geotab: 5.000/min)
   const CAP_STEP = () => window.GI_CAP_STEP || 1000;
 
   // Vehículos de los grupos del alcance (Device sí respeta groups e incluye
