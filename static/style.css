@@ -205,3 +205,14 @@ main { padding: 18px 22px 40px; width: 100%; }
 /* ---------- Map ---------- */
 .map { height: 460px; border-radius: 8px; border: 1px solid var(--line); }
 .map.hidden { display: none; }
+
+/* ---------- Selector de categorías / comparación ---------- */
+.catbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 12px; }
+.catchip { border: 1px solid var(--line-strong); background: #fff; border-radius: 99px; padding: 3px 10px; font-size: 12.5px; cursor: pointer; color: var(--muted); display: inline-flex; align-items: center; user-select: none; }
+.catchip .dot { opacity: .35; }
+.catchip.on { color: var(--text); border-color: var(--c); background: color-mix(in srgb, var(--c) 10%, #fff); font-weight: 600; }
+.catchip.on .dot { opacity: 1; }
+.compare { display: flex; flex-wrap: wrap; gap: 10px 28px; align-items: flex-end; padding: 10px 14px; background: #f8fafc; border: 1px solid var(--line); border-radius: 8px; margin-bottom: 12px; }
+.compare > div { display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
+.compare b { font-size: 18px; color: var(--ink); font-variant-numeric: tabular-nums; }
+.compare .compare-note { margin-left: auto; align-self: center; }

@@ -158,6 +158,73 @@
     </div>`;
   }
 
+  // Evolución de eventos con selector de categorías y 3 vistas:
+  // tasa por 100 km (normaliza por km), eventos vs km, y cantidad.
+  function EventsEvolution({ view, riskCats }) {
+    const allKeys = riskCats.map(c => c.key);
+    const [sel, setSel] = useState(allKeys);
+    const [mode, setMode] = useState("rate");
+    useEffect(() => { setSel(s => (s.length ? s.filter(k => allKeys.includes(k)) : s)); }, [allKeys.join()]);
+    const active = riskCats.filter(c => sel.includes(c.key));
+    const toggle = k => setSel(s => (s.includes(k) ? s.filter(x => x !== k) : [...s, k]));
+    const S = view.series;
+    const evSel = s => GI.sum(active, c => s.evByCat[c.key] || 0);
+    const rate = s => (s.km > 0 ? GI.round((evSel(s) / s.km) * 100, 3) : null);
+
+    // Comparación 1.ª vs 2.ª mitad: eventos, km y eventos/100 km
+    const full = S.filter(s => !s.partial);
+    const h = Math.floor(full.length / 2);
+    const A = full.slice(0, h), B = full.slice(h);
+    const evA = GI.sum(A, evSel), evB = GI.sum(B, evSel), kmA = GI.sum(A, s => s.km), kmB = GI.sum(B, s => s.km);
+    const chEv = GI.pctChange(evA / (A.length || 1), evB / (B.length || 1));
+    const chKm = GI.pctChange(kmA / (A.length || 1), kmB / (B.length || 1));
+    const chRate = kmA && kmB ? GI.pctChange(evA / kmA, evB / kmB) : null;
+    const verdict = chRate == null ? null : chRate <= -5 ? "Mejora" : chRate >= 5 ? "Empeora" : "Estable";
+
+    const marks = { items: GI.milestoneMarks(view.milestones, S, view.gran) };
+    const tooltip = { mode: "nearest", intersect: true, displayColors: true, padding: 8, boxPadding: 3,
+      callbacks: { title: items => items.length ? S[items[0].dataIndex].label : "" } };
+    let config;
+    if (mode === "rate") {
+      config = { type: "bar", data: { labels: S.map(s => s.label), datasets: [
+        ...active.map(c => ({ type: "bar", label: c.label, data: S.map(s => (s.km > 0 ? GI.round(((s.evByCat[c.key] || 0) / s.km) * 100, 3) : null)), backgroundColor: c.color, stack: "r" })),
+        { type: "line", label: "Total selección /100 km", data: S.map(rate), borderColor: "#111827", backgroundColor: "#111827", tension: 0.25, spanGaps: true, pointRadius: 3 },
+      ] }, options: { interaction: { mode: "nearest", intersect: true }, plugins: { legend: { display: false }, tooltip, milestones: marks },
+        scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true, title: { display: true, text: "eventos / 100 km" } } } } };
+    } else if (mode === "vskm") {
+      config = { type: "bar", data: { labels: S.map(s => s.label), datasets: [
+        { type: "bar", label: "Eventos (selección)", data: S.map(evSel), backgroundColor: "#f87171", yAxisID: "y" },
+        { type: "line", label: "Kilómetros", data: S.map(s => GI.round(s.km, 0)), borderColor: "#2563eb", backgroundColor: "#2563eb", yAxisID: "y1", tension: 0.25, pointRadius: 3 },
+      ] }, options: { interaction: { mode: "index", intersect: false }, plugins: { legend: { display: true }, tooltip: { ...tooltip, mode: "index", intersect: false }, milestones: marks },
+        scales: { y: { beginAtZero: true, title: { display: true, text: "eventos" } }, y1: { position: "right", beginAtZero: true, grid: { drawOnChartArea: false }, title: { display: true, text: "km" } } } } };
+    } else {
+      config = { type: "bar", data: { labels: S.map(s => s.label), datasets: active.map(c => ({ label: c.label, data: S.map(s => s.evByCat[c.key] || 0), backgroundColor: c.color, stack: "n" })) },
+        options: { interaction: { mode: "nearest", intersect: true }, plugins: { legend: { display: false }, tooltip, milestones: marks },
+          scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true, title: { display: true, text: "eventos" } } } } };
+    }
+
+    return html`<${Panel} title="Evolución de eventos"
+      sub="Eventos/100 km normaliza por lo recorrido: si los eventos se mantienen y los km suben, la tasa baja y es una mejora. Pasá el mouse sobre una barra para ver solo esa categoría."
+      actions=${html`<${Segmented} value=${mode} onChange=${setMode} options=${[
+        { value: "rate", label: "Eventos / 100 km" }, { value: "vskm", label: "Eventos vs km" }, { value: "count", label: "Cantidad" }]} />`}>
+      <div className="catbar">
+        <button className="btn small" onClick=${() => setSel(allKeys)}>Todas</button>
+        <button className="btn small" onClick=${() => setSel([])}>Ninguna</button>
+        ${riskCats.map(c => html`<button key=${c.key} className=${"catchip" + (sel.includes(c.key) ? " on" : "")}
+          style=${{ "--c": c.color }} onClick=${() => toggle(c.key)} onDoubleClick=${() => setSel([c.key])}
+          title="Click: mostrar/ocultar · Doble click: ver solo esta"><span className="dot" style=${{ background: c.color }}></span>${c.label}</button>`)}
+      </div>
+      <div className="compare">
+        <div><span className="muted">Eventos promedio por ${({ day: "día", week: "semana", month: "mes" })[view.gran]}</span><b>${GI.fmtNum(evB / (B.length || 1))}</b><${Delta} value=${chEv} goodWhenDown /></div>
+        <div><span className="muted">Km promedio por ${({ day: "día", week: "semana", month: "mes" })[view.gran]}</span><b>${GI.fmtNum(kmB / (B.length || 1))}</b><${Delta} value=${chKm} /></div>
+        <div><span className="muted">Eventos / 100 km</span><b>${GI.fmtNum(kmB ? (evB / kmB) * 100 : null, 2)}</b><${Delta} value=${chRate} goodWhenDown /></div>
+        ${verdict ? html`<div><span className="muted">Resultado</span><span className=${"verdict " + (verdict === "Mejora" ? "good" : verdict === "Empeora" ? "bad" : "")}>${verdict}</span></div>` : null}
+        <div className="muted small compare-note">2.ª mitad vs 1.ª mitad del período (sin ${({ day: "días", week: "semanas", month: "meses" })[view.gran]} incompletos)</div>
+      </div>
+      ${active.length ? html`<${ChartView} height=${320} config=${config} />` : html`<div className="empty">Elegí al menos una categoría.</div>`}
+    <//>`;
+  }
+
   // ======================= SEGURIDAD =======================
   function SafetyTab({ view, onVehicle }) {
     const riskCats = GI.CATEGORIES.filter(c => c.kind === "riesgo" && view.series.some(s => (s.evByCat[c.key] || 0) > 0));
@@ -173,17 +240,7 @@
     });
     const opCats = GI.CATEGORIES.filter(c => c.kind === "operativo" && (total.evByCat[c.key] || 0) > 0);
     return html`<div>
-      <${Panel} title="Eventos de riesgo por categoría" sub="Barras: cantidad de eventos. Línea: índice de riesgo (pts/100 km).">
-        <${ChartView} height=${320} config=${{
-          type: "bar",
-          data: { labels: view.series.map(s => s.label), datasets: [
-            ...riskCats.map(c => ({ type: "bar", label: c.label, data: view.series.map(s => s.evByCat[c.key] || 0), backgroundColor: c.color, stack: "ev", yAxisID: "y" })),
-            { type: "line", label: "Índice de riesgo", data: view.series.map(s => s.risk == null ? null : GI.round(s.risk, 2)), borderColor: "#111827", yAxisID: "y1", tension: 0.25, spanGaps: true },
-          ] },
-          options: { plugins: { milestones: { items: GI.milestoneMarks(view.milestones, view.series, view.gran) } },
-            scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true }, y1: { position: "right", beginAtZero: true, grid: { drawOnChartArea: false } } } },
-        }} />
-      <//>
+      <${EventsEvolution} view=${view} riskCats=${riskCats} />
       <div className="grid-2">
         <${Panel} title="Categorías" sub="Tendencia: tasa/100 km, 2.ª mitad vs 1.ª mitad del período.">
           <${DataTable} rowKey=${r => r.key} rows=${catRows} defaultSort=${{ key: "share", dir: "desc" }} columns=${[
