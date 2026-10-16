@@ -5,21 +5,53 @@
   const html = htm.bind(React.createElement);
   GI.html = html;
 
-  // ---------- KPI ----------
-  function Kpi({ label, value, sub, tone, hint }) {
-    return html`<div className=${"kpi" + (tone ? " tone-" + tone : "")} title=${hint || ""}>
-      <div className="kpi-label">${label}</div>
-      <div className="kpi-value">${value}</div>
-      ${sub ? html`<div className="kpi-sub">${sub}</div>` : null}
+  // ---------- Estilo global de los gráficos ----------
+  // Tipografía de la interfaz, ejes y grilla discretos, y popup chico y claro
+  // que muestra solo lo que está bajo el mouse (no tapa el gráfico).
+  if (window.Chart) {
+    Chart.defaults.font.family = "'Barlow', system-ui, sans-serif";
+    Chart.defaults.font.size = 12.5;
+    Chart.defaults.color = "#4f5866";
+    Chart.defaults.borderColor = "#e9ecf0";
+    Chart.defaults.scale.grid.color = "#eef0f3";
+    Chart.defaults.scale.border = { display: false };
+    Chart.defaults.elements.bar.borderRadius = 3;
+    Chart.defaults.elements.line.borderWidth = 2;
+    Chart.defaults.elements.point.radius = 2.5;
+    Chart.defaults.elements.point.hoverRadius = 5;
+    Object.assign(Chart.defaults.plugins.tooltip, {
+      backgroundColor: "#ffffff", titleColor: "#1f2a37", bodyColor: "#1c2430", footerColor: "#4f5866",
+      borderColor: "#cdd3db", borderWidth: 1, padding: 10, cornerRadius: 6, boxWidth: 9, boxHeight: 9,
+      boxPadding: 4, usePointStyle: true, caretSize: 5,
+      titleFont: { weight: "600", size: 13 }, bodyFont: { size: 13 },
+    });
+    Chart.defaults.plugins.legend.labels.usePointStyle = true;
+    Chart.defaults.plugins.legend.labels.boxWidth = 9;
+  }
+
+  // Ayuda contextual: explicación de cómo se calcula algo, sin ocupar espacio.
+  function Hint({ children }) {
+    if (!children) return null;
+    return html`<span className="hint"><button type="button" aria-label="Cómo se calcula">?</button><span className="hint-body" role="tooltip">${children}</span></span>`;
+  }
+
+  // ---------- Indicador (va dentro de un contenedor .readouts) ----------
+  function Kpi({ label, value, unit, sub, tone, hint }) {
+    return html`<div className=${"readout" + (tone ? " " + tone : "")}>
+      <div className="readout-label">${label}<${Hint}>${hint}<//></div>
+      <div className="readout-value">${value}${unit ? html`<span className="unit">${unit}</span>` : null}</div>
+      ${sub ? html`<div className="readout-foot">${sub}</div>` : null}
     </div>`;
   }
 
-  function Delta({ value, goodWhenDown }) {
-    if (value == null || Number.isNaN(value)) return html`<span className="delta">–</span>`;
+  // Variación con flecha + número (+ texto opcional): nunca solo color.
+  function Delta({ value, goodWhenDown, suffix }) {
+    if (value == null || Number.isNaN(value)) return html`<span className="delta flat">sin comparación</span>`;
     const down = value < 0;
     const good = goodWhenDown ? down : !down;
     const cls = Math.abs(value) < 3 ? "flat" : good ? "good" : "bad";
-    return html`<span className=${"delta " + cls}>${down ? "▼" : "▲"} ${GI.fmtNum(Math.abs(value), 1)}%</span>`;
+    const arrow = Math.abs(value) < 0.05 ? "=" : down ? "▼" : "▲";
+    return html`<span className=${"delta " + cls}>${arrow} ${GI.fmtNum(Math.abs(value), 1)}%${suffix ? " " + suffix : ""}</span>`;
   }
 
   function Segmented({ value, options, onChange }) {
@@ -27,10 +59,10 @@
       <button key=${o.value} className=${value === o.value ? "on" : ""} onClick=${() => onChange(o.value)}>${o.label}</button>`)}</div>`;
   }
 
-  function Panel({ title, sub, actions, children, className }) {
+  function Panel({ title, sub, hint, actions, children, className }) {
     return html`<section className=${"panel " + (className || "")}>
       ${title || actions ? html`<div className="panel-head">
-        <div><h2>${title}</h2>${sub ? html`<p className="panel-sub">${sub}</p>` : null}</div>
+        <div><h2>${title}<${Hint}>${hint}<//></h2>${sub ? html`<p className="panel-sub">${sub}</p>` : null}</div>
         ${actions ? html`<div className="panel-actions">${actions}</div>` : null}
       </div>` : null}
       ${children}
@@ -100,14 +132,14 @@
       for (const m of ms) {
         const px = x.getPixelForValue(m.index);
         if (px == null || Number.isNaN(px)) continue;
-        ctx.strokeStyle = "#b45309";
+        ctx.strokeStyle = "#f2b705";
         ctx.setLineDash([5, 4]);
-        ctx.lineWidth = 1.5;
+        ctx.lineWidth = 2;
         ctx.beginPath(); ctx.moveTo(px, chartArea.top); ctx.lineTo(px, chartArea.bottom); ctx.stroke();
         ctx.setLineDash([]);
-        ctx.fillStyle = "#b45309";
-        ctx.font = "600 11px system-ui, sans-serif";
-        const text = "◆ " + m.label;
+        ctx.fillStyle = "#7a5a00";
+        ctx.font = "600 12px Barlow, system-ui, sans-serif";
+        const text = m.label;
         const w = ctx.measureText(text).width;
         const tx = Math.min(px + 4, chartArea.right - w);
         ctx.fillText(text, tx, chartArea.top + 12);
@@ -191,7 +223,7 @@
 
   function Progress({ value, label }) {
     return html`<div className="progress"><div className="bar" style=${{ width: Math.round((value || 0) * 100) + "%" }}></div>
-      <span>${label || "Cargando…"} ${Math.round((value || 0) * 100)}%</span></div>`;
+      <span>${label || "Cargando"} (${Math.round((value || 0) * 100)}%)</span></div>`;
   }
 
   function catLabel(k) { return (GI.CATEGORY_BY_KEY[k] || { label: k }).label; }
@@ -209,7 +241,7 @@
   }
 
   Object.assign(GI, {
-    Kpi, Delta, Segmented, Panel, Info, Modal, DataTable, ChartView, milestoneMarks, GroupMultiSelect,
+    Kpi, Hint, Delta, Segmented, Panel, Info, Modal, DataTable, ChartView, milestoneMarks, GroupMultiSelect,
     flattenGroups, Progress, catLabel, catColor, vtypeLabel, stypeLabel, profileLabel,
   });
 })(window.GI);

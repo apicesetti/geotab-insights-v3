@@ -81,7 +81,7 @@
       const b = GI.sum(r, x => x.nBefore), a = GI.sum(r, x => x.nAfter);
       return imp.before.km && imp.after.km ? GI.pctChange(b / imp.before.km, a / imp.after.km) : null;
     })();
-    const verdict = mainChange == null ? "Sin datos suficientes" : mainChange <= -10 ? "Impacto positivo" : mainChange >= 10 ? "Empeoró" : "Sin cambio significativo";
+    const verdict = mainChange == null ? "Sin datos suficientes" : mainChange <= -10 ? "Mejoró" : mainChange >= 10 ? "Empeoró" : "Sin cambio claro";
     const vtone = mainChange == null ? "" : mainChange <= -10 ? "good" : mainChange >= 10 ? "bad" : "flat";
     return html`<div className="milestone">
       <div className="ms-head">
@@ -89,15 +89,16 @@
           <div className="ms-date">◆ ${GI.parseDayKey(m.date).toLocaleDateString("es-AR", { day: "numeric", month: "long", year: "numeric" })}</div>
           <h3>${m.title}</h3>
           ${m.description ? html`<p>${m.description}</p>` : null}
-          <p className="muted small">Alcance: ${scopeTxt} · ${imp.devices} vehículos · Categorías: ${catTxt}</p>
+          <p className="muted small">Alcance: ${scopeTxt} (${imp.devices} vehículos). Mide: ${catTxt}.</p>
         </div>
-        <div className="ms-verdict">
-          <span className=${"verdict " + vtone}>${verdict}</span>
-          ${mainChange != null ? html`<${Delta} value=${mainChange} goodWhenDown />` : null}
-          ${isAdmin ? html`<div className="ms-actions"><button className="btn small" onClick=${onEdit}>Editar</button>
-            <button className="btn small danger" onClick=${onDelete}>Eliminar</button></div>` : null}
-        </div>
+        ${isAdmin ? html`<div className="ms-actions"><button className="btn small" onClick=${onEdit}>Editar</button>
+          <button className="btn small danger" onClick=${onDelete}>Eliminar</button></div>` : null}
       </div>
+      ${imp.days ? html`<div className=${"verdict-line " + (vtone === "flat" ? "" : vtone)}>
+        <span className="vtag">${verdict}</span>
+        <span>${mainChange == null ? "No hay km suficientes en alguna de las dos ventanas para comparar." : html`
+          En los ${imp.days} días posteriores hubo <b>${GI.fmtNum(Math.abs(mainChange), 0)}% ${mainChange < 0 ? "menos" : "más"}</b> ${metric === "idlePct" ? "ralentí (en % del tiempo en marcha)" : "infracciones cada 100 km"} que en los ${imp.days} días anteriores.`}</span>
+      </div>` : null}
       ${!imp.days ? html`<${Info} tone="warn">El período cargado no incluye días antes y después de este hito. Ampliá el rango de fechas para medir su impacto.<//>` : html`
         ${truncated ? html`<${Info}>Se comparan ${imp.days} días antes vs ${imp.days} días después (de ${windowDays} pedidos): el rango cargado o la fecha actual no alcanzan para más.<//>` : null}
         <div className="grid-2">

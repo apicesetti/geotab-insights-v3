@@ -6,24 +6,33 @@
   // kind: "riesgo" suma al índice de riesgo; "operativo" no (ralentí, desvío
   // de ruta, tiempos en zona...). weight: peso por defecto en el índice.
   const CATEGORIES = [
-    { key: "velocidad", label: "Exceso de velocidad", kind: "riesgo", weight: 1.5, color: "#ef4444" },
-    { key: "frenado_brusco", label: "Frenado brusco", kind: "riesgo", weight: 1.3, color: "#f97316" },
-    { key: "aceleracion_brusca", label: "Aceleración brusca", kind: "riesgo", weight: 1.2, color: "#f59e0b" },
-    { key: "giro_brusco", label: "Giro brusco", kind: "riesgo", weight: 1.2, color: "#eab308" },
-    { key: "cinturon", label: "Cinturón de seguridad", kind: "riesgo", weight: 1.5, color: "#8b5cf6" },
-    { key: "telefono", label: "Uso de celular", kind: "riesgo", weight: 1.6, color: "#ec4899" },
-    { key: "distraccion", label: "Distracción", kind: "riesgo", weight: 1.4, color: "#d946ef" },
-    { key: "fatiga", label: "Fatiga / bostezo", kind: "riesgo", weight: 1.5, color: "#6366f1" },
-    { key: "colision", label: "Colisión / casi colisión", kind: "riesgo", weight: 2.0, color: "#dc2626" },
-    { key: "distancia", label: "Conducción cercana (distancia)", kind: "riesgo", weight: 1.4, color: "#be123c" },
-    { key: "salida_carril", label: "Salida de carril / doble línea", kind: "riesgo", weight: 1.3, color: "#0ea5e9" },
-    { key: "fumar_comer", label: "Fumar / comer / beber", kind: "riesgo", weight: 0.8, color: "#14b8a6" },
-    { key: "reversa", label: "Marcha atrás", kind: "riesgo", weight: 0.6, color: "#64748b" },
-    { key: "camara", label: "Cámara obstruida / manipulada", kind: "riesgo", weight: 1.0, color: "#94a3b8" },
-    { key: "ralenti", label: "Ralentí", kind: "operativo", weight: 0, color: "#22c55e" },
-    { key: "operativo", label: "Otro operativo (ruta, zonas, horario)", kind: "operativo", weight: 0, color: "#a3a3a3" },
+    { key: "velocidad", label: "Exceso de velocidad", kind: "riesgo", weight: 1.5, color: "#2a78d6" },
+    { key: "frenado_brusco", label: "Frenado brusco", kind: "riesgo", weight: 1.3, color: "#e87ba4" },
+    { key: "aceleracion_brusca", label: "Aceleración brusca", kind: "riesgo", weight: 1.2, color: "#008300" },
+    { key: "giro_brusco", label: "Giro brusco", kind: "riesgo", weight: 1.2, color: "#6250d6" },
+    { key: "cinturon", label: "Cinturón de seguridad", kind: "riesgo", weight: 1.5, color: "#eb6834" },
+    { key: "telefono", label: "Uso de celular", kind: "riesgo", weight: 1.6, color: "#1baf7a" },
+    { key: "distraccion", label: "Distracción", kind: "riesgo", weight: 1.4, color: "#eda100" },
+    { key: "fatiga", label: "Fatiga / bostezo", kind: "riesgo", weight: 1.5, color: "#9a9893" },
+    { key: "colision", label: "Colisión / casi colisión", kind: "riesgo", weight: 2.0, color: "#e34948" },
+    { key: "distancia", label: "Conducción cercana (distancia)", kind: "riesgo", weight: 1.4, color: "#9a9893" },
+    { key: "salida_carril", label: "Salida de carril / doble línea", kind: "riesgo", weight: 1.3, color: "#9a9893" },
+    { key: "fumar_comer", label: "Fumar / comer / beber", kind: "riesgo", weight: 0.8, color: "#9a9893" },
+    { key: "reversa", label: "Marcha atrás", kind: "riesgo", weight: 0.6, color: "#9a9893" },
+    { key: "camara", label: "Cámara obstruida / manipulada", kind: "riesgo", weight: 1.0, color: "#9a9893" },
+    { key: "ralenti", label: "Ralentí", kind: "operativo", weight: 0, color: "#9a9893" },
+    { key: "operativo", label: "Otro operativo (ruta, zonas, horario)", kind: "operativo", weight: 0, color: "#9a9893" },
   ];
   const CATEGORY_BY_KEY = Object.fromEntries(CATEGORIES.map(c => [c.key, c]));
+
+  // Colores de gráficos: paleta categórica validada para daltonismo (8
+  // tonos), asignada FIJA a las 8 infracciones principales en este orden (el
+  // orden es parte de la validación: tonos vecinos en una pila se
+  // distinguen). El resto se agrupa como "Otras" en gris.
+  const CHART_SLOTS = ["velocidad", "cinturon", "telefono", "distraccion", "frenado_brusco", "aceleracion_brusca", "giro_brusco", "colision"];
+  const OTHER_COLOR = "#9a9893";
+  // Paleta para series que no son categorías (tipos de vehículo, etc.).
+  const SERIES_COLORS = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"];
 
   // Reglas stock de Geotab -> categoría.
   const STOCK_RULES = {
@@ -156,7 +165,7 @@
   }
 
   Object.assign(GI, {
-    CATEGORIES, CATEGORY_BY_KEY, STOCK_RULES, SERVICE_TYPES,
+    CATEGORIES, CATEGORY_BY_KEY, CHART_SLOTS, OTHER_COLOR, SERIES_COLORS, STOCK_RULES, SERVICE_TYPES,
     suggestCategory, isNoiseRule, defaultSettings, defaultProfileTargets, profileKey,
   });
 })(window.GI);

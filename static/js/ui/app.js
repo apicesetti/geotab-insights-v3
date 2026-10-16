@@ -127,9 +127,13 @@
     if (phase === "error") return html`<div className="splash"><${Info} tone="error">${error}<//></div>`;
 
     const vtypes = [...settings.vehicle_types, { key: "sin_tipo", label: "Sin tipo" }];
+    const activeFilters = [];
+    if (filter.groupId) activeFilters.push({ key: "g", label: "Grupo " + ((groupsFlat.find(g => g.id === filter.groupId) || {}).name || filter.groupId), clear: () => setFilter(f => ({ ...f, groupId: "" })) });
+    if (filter.vtype) activeFilters.push({ key: "v", label: (vtypes.find(v => v.key === filter.vtype) || {}).label || filter.vtype, clear: () => setFilter(f => ({ ...f, vtype: "" })) });
+    if (filter.stype) activeFilters.push({ key: "s", label: filter.stype === "larga" ? "Larga distancia" : "Corta distancia", clear: () => setFilter(f => ({ ...f, stype: "" })) });
     return html`<div className="app">
       <header className="topbar">
-        <div className="brand"><span className="logo">◆</span><div><h1>Geotab Insights</h1><span>${database}${isAdmin ? " · administrador" : ""}</span></div></div>
+        <div className="brand"><h1>Geotab Insights</h1><span className="sub">Base ${database}${isAdmin ? ", con permisos de administrador" : ""}</span></div>
         <div className="controls">
           <label className="ctl">Período
             <select value=${customDraft ? "custom" : period.preset || "custom"} onChange=${e => applyPreset(e.target.value)}>
@@ -161,7 +165,12 @@
             onClick=${() => load(settings, period, catalogs, true)}>↻ Actualizar</button>
         </div>
       </header>
-      ${loading != null ? html`<${Progress} value=${loading} label=${raw ? "Actualizando datos…" : "Descargando datos (la primera vez tarda más; después queda en caché)…"} />` : null}
+      ${activeFilters.length ? html`<div className="filterbar" role="status">
+        <span>Mostrando:</span>
+        ${activeFilters.map(f => html`<span key=${f.key} className="fchip">${f.label}<button aria-label=${"Quitar " + f.label} onClick=${f.clear}>×</button></span>`)}
+        <button className="btn link small" onClick=${() => setFilter({ groupId: "", vtype: "", stype: "" })}>Ver toda la flota</button>
+      </div>` : null}
+      ${loading != null ? html`<${Progress} value=${loading} label=${raw ? "Actualizando datos" : "Descargando datos. La primera vez tarda más; después queda guardado"} />` : null}
       <nav className="tabs">${TABS.map(([k, l]) => html`<button key=${k} className=${tab === k ? "on" : ""} onClick=${() => setTab(k)}>${l}</button>`)}</nav>
       <div className="gi-main">
         ${error ? html`<${Info} tone="error">${error}<//>` : null}
