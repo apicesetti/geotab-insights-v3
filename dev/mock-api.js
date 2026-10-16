@@ -169,7 +169,15 @@
         // Como el servidor real: Trip ignora deviceSearch.groups; solo filtra por id.
         case "Trip": out = trips.filter(t => inRange(t.start, s) && (!s.deviceSearch || !s.deviceSearch.id || t.device.id === s.deviceSearch.id)); break;
         case "ExceptionEvent": out = exceptions.filter(e => inRange(e.activeFrom, s) && inGroups(e.device, s) && (!s.ruleSearch || e.rule.id === s.ruleSearch.id)); break;
-        case "StatusData": out = status.filter(r => inRange(r.dateTime, s) && inGroups(r.device, s) && (!s.diagnosticSearch || r.diagnostic.id === s.diagnosticSearch.id)); break;
+        case "StatusData":
+          // fromDate = toDate con un vehículo: valor en ese instante (último anterior).
+          if (s.fromDate && s.fromDate === s.toDate && s.deviceSearch && s.deviceSearch.id) {
+            let best = null;
+            for (const r of status) if (r.device.id === s.deviceSearch.id && (!s.diagnosticSearch || r.diagnostic.id === s.diagnosticSearch.id) && r.dateTime <= s.fromDate && (!best || r.dateTime > best.dateTime)) best = r;
+            out = best ? [{ ...best, dateTime: s.fromDate, id: undefined }] : [];
+            break;
+          }
+          out = status.filter(r => inRange(r.dateTime, s) && inGroups(r.device, s) && (!s.diagnosticSearch || r.diagnostic.id === s.diagnosticSearch.id)); break;
         case "AddInData": out = addInData.filter(a => a.addInId === s.addInId); break;
         case "LogRecord": {
           const from = new Date(s.fromDate).getTime() / 1000, to = new Date(s.toDate).getTime() / 1000;

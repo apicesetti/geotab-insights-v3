@@ -28,7 +28,7 @@
   async function scopeDeviceIds(api, groupIds, from) {
     const res = await api.call("Get", {
       typeName: "Device",
-      search: { groups: groupIds.map(id => ({ id })), fromDate: from.toISOString() },
+      search: { ...(groupIds.length ? { groups: groupIds.map(id => ({ id })) } : {}), fromDate: from.toISOString() },
       propertySelector: { fields: ["id"], isIncluded: true },
     });
     return [...new Set((res || []).map(d => d.id).filter(Boolean))];
@@ -493,9 +493,117 @@
     };
   }
 
+  // ---------- Combustible por cortes diarios (flotas grandes) ----------
+  // En vez de bajar todas las lecturas del contador, se pide su valor a las
+  // 00:00 de cada día (Get con fromDate = toDate devuelve el valor
+  // interpolado en ese instante). Día N = valor(N+1 00:00) - valor(N 00:00).
+  const BOUNDARY_FLEET_MIN = 300;
+  const BOUNDARY_BATCH = 250;
+  const BOUNDARY_CONCURRENCY = 4;
+
+  async function loadFuelBoundaries(api, database, fuelDays, devIds, scopeKey, onProgress) {
+    const diags = [FUEL_DIAG, IDLE_FUEL_DIAG];
+    // Cortes: 00:00 de cada día y 00:00 del día siguiente al último (si ya pasó).
+    const now = Date.now();
+    const nextKey = GI.dayKey(GI.addDays(GI.parseDayKey(fuelDays[fuelDays.length - 1]), 1));
+    const bounds = [...fuelDays, nextKey].filter(dk => GI.parseDayKey(dk).getTime() <= now);
+    // El día en curso cierra con el valor "ahora" (no se guarda en caché).
+    const NOW_KEY = "@now";
+    if (GI.parseDayKey(nextKey).getTime() > now) bounds.push(NOW_KEY);
+    const timeOf = dk => (dk === NOW_KEY ? new Date(now) : GI.parseDayKey(dk));
+    const keyOf = (diag, dk) => database + "|sdb:" + diag + scopeKey + "|" + dk;
+    const allKeys = [];
+    for (const diag of diags) for (const dk of bounds) allKeys.push(keyOf(diag, dk));
+    const cached = await idbGetMany("days", allKeys);
+    const values = new Map(diags.map(d => [d, new Map()])); // diag -> dk -> {dev: value}
+    const missing = new Map(diags.map(d => [d, []]));
+    for (const diag of diags) for (const dk of bounds) {
+      const e = dk === NOW_KEY ? null : cached.get(keyOf(diag, dk));
+      if (cacheValid(e, dk)) values.get(diag).set(dk, e.v);
+      else missing.get(diag).push(dk);
+    }
+
+    let total = 0, done = 0;
+    const tick = n => { done += n; if (onProgress) onProgress(total ? Math.min(1, done / total) : 1); };
+    const fetchBounds = async (diag, dks, devs) => {
+      const calls = [];
+      for (const dk of dks) {
+        const t = timeOf(dk).toISOString();
+        for (const id of devs) calls.push({ dk, id, t });
+      }
+      const got = new Map(dks.map(dk => [dk, {}]));
+      const batches = [];
+      for (let i = 0; i < calls.length; i += BOUNDARY_BATCH) batches.push(calls.slice(i, i + BOUNDARY_BATCH));
+      await GI.pool(batches, BOUNDARY_CONCURRENCY, async batch => {
+        const res = await api.multiCall(batch.map(c => ["Get", {
+          typeName: "StatusData", resultsLimit: 1,
+          search: { deviceSearch: { id: c.id }, diagnosticSearch: { id: diag }, fromDate: c.t, toDate: c.t },
+        }]));
+        batch.forEach((c, i) => {
+          const r = (res[i] || [])[0];
+          const v = r ? Number(r.data) : NaN;
+          if (!Number.isNaN(v)) got.get(c.dk)[c.id] = v;
+        });
+        tick(batch.length);
+      });
+      const at = Date.now();
+      const store = [];
+      for (const [dk, v] of got) { values.get(diag).set(dk, v); if (dk !== NOW_KEY) store.push({ k: keyOf(diag, dk), v, at }); }
+      await idbPutMany("days", store);
+      return got;
+    };
+
+    // Sondeo: el corte más reciente para todos los vehículos; los que no
+    // tienen el contador no se consultan en el resto de los días.
+    const probeDk = bounds.filter(dk => dk !== NOW_KEY).pop();
+    let withData = new Set();
+    for (const diag of diags) {
+      const v = values.get(diag).get(probeDk);
+      if (v) Object.keys(v).forEach(id => withData.add(id));
+    }
+    const needProbe = diags.filter(d => missing.get(d).includes(probeDk));
+    const rest = new Map(diags.map(d => [d, missing.get(d).filter(dk => dk !== probeDk)]));
+    total = needProbe.length * devIds.length;
+    if (needProbe.length) {
+      for (const diag of needProbe) {
+        const got = await fetchBounds(diag, [probeDk], devIds);
+        Object.keys(got.get(probeDk)).forEach(id => withData.add(id));
+      }
+    } else if (!withData.size) {
+      // Sin corte reciente en caché ni datos: se usan todos.
+      withData = new Set(devIds);
+    }
+    const devs = devIds.filter(id => withData.has(id));
+    for (const diag of diags) total += rest.get(diag).length * devs.length;
+    if (onProgress) onProgress(total ? done / total : 1);
+    for (const diag of diags) if (rest.get(diag).length && devs.length) await fetchBounds(diag, rest.get(diag), devs);
+
+    // A formato diario {dev: {ft, fv, lt, lv}} (mismo que compactCounter).
+    const toDaily = diag => {
+      const m = new Map();
+      const vals = values.get(diag);
+      for (let i = 0; i < bounds.length - 1; i++) {
+        const a = vals.get(bounds[i]) || {}, b = vals.get(bounds[i + 1]) || {};
+        const ft = timeOf(bounds[i]).getTime(), lt = timeOf(bounds[i + 1]).getTime();
+        const day = {};
+        for (const id in b) if (a[id] != null) day[id] = { ft, fv: a[id], lt, lv: b[id] };
+        m.set(bounds[i], day);
+      }
+      return m;
+    };
+    return { fuelDaily: toDaily(FUEL_DIAG), idleFuelDaily: toDaily(IDLE_FUEL_DIAG) };
+  }
+
   async function loadFuel(api, database, fromKey, toKey, scopeGroupIds, onProgress) {
     const scopeIds = (scopeGroupIds || []).filter(Boolean).slice().sort();
     const scopeKey = scopeIds.length ? "|g:" + scopeIds.join(",") : "";
+    const fuelDays0 = GI.dayRange(GI.dayKey(GI.addDays(GI.parseDayKey(fromKey), -3)), toKey);
+    // Más de 300 vehículos en el alcance: valor del contador en cada corte diario.
+    const devIds = await scopeDeviceIds(api, scopeIds, GI.parseDayKey(fuelDays0[0]));
+    if (devIds.length > (window.GI_FUEL_BOUNDARY_MIN || BOUNDARY_FLEET_MIN)) {
+      const r = await loadFuelBoundaries(api, database, fuelDays0, devIds, scopeKey, onProgress);
+      return { ...r, fuelDays: fuelDays0, fuelMode: "cortes" };
+    }
     const devSearch = scopeIds.length ? { deviceSearch: { groups: scopeIds.map(id => ({ id })) } } : {};
     const fuelDays = GI.dayRange(GI.dayKey(GI.addDays(GI.parseDayKey(fromKey), -3)), toKey);
     const fuelDs = [FUEL_DIAG, IDLE_FUEL_DIAG].map(diag => ({
@@ -553,6 +661,6 @@
 
   Object.assign(GI, {
     loadCatalogs, loadZones, loadZoneTypes, loadPeriod, loadFuel, loadEventLocations, clearCache,
-    _compactTrips: compactTrips, _compactExceptions: compactExceptions, _compactCounter: compactCounter, _missingRuns: missingRuns,
+    _compactTrips: compactTrips, _compactExceptions: compactExceptions, _compactCounter: compactCounter, _loadFuelBoundaries: loadFuelBoundaries, _missingRuns: missingRuns,
   });
 })(window.GI);
