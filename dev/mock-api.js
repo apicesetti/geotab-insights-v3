@@ -43,6 +43,7 @@
     ["aVel", "Exceso de velocidad - General", "Custom"], ["aRuta", "Desvío de Ruta", "Custom"],
     ["aDummy", "Dummy Rule 0HNO1QCE7S0R2:00000087", "Custom"], ["aTest", "[TEST]Dentro TIL-TZ-TASA", "Custom"],
     ["RuleApplicationExceptionId", "**Application Exception", "Stock"],
+    ...Array.from({ length: 300 }, (_, i) => ["azs" + i, "Zona " + i, "ZoneStop"]),
   ].map(([id, name, baseType]) => ({ id, name, baseType }));
 
   const drivers = Array.from({ length: 22 }, (_, i) => ({
@@ -178,6 +179,11 @@
         default: throw new Error("Mock: Get " + p.typeName + " no soportado");
       }
       if (method === "GetCountOf") return out.length;
+      if (p.typeName === "Rule" && s.baseType) out = out.filter(r => r.baseType === s.baseType);
+      if (p.sort && p.sort.sortBy === "id") {
+        out = [...out].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+        if (p.sort.offset) out = out.filter(r => r.id > p.sort.offset);
+      }
       return p.resultsLimit ? out.slice(0, p.resultsLimit) : out;
     }
     if (method === "Add") { const id = "ad" + (++aid); addInData.push({ ...JSON.parse(JSON.stringify(p.entity)), id }); return id; }

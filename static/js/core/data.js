@@ -94,14 +94,56 @@
     const base = { typeName, ...(params || {}) };
     let raw;
     try {
-      raw = await api.call("Get", fields ? { ...base, propertySelector: { fields, isIncluded: true } } : base);
+      raw = await getAllById(api, typeName, base.search, fields, 10000);
     } catch (e) {
-      if (!fields) throw e;
+      // Si la base no acepta orden por id o propertySelector, un Get simple.
       raw = await api.call("Get", base);
     }
     const v = (raw || []).map(compact);
     await idbPutMany("meta", [{ k, v, at: Date.now() }]);
     return v;
+  }
+
+  // Reglas: solo Custom y Stock. Geotab crea una regla "ZoneStop" por cada
+  // zona (en tsbsa son ~24.000); no sirven acá y traerlas trababa la carga.
+  async function cachedRules(api, database, force) {
+    const k = database + "|cat3|Rule";
+    if (!force) {
+      const hit = (await idbGetMany("meta", [k])).get(k);
+      if (hit && Date.now() - hit.at < CATALOG_TTL_MS) return hit.v;
+    }
+    const sel = { propertySelector: { fields: ["id", "name", "baseType"], isIncluded: true } };
+    let rules;
+    try {
+      const res = await api.multiCall(["Custom", "Stock"].map(bt => ["Get", { typeName: "Rule", search: { baseType: bt }, ...sel }]));
+      rules = [].concat(...res.map(r => r || []));
+    } catch (e) {
+      rules = ((await api.call("Get", { typeName: "Rule", ...sel })) || []).filter(r => r.baseType !== "ZoneStop");
+    }
+    const v = rules.filter(r => r.baseType !== "ZoneStop").map(r => ({ id: r.id, name: r.name || r.id, baseType: r.baseType }));
+    await idbPutMany("meta", [{ k, v, at: Date.now() }]);
+    return v;
+  }
+
+  // Trae todos los registros de un tipo sin fecha, paginando por id (páginas
+  // chicas y con solo los campos necesarios). Corta cuando una página vuelve
+  // vacía (resultsLimit no garantiza que una página corta sea la última).
+  async function getAllById(api, typeName, search, fields, pageSize) {
+    const out = [];
+    let offset = null;
+    const sel = fields ? { propertySelector: { fields, isIncluded: true } } : {};
+    for (let guard = 0; guard < 200; guard++) {
+      const page = await api.call("Get", {
+        typeName, resultsLimit: pageSize || 10000, ...(search ? { search } : {}), ...sel,
+        sort: { sortBy: "id", sortDirection: "asc", offset },
+      });
+      if (!page || !page.length) break;
+      const lastId = page[page.length - 1].id;
+      if (lastId === offset) break; // sin avance: la base ignora el orden
+      out.push(...page);
+      offset = lastId;
+    }
+    return out;
   }
 
   async function loadCatalogs(api, database, force) {
@@ -110,8 +152,7 @@
         g => ({ id: g.id, name: g.name || g.id, children: (g.children || []).map(GI.idOf) }), force),
       cachedCatalog(api, database, "Device", null, ["id", "name", "serialNumber", "groups"],
         d => ({ id: d.id, name: d.name || d.id, serial: d.serialNumber || "", groups: (d.groups || []).map(GI.idOf) }), force),
-      cachedCatalog(api, database, "Rule", null, ["id", "name", "baseType"],
-        r => ({ id: r.id, name: r.name || r.id, baseType: r.baseType }), force),
+      cachedRules(api, database, force),
       cachedCatalog(api, database, "User", { search: { isDriver: true } }, ["id", "name", "firstName", "lastName"],
         u => ({ id: u.id, name: [u.firstName, u.lastName].filter(Boolean).join(" ").trim() || u.name || u.id, login: u.name || "" }), force).catch(() => []),
     ]);
@@ -142,21 +183,41 @@
   async function loadZones(api, database, area) {
     const r = v => Math.round(v * 2) / 2;
     const box = area ? { left: r(area[0]) - 0.5, bottom: r(area[1]) - 0.5, right: r(area[2]) + 0.5, top: r(area[3]) + 0.5 } : null;
-    const k = database + "|zones2|" + (box ? [box.left, box.bottom, box.right, box.top].join(",") : "all");
+    const k = database + "|zones3|" + (box ? [box.left, box.bottom, box.right, box.top].join(",") : "all");
     const hit = (await idbGetMany("meta", [k])).get(k);
     if (hit && Date.now() - hit.at < CATALOG_TTL_MS) return hit.v;
-    const fields = { propertySelector: { fields: ["id", "name", "points", "zoneTypes"], isIncluded: true } };
-    const search = box ? { search: { searchArea: box } } : {};
-    let raw;
-    try { raw = await api.call("Get", { typeName: "Zone", resultsLimit: 50000, ...search, ...fields }); }
-    catch (e) { raw = await api.call("Get", { typeName: "Zone", resultsLimit: 50000, ...search }); }
-    const v = (raw || []).filter(z => (z.points || []).length >= 3).map(z => {
+    const sel = { propertySelector: { fields: ["id", "name", "points", "zoneTypes"], isIncluded: true } };
+    const LIM = 10000;
+    let raw = [];
+    if (box) {
+      // Si un área llega al límite, se parte en 4 y se piden las 4 juntas (un multiCall).
+      const seen = new Map();
+      let pending = [box];
+      for (let guard = 0; pending.length && guard < 12; guard++) {
+        const batch = pending.splice(0, 40);
+        const res = await api.multiCall(batch.map(b => ["Get", { typeName: "Zone", resultsLimit: LIM, search: { searchArea: b }, ...sel }]));
+        batch.forEach((b, i) => {
+          const page = res[i] || [];
+          for (const z of page) seen.set(z.id, z);
+          if (page.length >= LIM && b.right - b.left > 0.01) {
+            const mx = (b.left + b.right) / 2, my = (b.bottom + b.top) / 2;
+            pending.push({ left: b.left, bottom: b.bottom, right: mx, top: my }, { left: mx, bottom: b.bottom, right: b.right, top: my },
+              { left: b.left, bottom: my, right: mx, top: b.top }, { left: mx, bottom: my, right: b.right, top: b.top });
+          }
+        });
+      }
+      raw = [...seen.values()];
+    } else {
+      raw = await getAllById(api, "Zone", null, ["id", "name", "points", "zoneTypes"], LIM);
+    }
+    const v = raw.filter(z => (z.points || []).length >= 3).map(z => {
       const pts = z.points.map(p => [p.x, p.y]);
       return { id: z.id, name: z.name || z.id, pts, bbox: zoneBbox(pts), types: (z.zoneTypes || []).map(GI.idOf).filter(Boolean) };
     });
     await idbPutMany("meta", [{ k, v, at: Date.now() }]);
     return v;
   }
+
 
   // ---------- Fetch por rango con partición automática ----------
   // calls: [{key, typeName, search}] -- se resuelven en un multiCall; los que
@@ -183,8 +244,13 @@
       batch.forEach((c, i) => {
         const page = res[i] || [];
         if (page.length >= LIMIT && c.to - c.from > 60000) {
-          const mid = new Date(c.from.getTime() + Math.floor((c.to - c.from) / 2));
-          pending.push({ ...c, to: mid }, { ...c, from: mid });
+          // Llegó al límite: se parte en 4 tramos que van juntos en el próximo multiCall.
+          const step = Math.floor((c.to - c.from) / 4);
+          for (let q = 0; q < 4; q++) {
+            const f = new Date(c.from.getTime() + q * step);
+            const t = q === 3 ? c.to : new Date(c.from.getTime() + (q + 1) * step);
+            pending.push({ ...c, from: f, to: t });
+          }
         } else {
           const arr = out.get(c.key);
           for (const r of page) arr.push(r);
