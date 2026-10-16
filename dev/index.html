@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<title>Geotab Insights</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="stylesheet" href="../static/vendor/leaflet.css">
+<link rel="stylesheet" href="../static/style.css">
+</head>
+<body>
+<div id="root"><div class="splash">Esta página está pensada para abrirse como Add-In dentro de MyGeotab.</div></div>
+
+<script src="../static/vendor/react.production.min.js"></script>
+<script src="../static/vendor/react-dom.production.min.js"></script>
+<script src="../static/vendor/htm.umd.js"></script>
+<script src="../static/vendor/chart.umd.min.js"></script>
+<script src="../static/vendor/leaflet.js"></script>
+<script src="../static/vendor/leaflet-heat.js"></script>
+
+<script src="../static/js/core/util.js"></script>
+<script src="../static/js/core/catalog.js"></script>
+<script src="../static/js/core/storage.js"></script>
+<script src="../static/js/core/data.js"></script>
+<script src="../static/js/core/model.js"></script>
+<script src="../static/js/ui/components.js"></script>
+<script src="../static/js/ui/tabs.js"></script>
+<script src="../static/js/ui/milestones.js"></script>
+<script src="../static/js/ui/config.js"></script>
+<script src="../static/js/ui/app.js"></script>
+<script src="mock-api.js"></script>
+<script>
+  // Arranque como lo haría MyGeotab
+  geotab.addin.cesettiInsightsV3().initialize(mockApi, {}, function () {});
+</script>
+</body>
+</html>

@@ -1,0 +1,299 @@
+// Configuración compartida (AddInData). Solo administradores la editan; el
+// resto la ve en modo lectura.
+(function (GI) {
+  "use strict";
+  const { useState, useMemo } = React;
+  const html = GI.html;
+  const { Panel, Info, GroupMultiSelect } = GI;
+
+  const SECTIONS = [
+    ["reglas", "Reglas → categorías"],
+    ["tipos", "Tipos de vehículo"],
+    ["servicio", "Corta / larga distancia"],
+    ["objetivos", "Objetivos por perfil"],
+    ["pesos", "Pesos de riesgo"],
+    ["alcance", "Alcance y combustible"],
+    ["general", "General"],
+  ];
+
+  function clone(o) { return JSON.parse(JSON.stringify(o)); }
+
+  function ConfigTab({ api, settings, catalogs, groups, model, isAdmin, userName, onSave }) {
+    const [draft, setDraft] = useState(() => clone(settings));
+    const [section, setSection] = useState("reglas");
+    const [saving, setSaving] = useState(false);
+    const [msg, setMsg] = useState(null);
+    const dirty = JSON.stringify({ ...draft, _rev: 0, updated_at: 0 }) !== JSON.stringify({ ...settings, _rev: 0, updated_at: 0 });
+    const ro = !isAdmin;
+    const set = (path, value) => setDraft(d => {
+      const n = clone(d);
+      let o = n;
+      for (let i = 0; i < path.length - 1; i++) o = o[path[i]];
+      o[path[path.length - 1]] = value;
+      return n;
+    });
+
+    async function save() {
+      setSaving(true); setMsg(null);
+      try {
+        const saved = await onSave({ ...draft, configured: true });
+        setDraft(clone(saved));
+        setMsg({ tone: "ok", text: "Configuración guardada para todos los usuarios de la base." });
+      } catch (e) {
+        setMsg({ tone: "error", text: "No se pudo guardar: " + (e.message || e) });
+      }
+      setSaving(false);
+    }
+
+    const body = {
+      reglas: html`<${RulesSection} api=${api} draft=${draft} set=${set} rules=${catalogs.rules} ro=${ro} />`,
+      tipos: html`<${TypesSection} draft=${draft} set=${set} groups=${groups} ro=${ro} model=${model} />`,
+      servicio: html`<${ServiceSection} draft=${draft} set=${set} groups=${groups} ro=${ro} model=${model} />`,
+      objetivos: html`<${TargetsSection} draft=${draft} set=${set} ro=${ro} model=${model} />`,
+      pesos: html`<${WeightsSection} draft=${draft} set=${set} ro=${ro} />`,
+      alcance: html`<${ScopeSection} draft=${draft} set=${set} groups=${groups} ro=${ro} />`,
+      general: html`<${GeneralSection} draft=${draft} set=${set} ro=${ro} />`,
+    }[section];
+
+    return html`<div className="config">
+      ${ro ? html`<${Info}>Modo lectura: solo los administradores de la base (o los editores definidos en General) pueden modificar la configuración. Usuario actual: <b>${userName}</b>.<//>` : null}
+      ${!settings.configured && !ro ? html`<${Info} tone="warn"><b>Primera configuración.</b> Se cargaron sugerencias automáticas (reglas, tipos de vehículo por nombre de grupo, grupos a excluir). Revisá cada sección y guardá: a partir de ahí todos los usuarios ven lo mismo.<//>` : null}
+      <div className="config-layout">
+        <nav className="config-nav">${SECTIONS.map(([k, l]) => html`<button key=${k} className=${section === k ? "on" : ""} onClick=${() => setSection(k)}>${l}</button>`)}</nav>
+        <div className="config-body">${body}</div>
+      </div>
+      ${!ro ? html`<div className=${"savebar" + (dirty ? " dirty" : "")}>
+        ${msg ? html`<span className=${"msg " + msg.tone}>${msg.text}</span>` : html`<span className="muted">${dirty ? "Hay cambios sin guardar." : "Sin cambios."}</span>`}
+        <button className="btn" disabled=${!dirty || saving} onClick=${() => { setDraft(clone(settings)); setMsg(null); }}>Descartar</button>
+        <button className="btn primary" disabled=${(!dirty && settings.configured) || saving} onClick=${save}>${saving ? "Guardando…" : "Guardar para todos"}</button>
+      </div>` : null}
+    </div>`;
+  }
+
+  // ---------- Reglas ----------
+  function RulesSection({ api, draft, set, rules, ro }) {
+    const [q, setQ] = useState("");
+    const [showNoise, setShowNoise] = useState(false);
+    const [onlyUnmapped, setOnlyUnmapped] = useState(false);
+    const [counts, setCounts] = useState(null);
+    const [counting, setCounting] = useState(false);
+    const mapping = draft.rule_mapping;
+    const list = rules
+      .filter(r => showNoise || !GI.isNoiseRule(r) || mapping[r.id])
+      .filter(r => !q || r.name.toLowerCase().includes(q.toLowerCase()))
+      .filter(r => !onlyUnmapped || !mapping[r.id])
+      .sort((a, b) => (counts ? (counts[b.id] || 0) - (counts[a.id] || 0) : 0) || a.name.localeCompare(b.name, "es"));
+    const pending = rules.filter(r => !GI.isNoiseRule(r) && !mapping[r.id] && GI.suggestCategory(r));
+    const ruleName = new Map(rules.map(r => [r.id, r.name]));
+    const dupes = [...GI.groupBy(Object.keys(mapping), id => mapping[id]).entries()]
+      .filter(([c, ids]) => ids.length > 1 && (GI.CATEGORY_BY_KEY[c] || {}).kind === "riesgo")
+      .map(([c, ids]) => [c, ids.map(id => ruleName.get(id) || id)]);
+
+    async function count() {
+      setCounting(true);
+      const from = GI.addDays(new Date(), -30).toISOString(), to = new Date().toISOString();
+      const visible = rules.filter(r => showNoise || !GI.isNoiseRule(r));
+      const out = {};
+      for (let i = 0; i < visible.length; i += 40) {
+        const batch = visible.slice(i, i + 40);
+        try {
+          const res = await api.multiCall(batch.map(r => ["GetCountOf", { typeName: "ExceptionEvent", search: { ruleSearch: { id: r.id }, fromDate: from, toDate: to } }]));
+          batch.forEach((r, j) => { out[r.id] = res[j] || 0; });
+        } catch (e) { /* seguimos sin conteo para ese lote */ }
+      }
+      setCounts(out); setCounting(false);
+    }
+
+    function setRule(id, cat) {
+      const m = { ...mapping };
+      if (cat) m[id] = cat; else delete m[id];
+      set(["rule_mapping"], m);
+    }
+
+    return html`<${Panel} title="Reglas de MyGeotab → categoría"
+      sub="Cada regla incluida suma eventos a su categoría. Las reglas stock y las de cámara (SRF_) se sugieren solas; las de prueba (Dummy, [TEST]) quedan ocultas.">
+      <div className="toolbar">
+        <input placeholder="Buscar regla…" value=${q} onInput=${e => setQ(e.target.value)} />
+        <label className="inline"><input type="checkbox" checked=${onlyUnmapped} onChange=${e => setOnlyUnmapped(e.target.checked)} /> Solo sin categoría</label>
+        <label className="inline"><input type="checkbox" checked=${showNoise} onChange=${e => setShowNoise(e.target.checked)} /> Mostrar reglas de prueba</label>
+        <button className="btn" disabled=${counting} onClick=${count}>${counting ? "Contando…" : "Contar eventos (30 días)"}</button>
+        ${!ro && pending.length ? html`<button className="btn primary" onClick=${() => {
+          const m = { ...mapping };
+          for (const r of pending) m[r.id] = GI.suggestCategory(r);
+          set(["rule_mapping"], m);
+        }}>Aplicar ${pending.length} sugerencias</button>` : null}
+      </div>
+      <div className="table-wrap"><table className="tbl">
+        <thead><tr><th>Regla</th><th>Tipo</th>${counts ? html`<th className="num">Eventos 30 d</th>` : null}<th>Categoría</th></tr></thead>
+        <tbody>${list.map(r => {
+          const sug = GI.suggestCategory(r);
+          const cur = mapping[r.id] || "";
+          return html`<tr key=${r.id} className=${cur ? "" : "muted-row"}>
+            <td>${r.name}${GI.isNoiseRule(r) ? html` <span className="tag">prueba</span>` : null}</td>
+            <td className="muted">${r.baseType === "Stock" ? "Stock" : r.name.startsWith("SRF_") ? "Cámara" : "Custom"}</td>
+            ${counts ? html`<td className="num">${GI.fmtNum(counts[r.id] || 0)}</td>` : null}
+            <td><select disabled=${ro} value=${cur} onChange=${e => setRule(r.id, e.target.value)}>
+              <option value="">— No incluir —</option>
+              ${GI.CATEGORIES.map(c => html`<option key=${c.key} value=${c.key}>${c.label}${c.key === sug && c.key !== cur ? " (sugerida)" : ""}</option>`)}
+            </select></td></tr>`;
+        })}</tbody></table></div>
+      ${dupes.length ? html`<${Info} tone="warn">Hay varias reglas en la misma categoría: ${dupes.map(([c, rs]) => GI.catLabel(c) + " (" + rs.join(", ") + ")").join(" · ")}.
+        Si miden la misma situación (ej. "Speeding" y "Speeding (New)", o una regla stock y una custom equivalente) el evento se cuenta dos veces. Usá "Contar eventos" para ver cuál está activa y dejá solo una.<//>` : null}
+      <p className="muted small">${Object.keys(mapping).length} reglas incluidas.</p>
+    <//>`;
+  }
+
+  // ---------- Tipos de vehículo ----------
+  function TypesSection({ draft, set, groups, ro, model }) {
+    const types = draft.vehicle_types;
+    const counts = useMemo(() => {
+      const c = {};
+      if (model) for (const v of model.vtypeOf.values()) c[v] = (c[v] || 0) + 1;
+      return c;
+    }, [model]);
+    const upd = (i, patch) => set(["vehicle_types"], types.map((t, j) => (j === i ? { ...t, ...patch } : t)));
+    const move = (i, d) => {
+      const arr = [...types];
+      const [x] = arr.splice(i, 1);
+      arr.splice(i + d, 0, x);
+      set(["vehicle_types"], arr);
+    };
+    function add() {
+      const key = "tipo" + Date.now().toString(36);
+      set(["vehicle_types"], [...types, { key, label: "Nuevo tipo", groupIds: [], idle_lph: 2 }]);
+      const t = clone(draft.profile_targets);
+      for (const st of GI.SERVICE_TYPES) t[GI.profileKey(key, st.key)] = { l100: 0, idle_pct_max: st.key === "corta" ? 20 : 10, risk_max: st.key === "corta" ? 3 : 1.5 };
+      set(["profile_targets"], t);
+    }
+    return html`<${Panel} title="Tipos de vehículo"
+      sub="Cada vehículo toma el PRIMER tipo de la lista cuyos grupos contenga (por eso Bitren va antes que Camión). El consumo de ralentí (L/h) se usa solo para vehículos sin medición de combustible.">
+      ${types.map((t, i) => html`<div key=${t.key} className="type-row">
+        <div className="type-order">${!ro ? html`<button className="btn small" disabled=${i === 0} onClick=${() => move(i, -1)}>▲</button>
+          <button className="btn small" disabled=${i === types.length - 1} onClick=${() => move(i, 1)}>▼</button>` : null}</div>
+        <div className="type-main">
+          <div className="type-line">
+            <input className="type-name" disabled=${ro} value=${t.label} onInput=${e => upd(i, { label: e.target.value })} />
+            <label className="inline">Ralentí estimado <input type="number" step="0.1" className="num-in" disabled=${ro} value=${t.idle_lph} onChange=${e => upd(i, { idle_lph: +e.target.value })} /> L/h</label>
+            <span className="muted">${counts[t.key] || 0} vehículos</span>
+            ${!ro ? html`<button className="btn small danger" onClick=${() => set(["vehicle_types"], types.filter((_, j) => j !== i))}>Quitar</button>` : null}
+          </div>
+          <${GroupMultiSelect} groups=${groups} value=${t.groupIds} disabled=${ro} onChange=${v => upd(i, { groupIds: v })} placeholder="Sin grupos asignados" />
+        </div>
+      </div>`)}
+      ${!ro ? html`<button className="btn" onClick=${add}>+ Agregar tipo</button>` : null}
+      ${counts.sin_tipo ? html`<${Info} tone="warn">${counts.sin_tipo} vehículos no caen en ningún tipo y se analizan como "Sin tipo".<//>` : null}
+    <//>`;
+  }
+
+  // ---------- Servicio ----------
+  function ServiceSection({ draft, set, groups, ro, model }) {
+    const s = draft.service;
+    const summary = useMemo(() => {
+      if (!model) return null;
+      const out = { corta: { grupo: 0, auto: 0 }, larga: { grupo: 0, auto: 0 } };
+      for (const [id, st] of model.serviceOf) {
+        const src = model.serviceSource.get(id);
+        out[st][src === "grupo" ? "grupo" : "auto"]++;
+      }
+      return out;
+    }, [model]);
+    return html`<${Panel} title="Corta y larga distancia"
+      sub="Si el vehículo está en uno de estos grupos, se usa eso. Si no, y la clasificación automática está activa, se decide por la distancia mediana de sus recorridos (zona a zona).">
+      <div className="form">
+        <div className="field"><span>Grupos de <b>corta distancia</b></span>
+          <${GroupMultiSelect} groups=${groups} disabled=${ro} value=${s.group_ids.corta} onChange=${v => set(["service", "group_ids", "corta"], v)} /></div>
+        <div className="field"><span>Grupos de <b>larga distancia</b></span>
+          <${GroupMultiSelect} groups=${groups} disabled=${ro} value=${s.group_ids.larga} onChange=${v => set(["service", "group_ids", "larga"], v)} /></div>
+        <label className="inline"><input type="checkbox" disabled=${ro} checked=${s.auto} onChange=${e => set(["service", "auto"], e.target.checked)} /> Clasificar automáticamente los vehículos que no estén en esos grupos</label>
+        <label className="inline">Larga distancia si el recorrido mediano supera <input type="number" className="num-in" disabled=${ro || !s.auto} value=${s.threshold_km} onChange=${e => set(["service", "threshold_km", ], +e.target.value)} /> km</label>
+      </div>
+      <${Info}>Recomendado: crear en MyGeotab subgrupos "Corta distancia" y "Larga distancia" y asignarlos acá (si se llaman así, se detectan solos). La clasificación automática queda como respaldo para los vehículos sin grupo.<//>
+      ${summary ? html`<p className="muted">Con los datos cargados: corta ${summary.corta.grupo} por grupo + ${summary.corta.auto} automáticos · larga ${summary.larga.grupo} por grupo + ${summary.larga.auto} automáticos. (Se recalcula al guardar.)</p>` : null}
+    <//>`;
+  }
+
+  // ---------- Objetivos ----------
+  function TargetsSection({ draft, set, ro, model }) {
+    const actual = useMemo(() => {
+      if (!model) return {};
+      const out = {};
+      for (const r of GI.profileRows(model, new Set(model.devices.map(d => d.id)))) out[r.profile] = r;
+      return out;
+    }, [model]);
+    const profiles = [];
+    for (const vt of [...draft.vehicle_types, { key: "sin_tipo", label: "Sin tipo" }]) {
+      for (const st of GI.SERVICE_TYPES) profiles.push({ key: GI.profileKey(vt.key, st.key), label: vt.label + " · " + st.label });
+    }
+    const t = draft.profile_targets;
+    const upd = (k, field, v) => set(["profile_targets"], { ...t, [k]: { ...(t[k] || { l100: 0, idle_pct_max: 15, risk_max: 2 }), [field]: v } });
+    return html`<${Panel} title="Objetivos por perfil"
+      sub="Un bitren de larga distancia no se mide igual que un camión de corta. L/100 = 0 compara contra la mediana del propio perfil. Entre paréntesis, el valor real del período cargado.">
+      <div className="table-wrap"><table className="tbl">
+        <thead><tr><th>Perfil</th><th className="num">L/100 km objetivo</th><th className="num">% ralentí máx.</th><th className="num">Riesgo máx. (pts/100 km)</th></tr></thead>
+        <tbody>${profiles.map(p => {
+          const v = t[p.key] || { l100: 0, idle_pct_max: 15, risk_max: 2 };
+          const a = actual[p.key];
+          return html`<tr key=${p.key}><td>${p.label}${a ? html` <span className="muted small">${a.vehicles} veh.</span>` : null}</td>
+            <td className="num"><input type="number" step="0.5" className="num-in" disabled=${ro} value=${v.l100} onChange=${e => upd(p.key, "l100", +e.target.value)} />
+              <span className="muted small"> (${a ? GI.fmtNum(a.l100, 1) : "–"})</span></td>
+            <td className="num"><input type="number" className="num-in" disabled=${ro} value=${v.idle_pct_max} onChange=${e => upd(p.key, "idle_pct_max", +e.target.value)} />
+              <span className="muted small"> (${a ? GI.fmtNum(a.idlePct, 1) : "–"})</span></td>
+            <td className="num"><input type="number" step="0.1" className="num-in" disabled=${ro} value=${v.risk_max} onChange=${e => upd(p.key, "risk_max", +e.target.value)} />
+              <span className="muted small"> (${a ? GI.fmtNum(a.risk, 2) : "–"})</span></td></tr>`;
+        })}</tbody></table></div>
+    <//>`;
+  }
+
+  // ---------- Pesos ----------
+  function WeightsSection({ draft, set, ro }) {
+    const w = draft.category_weights;
+    return html`<${Panel} title="Peso de cada categoría en el índice de riesgo"
+      sub="Índice de riesgo = suma de (eventos × peso) cada 100 km. Las categorías operativas (ralentí, desvíos, zonas) tienen peso 0 y no suman.">
+      <div className="weights">${GI.CATEGORIES.map(c => html`<label key=${c.key} className="weight">
+        <span><span className="dot" style=${{ background: c.color }}></span>${c.label}</span>
+        <input type="number" step="0.1" min="0" className="num-in" disabled=${ro || c.kind !== "riesgo"} value=${w[c.key] != null ? w[c.key] : c.weight}
+          onChange=${e => set(["category_weights"], { ...w, [c.key]: +e.target.value })} /></label>`)}</div>
+    <//>`;
+  }
+
+  // ---------- Alcance ----------
+  function ScopeSection({ draft, set, groups, ro }) {
+    return html`<${Panel} title="Alcance del análisis y combustible">
+      <div className="form">
+        <div className="field"><span>Analizar solo estos grupos <span className="muted">(vacío = toda la base)</span></span>
+          <${GroupMultiSelect} groups=${groups} disabled=${ro} value=${draft.scope_group_ids} onChange=${v => set(["scope_group_ids"], v)} placeholder="Toda la base" /></div>
+        <div className="field"><span>Excluir siempre estos grupos</span>
+          <${GroupMultiSelect} groups=${groups} disabled=${ro} value=${draft.excluded_group_ids} onChange=${v => set(["excluded_group_ids"], v)} /></div>
+        <label className="inline">Precio del litro de combustible <input type="number" className="num-in wide" disabled=${ro} value=${draft.fuel.price_per_liter}
+          onChange=${e => set(["fuel", "price_per_liter"], +e.target.value)} /> $/L</label>
+        <label className="inline">Tolerancia de consumo sobre la referencia <input type="number" className="num-in" disabled=${ro} value=${draft.fuel.tolerance_pct != null ? draft.fuel.tolerance_pct : 10}
+          onChange=${e => set(["fuel", "tolerance_pct"], +e.target.value)} /> % <span className="muted small">(por debajo no se cuenta como exceso)</span></label>
+      </div>
+    <//>`;
+  }
+
+  // ---------- General ----------
+  function GeneralSection({ draft, set, ro }) {
+    const [editors, setEditors] = useState(draft.editors.join(", "));
+    return html`<${Panel} title="General">
+      <div className="form two-col">
+        <label>Período por defecto (días)<select disabled=${ro} value=${draft.ui.default_days} onChange=${e => set(["ui", "default_days"], +e.target.value)}>
+          ${[30, 60, 90, 180, 365].map(d => html`<option key=${d} value=${d}>${d}</option>`)}</select></label>
+        <label>Agrupación por defecto<select disabled=${ro} value=${draft.ui.default_granularity} onChange=${e => set(["ui", "default_granularity"], e.target.value)}>
+          <option value="day">Día</option><option value="week">Semana</option><option value="month">Mes</option></select></label>
+        <label>Ventana de impacto de hitos (días)<input type="number" disabled=${ro} value=${draft.ui.milestone_window_days} onChange=${e => set(["ui", "milestone_window_days"], +e.target.value)} /></label>
+        <label>Cortar recorrido tras parada de (h)<input type="number" disabled=${ro} value=${draft.journeys.break_hours} onChange=${e => set(["journeys", "break_hours"], +e.target.value)} /></label>
+        <label>Ranking de recorridos: mínimo de recorridos<input type="number" disabled=${ro} value=${draft.journeys.min_journeys_route} onChange=${e => set(["journeys", "min_journeys_route"], +e.target.value)} /></label>
+        <label>Ranking de recorridos: km acumulados mínimos<input type="number" disabled=${ro} value=${draft.journeys.min_km_route} onChange=${e => set(["journeys", "min_km_route"], +e.target.value)} /></label>
+        <label>Ranking de conductores: km mínimos<input type="number" disabled=${ro} value=${draft.drivers.min_km_ranking} onChange=${e => set(["drivers", "min_km_ranking"], +e.target.value)} /></label>
+        <label>Editores adicionales (usuarios MyGeotab, separados por coma)<input disabled=${ro} value=${editors}
+          onInput=${e => setEditors(e.target.value)} onBlur=${() => set(["editors"], editors.split(",").map(s => s.trim()).filter(Boolean))} /></label>
+      </div>
+      <h3>Caché local</h3>
+      <p className="muted small">Los datos ya descargados se guardan en este navegador para que la próxima apertura sea rápida. Borrarlo obliga a descargar todo de nuevo.</p>
+      <button className="btn" onClick=${async () => { await GI.clearCache(); alert("Caché borrada. Se va a descargar todo en la próxima actualización."); }}>Borrar caché de este navegador</button>
+    <//>`;
+  }
+
+  GI.ConfigTab = ConfigTab;
+})(window.GI);
