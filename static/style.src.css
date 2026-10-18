@@ -300,10 +300,18 @@ input:disabled, select:disabled { background: var(--sunken); color: var(--muted)
 .catchip:hover { border-color: var(--ink); }
 
 /* ---------- Mapa ---------- */
-.map { height: 460px; border-radius: 6px; border: 1px solid var(--rule); }
+/* El mapa queda encerrado en su caja: recorta las teselas y aísla los z-index
+   de Leaflet (400-1000) para que no tapen el panel ni los menús de MyGeotab. */
+.map { position: relative; height: 460px; overflow: hidden; isolation: isolate; z-index: 0; contain: layout paint; border-radius: 6px; border: 1px solid var(--rule); }
 .map.hidden { display: none; }
 
 @media (max-width: 700px) {
   .topbar, .gi-main, .filterbar { padding-left: 14px; padding-right: 14px; }
   .readout-value { font-size: 24px; }
 }
+
+/* Tipos de infracción por recorrido */
+.catmix { display: inline-flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; }
+.catmix-i { white-space: nowrap; font-size: 13px; }
+.catmix-i .dot { width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; }
+.catmix-i b { font-variant-numeric: tabular-nums; font-weight: 600; }

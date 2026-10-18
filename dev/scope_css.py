@@ -2,7 +2,7 @@
 
 MyGeotab inserta el add-in dentro de su propia página (sin iframe), así que
 cualquier selector global (body, main, button...) le cambiaría el layout.
-Uso: python3 dev/scope_css.py static/style.src.css static/style.css
+Uso: python3 dev/scope_css.py static/vendor/leaflet.css static/style.src.css static/style.css
 En el fuente, ":root" y "body" se convierten en el propio contenedor.
 """
 import re
@@ -55,5 +55,6 @@ def scope(src):
 
 
 if __name__ == "__main__":
-    src = open(sys.argv[1], encoding="utf-8").read()
-    open(sys.argv[2], "w", encoding="utf-8").write(scope(src))
+    # Varios fuentes se concatenan en orden: el último argumento es la salida.
+    src = "\n".join(open(f, encoding="utf-8").read() for f in sys.argv[1:-1])
+    open(sys.argv[-1], "w", encoding="utf-8").write(scope(src))

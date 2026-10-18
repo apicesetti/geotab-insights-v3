@@ -550,6 +550,17 @@
   }
 
   // ======================= RECORRIDOS =======================
+  // Mezcla de tipos de infracción: punto de color + nombre + cantidad.
+  function CatMix({ cats, max }) {
+    if (!cats || !cats.length) return html`<span className="muted">—</span>`;
+    const shown = max ? cats.slice(0, max) : cats;
+    const rest = cats.length - shown.length;
+    const all = cats.map(c => GI.catLabel(c.cat) + ": " + n0(c.n)).join(" · ");
+    return html`<span className="catmix" title=${all}>${shown.map(c => html`<span key=${c.cat} className="catmix-i">
+        <span className="dot" style=${{ background: GI.catColor(c.cat) }}></span>${GI.catLabel(c.cat)} <b>${n0(c.n)}</b></span>`)}
+      ${rest > 0 ? html`<span className="muted small">+${rest} más</span>` : null}</span>`;
+  }
+
   function RoutesTab({ view, api }) {
     const s = view.settings.journeys;
     const [showNoZone, setShowNoZone] = useState(false);
@@ -569,6 +580,9 @@
           { key: "avgKm", label: "Km promedio", align: "num", fmt: r => n0(r.avgKm) },
           { key: "devices", label: "Vehículos", align: "num" },
           { key: "nEv", label: "Infracciones", align: "num" },
+          { key: "cats", label: "Tipos de infracción", value: r => (r.cats[0] ? r.cats[0].n : null),
+            title: "Qué infracciones hubo en este recorrido (cantidad), de la más frecuente a la menos",
+            fmt: r => html`<${CatMix} cats=${r.cats} max=${3} />` },
           { key: "risk", label: "Riesgo", align: "num", fmt: r => n2(r.risk), title: "Puntos cada 100 km" },
           { key: "idlePct", label: "Ralentí", align: "num", fmt: r => GI.fmtPct(r.idlePct) },
         ]} empty="Ningún recorrido llega a los mínimos. Ampliá el período o bajá los mínimos en Configuración → General." />
@@ -639,7 +653,8 @@
         <button className="btn primary" disabled=${progress != null || !sample.length} onClick=${load}>${points ? "Actualizar mapa" : "Mostrar mapa"}</button>`}>
       ${route ? html`<div className="filterbar inset" role="status"><span>Solo el recorrido:</span>
         <span className="fchip">${route.from} → ${route.to}<button aria-label="Quitar recorrido" onClick=${onClearRoute}>×</button></span>
-        <span className="muted">${n0(evs.length)} infracciones en ${n0(route.n)} recorridos</span></div>` : html`<p className="muted small" style=${{ margin: "0 0 10px" }}>Tip: hacé click en un recorrido de la tabla de arriba para ver solo sus infracciones en el mapa.</p>`}
+        <span className="muted">${n0(evs.length)} infracciones en ${n0(route.n)} recorridos</span>
+        ${route.cats && route.cats.length ? html`<${CatMix} cats=${route.cats} />` : null}</div>` : html`<p className="muted small" style=${{ margin: "0 0 10px" }}>Tip: hacé click en un recorrido de la tabla de arriba para ver solo sus infracciones en el mapa.</p>`}
       ${progress != null ? html`<${GI.Progress} value=${progress} label=${"Ubicando " + n0(sample.length) + " eventos"} />` : null}
       ${err ? html`<${Info} tone="error">${err}<//>` : null}
       <div ref=${mapRef} className=${"map" + (points ? "" : " hidden")}></div>

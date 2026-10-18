@@ -1,3 +1,617 @@
+/* required styles */
+
+#gi3-root .leaflet-pane, #gi3-root .leaflet-tile, #gi3-root .leaflet-marker-icon, #gi3-root .leaflet-marker-shadow, #gi3-root .leaflet-tile-container, #gi3-root .leaflet-pane > svg, #gi3-root .leaflet-pane > canvas, #gi3-root .leaflet-zoom-box, #gi3-root .leaflet-image-layer, #gi3-root .leaflet-layer {
+	position: absolute;
+	left: 0;
+	top: 0;
+	}
+#gi3-root .leaflet-container {
+	overflow: hidden;
+	}
+#gi3-root .leaflet-tile, #gi3-root .leaflet-marker-icon, #gi3-root .leaflet-marker-shadow {
+	-webkit-user-select: none;
+	   -moz-user-select: none;
+	        user-select: none;
+	  -webkit-user-drag: none;
+	}
+/* Prevents IE11 from highlighting tiles in blue */
+#gi3-root .leaflet-tile::selection {
+	background: transparent;
+}
+/* Safari renders non-retina tile on retina better with this, but Chrome is worse */
+#gi3-root .leaflet-safari .leaflet-tile {
+	image-rendering: -webkit-optimize-contrast;
+	}
+/* hack that prevents hw layers "stretching" when loading new tiles */
+#gi3-root .leaflet-safari .leaflet-tile-container {
+	width: 1600px;
+	height: 1600px;
+	-webkit-transform-origin: 0 0;
+	}
+#gi3-root .leaflet-marker-icon, #gi3-root .leaflet-marker-shadow {
+	display: block;
+	}
+/* .leaflet-container svg: reset svg max-width decleration shipped in Joomla! (joomla.org) 3.x */
+/* .leaflet-container img: map is broken in FF if you have max-width: 100% on tiles */
+#gi3-root .leaflet-container .leaflet-overlay-pane svg {
+	max-width: none !important;
+	max-height: none !important;
+	}
+#gi3-root .leaflet-container .leaflet-marker-pane img, #gi3-root .leaflet-container .leaflet-shadow-pane img, #gi3-root .leaflet-container .leaflet-tile-pane img, #gi3-root .leaflet-container img.leaflet-image-layer, #gi3-root .leaflet-container .leaflet-tile {
+	max-width: none !important;
+	max-height: none !important;
+	width: auto;
+	padding: 0;
+	}
+
+#gi3-root .leaflet-container img.leaflet-tile {
+	/* See: https://bugs.chromium.org/p/chromium/issues/detail?id=600120 */
+	mix-blend-mode: plus-lighter;
+}
+
+#gi3-root .leaflet-container.leaflet-touch-zoom {
+	-ms-touch-action: pan-x pan-y;
+	touch-action: pan-x pan-y;
+	}
+#gi3-root .leaflet-container.leaflet-touch-drag {
+	-ms-touch-action: pinch-zoom;
+	/* Fallback for FF which doesn't support pinch-zoom */
+	touch-action: none;
+	touch-action: pinch-zoom;
+}
+#gi3-root .leaflet-container.leaflet-touch-drag.leaflet-touch-zoom {
+	-ms-touch-action: none;
+	touch-action: none;
+}
+#gi3-root .leaflet-container {
+	-webkit-tap-highlight-color: transparent;
+}
+#gi3-root .leaflet-container a {
+	-webkit-tap-highlight-color: rgba(51, 181, 229, 0.4);
+}
+#gi3-root .leaflet-tile {
+	filter: inherit;
+	visibility: hidden;
+	}
+#gi3-root .leaflet-tile-loaded {
+	visibility: inherit;
+	}
+#gi3-root .leaflet-zoom-box {
+	width: 0;
+	height: 0;
+	-moz-box-sizing: border-box;
+	     box-sizing: border-box;
+	z-index: 800;
+	}
+/* workaround for https://bugzilla.mozilla.org/show_bug.cgi?id=888319 */
+#gi3-root .leaflet-overlay-pane svg {
+	-moz-user-select: none;
+	}
+
+#gi3-root .leaflet-pane { z-index: 400; }
+
+#gi3-root .leaflet-tile-pane { z-index: 200; }
+#gi3-root .leaflet-overlay-pane { z-index: 400; }
+#gi3-root .leaflet-shadow-pane { z-index: 500; }
+#gi3-root .leaflet-marker-pane { z-index: 600; }
+#gi3-root .leaflet-tooltip-pane { z-index: 650; }
+#gi3-root .leaflet-popup-pane { z-index: 700; }
+
+#gi3-root .leaflet-map-pane canvas { z-index: 100; }
+#gi3-root .leaflet-map-pane svg { z-index: 200; }
+
+#gi3-root .leaflet-vml-shape {
+	width: 1px;
+	height: 1px;
+	}
+#gi3-root .lvml {
+	behavior: url(#default#VML);
+	display: inline-block;
+	position: absolute;
+	}
+
+
+/* control positioning */
+
+#gi3-root .leaflet-control {
+	position: relative;
+	z-index: 800;
+	pointer-events: visiblePainted; /* IE 9-10 doesn't have auto */
+	pointer-events: auto;
+	}
+#gi3-root .leaflet-top, #gi3-root .leaflet-bottom {
+	position: absolute;
+	z-index: 1000;
+	pointer-events: none;
+	}
+#gi3-root .leaflet-top {
+	top: 0;
+	}
+#gi3-root .leaflet-right {
+	right: 0;
+	}
+#gi3-root .leaflet-bottom {
+	bottom: 0;
+	}
+#gi3-root .leaflet-left {
+	left: 0;
+	}
+#gi3-root .leaflet-control {
+	float: left;
+	clear: both;
+	}
+#gi3-root .leaflet-right .leaflet-control {
+	float: right;
+	}
+#gi3-root .leaflet-top .leaflet-control {
+	margin-top: 10px;
+	}
+#gi3-root .leaflet-bottom .leaflet-control {
+	margin-bottom: 10px;
+	}
+#gi3-root .leaflet-left .leaflet-control {
+	margin-left: 10px;
+	}
+#gi3-root .leaflet-right .leaflet-control {
+	margin-right: 10px;
+	}
+
+
+/* zoom and fade animations */
+
+#gi3-root .leaflet-fade-anim .leaflet-popup {
+	opacity: 0;
+	-webkit-transition: opacity 0.2s linear;
+	   -moz-transition: opacity 0.2s linear;
+	        transition: opacity 0.2s linear;
+	}
+#gi3-root .leaflet-fade-anim .leaflet-map-pane .leaflet-popup {
+	opacity: 1;
+	}
+#gi3-root .leaflet-zoom-animated {
+	-webkit-transform-origin: 0 0;
+	    -ms-transform-origin: 0 0;
+	        transform-origin: 0 0;
+	}
+#gi3-root svg.leaflet-zoom-animated {
+	will-change: transform;
+}
+
+#gi3-root .leaflet-zoom-anim .leaflet-zoom-animated {
+	-webkit-transition: -webkit-transform 0.25s cubic-bezier(0,0,0.25,1);
+	   -moz-transition:    -moz-transform 0.25s cubic-bezier(0,0,0.25,1);
+	        transition:         transform 0.25s cubic-bezier(0,0,0.25,1);
+	}
+#gi3-root .leaflet-zoom-anim .leaflet-tile, #gi3-root .leaflet-pan-anim .leaflet-tile {
+	-webkit-transition: none;
+	   -moz-transition: none;
+	        transition: none;
+	}
+
+#gi3-root .leaflet-zoom-anim .leaflet-zoom-hide {
+	visibility: hidden;
+	}
+
+
+/* cursors */
+
+#gi3-root .leaflet-interactive {
+	cursor: pointer;
+	}
+#gi3-root .leaflet-grab {
+	cursor: -webkit-grab;
+	cursor:    -moz-grab;
+	cursor:         grab;
+	}
+#gi3-root .leaflet-crosshair, #gi3-root .leaflet-crosshair .leaflet-interactive {
+	cursor: crosshair;
+	}
+#gi3-root .leaflet-popup-pane, #gi3-root .leaflet-control {
+	cursor: auto;
+	}
+#gi3-root .leaflet-dragging .leaflet-grab, #gi3-root .leaflet-dragging .leaflet-grab .leaflet-interactive, #gi3-root .leaflet-dragging .leaflet-marker-draggable {
+	cursor: move;
+	cursor: -webkit-grabbing;
+	cursor:    -moz-grabbing;
+	cursor:         grabbing;
+	}
+
+/* marker & overlays interactivity */
+#gi3-root .leaflet-marker-icon, #gi3-root .leaflet-marker-shadow, #gi3-root .leaflet-image-layer, #gi3-root .leaflet-pane > svg path, #gi3-root .leaflet-tile-container {
+	pointer-events: none;
+	}
+
+#gi3-root .leaflet-marker-icon.leaflet-interactive, #gi3-root .leaflet-image-layer.leaflet-interactive, #gi3-root .leaflet-pane > svg path.leaflet-interactive, #gi3-root svg.leaflet-image-layer.leaflet-interactive path {
+	pointer-events: visiblePainted; /* IE 9-10 doesn't have auto */
+	pointer-events: auto;
+	}
+
+/* visual tweaks */
+
+#gi3-root .leaflet-container {
+	background: #ddd;
+	outline-offset: 1px;
+	}
+#gi3-root .leaflet-container a {
+	color: #0078A8;
+	}
+#gi3-root .leaflet-zoom-box {
+	border: 2px dotted #38f;
+	background: rgba(255,255,255,0.5);
+	}
+
+
+/* general typography */
+#gi3-root .leaflet-container {
+	font-family: "Helvetica Neue", Arial, Helvetica, sans-serif;
+	font-size: 12px;
+	font-size: 0.75rem;
+	line-height: 1.5;
+	}
+
+
+/* general toolbar styles */
+
+#gi3-root .leaflet-bar {
+	box-shadow: 0 1px 5px rgba(0,0,0,0.65);
+	border-radius: 4px;
+	}
+#gi3-root .leaflet-bar a {
+	background-color: #fff;
+	border-bottom: 1px solid #ccc;
+	width: 26px;
+	height: 26px;
+	line-height: 26px;
+	display: block;
+	text-align: center;
+	text-decoration: none;
+	color: black;
+	}
+#gi3-root .leaflet-bar a, #gi3-root .leaflet-control-layers-toggle {
+	background-position: 50% 50%;
+	background-repeat: no-repeat;
+	display: block;
+	}
+#gi3-root .leaflet-bar a:hover, #gi3-root .leaflet-bar a:focus {
+	background-color: #f4f4f4;
+	}
+#gi3-root .leaflet-bar a:first-child {
+	border-top-left-radius: 4px;
+	border-top-right-radius: 4px;
+	}
+#gi3-root .leaflet-bar a:last-child {
+	border-bottom-left-radius: 4px;
+	border-bottom-right-radius: 4px;
+	border-bottom: none;
+	}
+#gi3-root .leaflet-bar a.leaflet-disabled {
+	cursor: default;
+	background-color: #f4f4f4;
+	color: #bbb;
+	}
+
+#gi3-root .leaflet-touch .leaflet-bar a {
+	width: 30px;
+	height: 30px;
+	line-height: 30px;
+	}
+#gi3-root .leaflet-touch .leaflet-bar a:first-child {
+	border-top-left-radius: 2px;
+	border-top-right-radius: 2px;
+	}
+#gi3-root .leaflet-touch .leaflet-bar a:last-child {
+	border-bottom-left-radius: 2px;
+	border-bottom-right-radius: 2px;
+	}
+
+/* zoom control */
+
+#gi3-root .leaflet-control-zoom-in, #gi3-root .leaflet-control-zoom-out {
+	font: bold 18px 'Lucida Console', Monaco, monospace;
+	text-indent: 1px;
+	}
+
+#gi3-root .leaflet-touch .leaflet-control-zoom-in, #gi3-root .leaflet-touch .leaflet-control-zoom-out {
+	font-size: 22px;
+	}
+
+
+/* layers control */
+
+#gi3-root .leaflet-control-layers {
+	box-shadow: 0 1px 5px rgba(0,0,0,0.4);
+	background: #fff;
+	border-radius: 5px;
+	}
+#gi3-root .leaflet-control-layers-toggle {
+	background-image: url(images/layers.png);
+	width: 36px;
+	height: 36px;
+	}
+#gi3-root .leaflet-retina .leaflet-control-layers-toggle {
+	background-image: url(images/layers-2x.png);
+	background-size: 26px 26px;
+	}
+#gi3-root .leaflet-touch .leaflet-control-layers-toggle {
+	width: 44px;
+	height: 44px;
+	}
+#gi3-root .leaflet-control-layers .leaflet-control-layers-list, #gi3-root .leaflet-control-layers-expanded .leaflet-control-layers-toggle {
+	display: none;
+	}
+#gi3-root .leaflet-control-layers-expanded .leaflet-control-layers-list {
+	display: block;
+	position: relative;
+	}
+#gi3-root .leaflet-control-layers-expanded {
+	padding: 6px 10px 6px 6px;
+	color: #333;
+	background: #fff;
+	}
+#gi3-root .leaflet-control-layers-scrollbar {
+	overflow-y: scroll;
+	overflow-x: hidden;
+	padding-right: 5px;
+	}
+#gi3-root .leaflet-control-layers-selector {
+	margin-top: 2px;
+	position: relative;
+	top: 1px;
+	}
+#gi3-root .leaflet-control-layers label {
+	display: block;
+	font-size: 13px;
+	font-size: 1.08333em;
+	}
+#gi3-root .leaflet-control-layers-separator {
+	height: 0;
+	border-top: 1px solid #ddd;
+	margin: 5px -10px 5px -6px;
+	}
+
+/* Default icon URLs */
+#gi3-root .leaflet-default-icon-path { /* used only in path-guessing heuristic, see L.Icon.Default */
+	background-image: url(images/marker-icon.png);
+	}
+
+
+/* attribution and scale controls */
+
+#gi3-root .leaflet-container .leaflet-control-attribution {
+	background: #fff;
+	background: rgba(255, 255, 255, 0.8);
+	margin: 0;
+	}
+#gi3-root .leaflet-control-attribution, #gi3-root .leaflet-control-scale-line {
+	padding: 0 5px;
+	color: #333;
+	line-height: 1.4;
+	}
+#gi3-root .leaflet-control-attribution a {
+	text-decoration: none;
+	}
+#gi3-root .leaflet-control-attribution a:hover, #gi3-root .leaflet-control-attribution a:focus {
+	text-decoration: underline;
+	}
+#gi3-root .leaflet-attribution-flag {
+	display: inline !important;
+	vertical-align: baseline !important;
+	width: 1em;
+	height: 0.6669em;
+	}
+#gi3-root .leaflet-left .leaflet-control-scale {
+	margin-left: 5px;
+	}
+#gi3-root .leaflet-bottom .leaflet-control-scale {
+	margin-bottom: 5px;
+	}
+#gi3-root .leaflet-control-scale-line {
+	border: 2px solid #777;
+	border-top: none;
+	line-height: 1.1;
+	padding: 2px 5px 1px;
+	white-space: nowrap;
+	-moz-box-sizing: border-box;
+	     box-sizing: border-box;
+	background: rgba(255, 255, 255, 0.8);
+	text-shadow: 1px 1px #fff;
+	}
+#gi3-root .leaflet-control-scale-line:not(:first-child) {
+	border-top: 2px solid #777;
+	border-bottom: none;
+	margin-top: -2px;
+	}
+#gi3-root .leaflet-control-scale-line:not(:first-child):not(:last-child) {
+	border-bottom: 2px solid #777;
+	}
+
+#gi3-root .leaflet-touch .leaflet-control-attribution, #gi3-root .leaflet-touch .leaflet-control-layers, #gi3-root .leaflet-touch .leaflet-bar {
+	box-shadow: none;
+	}
+#gi3-root .leaflet-touch .leaflet-control-layers, #gi3-root .leaflet-touch .leaflet-bar {
+	border: 2px solid rgba(0,0,0,0.2);
+	background-clip: padding-box;
+	}
+
+
+/* popup */
+
+#gi3-root .leaflet-popup {
+	position: absolute;
+	text-align: center;
+	margin-bottom: 20px;
+	}
+#gi3-root .leaflet-popup-content-wrapper {
+	padding: 1px;
+	text-align: left;
+	border-radius: 12px;
+	}
+#gi3-root .leaflet-popup-content {
+	margin: 13px 24px 13px 20px;
+	line-height: 1.3;
+	font-size: 13px;
+	font-size: 1.08333em;
+	min-height: 1px;
+	}
+#gi3-root .leaflet-popup-content p {
+	margin: 17px 0;
+	margin: 1.3em 0;
+	}
+#gi3-root .leaflet-popup-tip-container {
+	width: 40px;
+	height: 20px;
+	position: absolute;
+	left: 50%;
+	margin-top: -1px;
+	margin-left: -20px;
+	overflow: hidden;
+	pointer-events: none;
+	}
+#gi3-root .leaflet-popup-tip {
+	width: 17px;
+	height: 17px;
+	padding: 1px;
+
+	margin: -10px auto 0;
+	pointer-events: auto;
+
+	-webkit-transform: rotate(45deg);
+	   -moz-transform: rotate(45deg);
+	    -ms-transform: rotate(45deg);
+	        transform: rotate(45deg);
+	}
+#gi3-root .leaflet-popup-content-wrapper, #gi3-root .leaflet-popup-tip {
+	background: white;
+	color: #333;
+	box-shadow: 0 3px 14px rgba(0,0,0,0.4);
+	}
+#gi3-root .leaflet-container a.leaflet-popup-close-button {
+	position: absolute;
+	top: 0;
+	right: 0;
+	border: none;
+	text-align: center;
+	width: 24px;
+	height: 24px;
+	font: 16px/24px Tahoma, Verdana, sans-serif;
+	color: #757575;
+	text-decoration: none;
+	background: transparent;
+	}
+#gi3-root .leaflet-container a.leaflet-popup-close-button:hover, #gi3-root .leaflet-container a.leaflet-popup-close-button:focus {
+	color: #585858;
+	}
+#gi3-root .leaflet-popup-scrolled {
+	overflow: auto;
+	}
+
+#gi3-root .leaflet-oldie .leaflet-popup-content-wrapper {
+	-ms-zoom: 1;
+	}
+#gi3-root .leaflet-oldie .leaflet-popup-tip {
+	width: 24px;
+	margin: 0 auto;
+
+	-ms-filter: "progid:DXImageTransform.Microsoft.Matrix(M11=0.70710678, M12=0.70710678, M21=-0.70710678, M22=0.70710678)";
+	filter: progid:DXImageTransform.Microsoft.Matrix(M11=0.70710678, M12=0.70710678, M21=-0.70710678, M22=0.70710678);
+	}
+
+#gi3-root .leaflet-oldie .leaflet-control-zoom, #gi3-root .leaflet-oldie .leaflet-control-layers, #gi3-root .leaflet-oldie .leaflet-popup-content-wrapper, #gi3-root .leaflet-oldie .leaflet-popup-tip {
+	border: 1px solid #999;
+	}
+
+
+/* div icon */
+
+#gi3-root .leaflet-div-icon {
+	background: #fff;
+	border: 1px solid #666;
+	}
+
+
+/* Tooltip */
+/* Base styles for the element that has a tooltip */
+#gi3-root .leaflet-tooltip {
+	position: absolute;
+	padding: 6px;
+	background-color: #fff;
+	border: 1px solid #fff;
+	border-radius: 3px;
+	color: #222;
+	white-space: nowrap;
+	-webkit-user-select: none;
+	-moz-user-select: none;
+	-ms-user-select: none;
+	user-select: none;
+	pointer-events: none;
+	box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+	}
+#gi3-root .leaflet-tooltip.leaflet-interactive {
+	cursor: pointer;
+	pointer-events: auto;
+	}
+#gi3-root .leaflet-tooltip-top:before, #gi3-root .leaflet-tooltip-bottom:before, #gi3-root .leaflet-tooltip-left:before, #gi3-root .leaflet-tooltip-right:before {
+	position: absolute;
+	pointer-events: none;
+	border: 6px solid transparent;
+	background: transparent;
+	content: "";
+	}
+
+/* Directions */
+
+#gi3-root .leaflet-tooltip-bottom {
+	margin-top: 6px;
+}
+#gi3-root .leaflet-tooltip-top {
+	margin-top: -6px;
+}
+#gi3-root .leaflet-tooltip-bottom:before, #gi3-root .leaflet-tooltip-top:before {
+	left: 50%;
+	margin-left: -6px;
+	}
+#gi3-root .leaflet-tooltip-top:before {
+	bottom: 0;
+	margin-bottom: -12px;
+	border-top-color: #fff;
+	}
+#gi3-root .leaflet-tooltip-bottom:before {
+	top: 0;
+	margin-top: -12px;
+	margin-left: -6px;
+	border-bottom-color: #fff;
+	}
+#gi3-root .leaflet-tooltip-left {
+	margin-left: -6px;
+}
+#gi3-root .leaflet-tooltip-right {
+	margin-left: 6px;
+}
+#gi3-root .leaflet-tooltip-left:before, #gi3-root .leaflet-tooltip-right:before {
+	top: 50%;
+	margin-top: -6px;
+	}
+#gi3-root .leaflet-tooltip-left:before {
+	right: 0;
+	margin-right: -12px;
+	border-left-color: #fff;
+	}
+#gi3-root .leaflet-tooltip-right:before {
+	left: 0;
+	margin-left: -12px;
+	border-right-color: #fff;
+	}
+
+/* Printing */
+
+@media print {
+	/* Prevent printers from removing background-images of controls. */
+	#gi3-root .leaflet-control {
+		-webkit-print-color-adjust: exact;
+		print-color-adjust: exact;
+		}
+	}
+
 /* Fuente de estilos. NO editar style.css a mano: se genera con
    python3 dev/scope_css.py static/style.src.css static/style.css
    (acota todo a #gi3-root para no afectar la página de MyGeotab). */
@@ -300,10 +914,18 @@
 #gi3-root .catchip:hover { border-color: var(--ink); }
 
 /* ---------- Mapa ---------- */
-#gi3-root .map { height: 460px; border-radius: 6px; border: 1px solid var(--rule); }
+/* El mapa queda encerrado en su caja: recorta las teselas y aísla los z-index
+   de Leaflet (400-1000) para que no tapen el panel ni los menús de MyGeotab. */
+#gi3-root .map { position: relative; height: 460px; overflow: hidden; isolation: isolate; z-index: 0; contain: layout paint; border-radius: 6px; border: 1px solid var(--rule); }
 #gi3-root .map.hidden { display: none; }
 
 @media (max-width: 700px) {
   #gi3-root .topbar, #gi3-root .gi-main, #gi3-root .filterbar { padding-left: 14px; padding-right: 14px; }
   #gi3-root .readout-value { font-size: 24px; }
 }
+
+/* Tipos de infracción por recorrido */
+#gi3-root .catmix { display: inline-flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; }
+#gi3-root .catmix-i { white-space: nowrap; font-size: 13px; }
+#gi3-root .catmix-i .dot { width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; }
+#gi3-root .catmix-i b { font-variant-numeric: tabular-nums; font-weight: 600; }

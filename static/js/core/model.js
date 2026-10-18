@@ -358,7 +358,10 @@
       dc.ev[catKey] = (dc.ev[catKey] || 0) + 1;
       dc.er[ev.rule] = (dc.er[ev.rule] || 0) + 1;
       if (w > 0) { dc.w += w; dc.n += 1; }
-      if (j) { j.w = (j.w || 0) + w; j.nEv = (j.nEv || 0) + (w > 0 ? 1 : 0); }
+      if (j) {
+        j.w = (j.w || 0) + w; j.nEv = (j.nEv || 0) + (w > 0 ? 1 : 0);
+        if (w > 0) { j.byCat = j.byCat || {}; j.byCat[catKey] = (j.byCat[catKey] || 0) + 1; }
+      }
     }
 
     // Combustible por conductor: se reparte el del vehículo-día por km
@@ -518,12 +521,15 @@
       if (!deviceIds.has(j.d) || j.internal || j.km < 1) continue;
       if (j.o === "_unknown") continue;
       const key = j.o + "→" + j.dest;
-      if (!groups.has(key)) groups.set(key, { key, from: j.oName, to: j.destName, n: 0, km: 0, dh: 0, ih: 0, w: 0, nEv: 0, devices: new Set(), noZone: j.o === "_none" || j.dest === "_none" });
+      if (!groups.has(key)) groups.set(key, { key, from: j.oName, to: j.destName, n: 0, km: 0, dh: 0, ih: 0, w: 0, nEv: 0, byCat: {}, devices: new Set(), noZone: j.o === "_none" || j.dest === "_none" });
       const g = groups.get(key);
       g.n++; g.km += j.km; g.dh += j.dh; g.ih += j.ih; g.w += j.w || 0; g.nEv += j.nEv || 0; g.devices.add(j.d);
+      for (const k in j.byCat || {}) g.byCat[k] = (g.byCat[k] || 0) + j.byCat[k];
     }
     return [...groups.values()].map(g => ({
       ...g, devices: g.devices.size,
+      // Tipos de infracción del recorrido, de más a menos frecuente.
+      cats: Object.entries(g.byCat).sort((a, b) => b[1] - a[1]).map(([cat, n]) => ({ cat, n })),
       avgKm: g.km / g.n, risk: g.km > 0 ? (g.w / g.km) * 100 : null,
       idlePct: g.dh + g.ih > 0 ? (g.ih / (g.dh + g.ih)) * 100 : null,
     }));
