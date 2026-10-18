@@ -296,17 +296,24 @@
   // habituales (rango de fechas, reglas, vehículos, conductores) y la página
   // toma los que reconoce. El filtro de grupos de MyGeotab sigue aplicado.
   GI.EVENTS_PAGE = "eventsInsights";
+  // Abre la página Eventos de MyGeotab con los filtros aplicados. Formato
+  // verificado en MyGeotab 11.146 (estado en el hash, notación rison):
+  // #eventsInsights,activeTab:overview,assetsFilter:!(id),driversFilter:!(id),
+  //   dateRangeFilter:(from:'ISO',label:unknown,to:'ISO'),exceptionRulesFilter:!(id),groupByFilter:Device
+  const risonStr = v => "'" + String(v).replace(/!/g, "!!").replace(/'/g, "!'") + "'";
+  const risonList = arr => "!(" + arr.map(risonStr).join(",") + ")";
   GI.openEventsPage = function (o) {
-    const st = GI._mgState;
-    const few = arr => (arr && arr.length && arr.length <= 100 ? arr : undefined);
-    const args = {
-      dateRange: { startDate: o.from + "T00:00:00.000Z", endDate: o.to + "T23:59:59.999Z" },
-      rules: few(o.ruleIds), ruleIds: few(o.ruleIds),
-      devices: few(o.deviceIds), deviceIds: few(o.deviceIds),
-      drivers: few(o.driverIds), driverIds: few(o.driverIds),
-    };
-    if (st && typeof st.gotoPage === "function") st.gotoPage(GI.EVENTS_PAGE, args);
-    else console.info("[Geotab Insights] gotoPage", GI.EVENTS_PAGE, args);
+    const few = arr => (arr && arr.length && arr.length <= 100 ? arr : null);
+    const from = GI.parseDayKey(o.from).toISOString();
+    const to = GI.addDays(GI.parseDayKey(o.to), 1).toISOString();
+    const parts = [GI.EVENTS_PAGE, "activeTab:overview"];
+    const devs = few(o.deviceIds), drvs = few(o.driverIds), rules = few(o.ruleIds);
+    if (devs) parts.push("assetsFilter:" + risonList(devs));
+    parts.push("dateRangeFilter:(from:" + risonStr(from) + ",label:unknown,to:" + risonStr(to) + ")");
+    if (drvs) parts.push("driversFilter:" + risonList(drvs));
+    if (rules) parts.push("exceptionRulesFilter:" + risonList(rules));
+    parts.push("groupByFilter:" + (drvs ? "Driver" : "Device"));
+    window.location.hash = parts.join(",");
   };
 
   GI.App = App;

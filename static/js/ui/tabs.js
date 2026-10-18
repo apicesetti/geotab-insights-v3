@@ -376,7 +376,7 @@
         onRowClick=${r => (r.unknown ? null : onDriver(r.id))} columns=${[
         { key: "name", label: "Conductor" },
         { key: "n", label: "Eventos", align: "num", title: "Click en el número para verlos en MyGeotab",
-          fmt: r => html`<button className="btn link" onClick=${e => { e.stopPropagation(); openEvents(view, { ruleIds, deviceIds: r.devs, driverIds: r.unknown ? null : [r.id] }); }}>${n0(r.n)}</button>` },
+          fmt: r => html`<button className="btn link" onClick=${e => { e.stopPropagation(); openEvents(view, r.unknown ? { ruleIds, deviceIds: r.devs } : { ruleIds, driverIds: [r.id] }); }}>${n0(r.n)}</button>` },
         { key: "share", label: "% del total", align: "num", value: r => r.n, fmt: r => GI.fmtPct(total ? (r.n / total) * 100 : null, 0) },
         { key: "km", label: "Km", align: "num", fmt: r => n0(r.km) },
         { key: "rate", label: "Cada 100 km", align: "num", fmt: r => n2(r.rate) },
