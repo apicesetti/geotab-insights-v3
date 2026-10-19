@@ -65,6 +65,21 @@
         byDrv.get(t.r).push(t);
       }
     }
+    const evByDrv = new Map();
+    for (const e of model.events) {
+      if (!(e.w > 0) || !ids.has(e.d) || !ok(e.drv)) continue;
+      if (!evByDrv.has(e.drv)) evByDrv.set(e.drv, []);
+      evByDrv.get(e.drv).push(e);
+    }
+    const pearson = pts => {
+      if (pts.length < 8) return null;
+      const n = pts.length, mx = GI.sum(pts, p => p[0]) / n, my = GI.sum(pts, p => p[1]) / n;
+      let sxy = 0, sxx = 0, syy = 0;
+      for (const [x, y] of pts) { sxy += (x - mx) * (y - my); sxx += (x - mx) ** 2; syy += (y - my) ** 2; }
+      return sxx > 0 && syy > 0 ? sxy / Math.sqrt(sxx * syy) : null;
+    };
+    // Flota: riesgo en días largos / después de descanso corto vs el resto.
+    const fleetDays = { long: { km: 0, w: 0 }, normal: { km: 0, w: 0 }, shortRest: { km: 0, w: 0 }, rested: { km: 0, w: 0 } };
     const drivers = [];
     for (const [id, raw] of byDrv) {
       raw.sort((a, b) => a.s - b.s);
@@ -83,10 +98,26 @@
       const days = new Map();
       for (const t of trips) {
         const dk = GI.dayKey(new Date(t.s));
-        const d = days.get(dk) || { dk, s: t.s, e: t.e, dh: 0, km: 0 };
+        const d = days.get(dk) || { dk, s: t.s, e: t.e, dh: 0, km: 0, n: 0, w: 0 };
         d.e = Math.max(d.e, t.e); d.dh += t.dh || 0; d.km += t.km || 0;
         days.set(dk, d);
       }
+      // Infracciones del conductor por día y por horas acumuladas al volante.
+      const cumB = FATIGUE_BUCKETS.map(([a, b]) => ({ from: a, to: b, km: 0, w: 0, n: 0 }));
+      const bOf = h => cumB.findIndex(x => h >= x.from && h < x.to);
+      let cday = null, cum = 0;
+      for (const t of trips) {
+        const dk = GI.dayKey(new Date(t.s));
+        if (dk !== cday) { cday = dk; cum = 0; }
+        t.cum = cum; cumB[bOf(cum)].km += t.km; cum += t.dh;
+      }
+      for (const e of evByDrv.get(id) || []) {
+        const d = days.get(GI.dayKey(new Date(e.t)));
+        if (d) { d.n++; d.w += e.w; }
+        const i = findTrip(trips, e.t);
+        if (i >= 0) { const t = trips[i]; const b = cumB[bOf(t.cum + Math.max(0, Math.min(t.dh, (e.t - t.s) / H)))]; b.n++; b.w += e.w; }
+      }
+      cumB.forEach(b => { b.rate = b.km >= 100 ? (b.w / b.km) * 100 : null; });
       const list = [...days.values()].sort((a, b) => a.s - b.s);
       let longDays = 0, longSpans = 0, shortRests = 0, maxRow = 0, row = 0, prev = null, minRest = null, maxDay = 0;
       for (const d of list) {
@@ -98,6 +129,7 @@
           const gapDays = Math.round((GI.parseDayKey(d.dk) - GI.parseDayKey(prev.dk)) / 86400000);
           row = gapDays === 1 ? row + 1 : 1;
           const rest = (d.s - prev.e) / H;
+          if (gapDays <= 1 && rest >= 0) d.restBefore = rest;
           if (gapDays <= 1 && rest >= 0) {
             minRest = minRest == null ? rest : Math.min(minRest, rest);
             if (rest < fz.min_rest) shortRests++;
@@ -113,12 +145,26 @@
         stint += t.dh || 0; maxStint = Math.max(maxStint, stint); lastE = t.e;
       }
       if (stint >= fz.max_continuous) longStints++;
+      for (const d of list) {
+        d.span = (d.e - d.s) / H;
+        d.rate = d.km >= 30 ? (d.w / d.km) * 100 : null;
+        const L = d.dh > fz.max_drive_day ? fleetDays.long : fleetDays.normal;
+        L.km += d.km; L.w += d.w;
+        if (d.restBefore != null) { const R = d.restBefore < fz.min_rest ? fleetDays.shortRest : fleetDays.rested; R.km += d.km; R.w += d.w; }
+      }
+      // ¿Más horas en el día = más infracciones por km? (correlación de Pearson)
+      const corrPts = list.filter(d => d.rate != null).map(d => [d.dh, d.rate]);
+      const corr = pearson(corrPts);
+      const idxOf = arr => { const km = GI.sum(arr, d => d.km); return km >= 100 ? (GI.sum(arr, d => d.w) / km) * 100 : null; };
+      const longIdx = idxOf(list.filter(d => d.dh > fz.max_drive_day)), normalIdx = idxOf(list.filter(d => d.dh <= fz.max_drive_day));
       const flags = (longDays ? 1 : 0) + (longSpans ? 1 : 0) + (shortRests ? 1 : 0) + (maxRow >= fz.max_days_row ? 1 : 0) + (longStints ? 1 : 0);
       drivers.push({
         id, name: model.driverName.get(id) || id, days: list.length,
         avgDay: list.length ? GI.sum(list, d => d.dh) / list.length : 0, maxDay,
         longDays, longSpans, shortRests, minRest, maxRow, maxStint, longStints,
         level: flags >= 3 ? "alta" : flags >= 1 ? "media" : "baja", flags,
+        dayList: list, cumBuckets: cumB, corr, corrN: corrPts.length, longIdx, normalIdx,
+        idx: idxOf(list), n: GI.sum(list, d => d.n),
       });
     }
 
@@ -178,7 +224,11 @@
     }
 
     return {
-      fatigue: { buckets: fb, drivers, limits: fz },
+      fatigue: {
+        buckets: fb, drivers, limits: fz,
+        longVsNormal: fleetDays.long.km >= 200 && fleetDays.normal.km >= 200 ? (fleetDays.long.w / fleetDays.long.km) / (fleetDays.normal.w / fleetDays.normal.km || Infinity) : null,
+        shortRestVsRested: fleetDays.shortRest.km >= 200 && fleetDays.rested.km >= 200 ? (fleetDays.shortRest.w / fleetDays.shortRest.km) / (fleetDays.rested.w / fleetDays.rested.km || Infinity) : null,
+      },
       familiarity: { buckets: famB, newcomers },
       prolonged: {
         longMin,

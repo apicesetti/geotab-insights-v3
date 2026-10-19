@@ -183,8 +183,83 @@
   const fatigueLabel = b => (b.to === Infinity ? "+" + b.from + " h" : b.from + "–" + b.to + " h");
   function levelTag(l) { return html`<span className=${"tag expo-" + l}>${l === "alta" ? "Alta" : l === "media" ? "Media" : "Baja"}</span>`; }
 
+  // Lectura de una correlación en palabras.
+  function corrWords(r) {
+    if (r == null) return null;
+    const a = Math.abs(r);
+    if (a < 0.2) return { tone: "flat", text: "no se ve relación" };
+    const dir = r > 0 ? "a más horas, más infracciones por km" : "a más horas, menos infracciones por km";
+    return { tone: r > 0 ? "bad" : "good", text: (a >= 0.4 ? "relación marcada: " : "relación débil: ") + dir };
+  }
+  const fmtDay = dk => GI.parseDayKey(dk).toLocaleDateString("es-AR", { weekday: "short", day: "2-digit", month: "2-digit" });
+  const fmtHour = ms => new Date(ms).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
+
+  // Detalle de jornada, descanso y fatiga de un conductor.
+  function FatigueDetail({ view, d, limits: L, onClose }) {
+    const days = d.dayList;
+    const cw = corrWords(d.corr);
+    const worst = days.map(x => ({ ...x,
+      flags: (x.dh > L.max_drive_day ? 1 : 0) + (x.span > L.max_span ? 1 : 0) + (x.restBefore != null && x.restBefore < L.min_rest ? 1 : 0) }));
+    const lvf = d.longIdx != null && d.normalIdx ? d.longIdx / d.normalIdx : null;
+    return html`<${GI.Modal} title=${d.name + " · jornada y descanso"} onClose=${onClose} wide>
+      <div className="readouts compact">
+        <${Kpi} label="Nivel de fatiga" value=${d.level === "alta" ? "Alta" : d.level === "media" ? "Media" : "Baja"} sub=${html`<span>${d.flags} de 5 límites superados</span>`} />
+        <${Kpi} label="Días trabajados" value=${n0(d.days)} sub=${html`<span>hasta ${d.maxRow} días seguidos</span>`} />
+        <${Kpi} label="Manejo por día" value=${n1(d.avgDay)} unit="h" sub=${html`<span>máximo ${n1(d.maxDay)} h</span>`} />
+        <${Kpi} label="Descanso más corto" value=${d.minRest == null ? "–" : n1(d.minRest)} unit=${d.minRest == null ? null : "h"} sub=${html`<span>${d.shortRests} descansos de menos de ${L.min_rest} h</span>`} />
+        <${Kpi} label="Manejo continuo máx." value=${n1(d.maxStint)} unit="h" sub=${html`<span>${d.longStints} veces más de ${L.max_continuous} h seguidas</span>`} />
+      </div>
+      <div className="why-text">
+        <p><b>¿Las horas de trabajo influyen en sus infracciones?</b>
+        ${cw ? html` Comparando sus ${d.corrN} días, <span className=${"delta " + cw.tone}>${cw.text}</span> (correlación ${GI.fmtNum(d.corr, 2)}).` : html` Todavía hay pocos días con km suficientes para medirlo (hacen falta 8).`}
+        ${lvf != null ? html` En sus días de más de ${L.max_drive_day} h de manejo, su riesgo es <b>${factorTxt(lvf)}</b> el de sus días normales (${n2(d.longIdx)} vs ${n2(d.normalIdx)} pts/100 km).` : null}</p>
+        <p className="muted small">La correlación va de −1 a 1: cerca de 0 no hay relación; por encima de 0,4 la relación es marcada. Que haya relación no prueba que el cansancio sea la causa, pero es una señal para revisar su jornada.</p>
+      </div>
+      <div className="grid-2">
+        <div><h3>Horas de manejo por día</h3>
+          <${ChartView} height=${220} config=${{
+            type: "bar",
+            data: { labels: days.map(x => fmtDay(x.dk)), datasets: [{ label: "Horas de manejo", data: days.map(x => GI.round(x.dh, 1)),
+              backgroundColor: days.map(x => (x.dh > L.max_drive_day ? "#e34948" : "#2a78d6")), borderRadius: 3, borderSkipped: "start" }] },
+            options: { plugins: { legend: { display: false }, tooltip: { callbacks: { afterLabel: c => { const x = days[c.dataIndex]; return "Jornada " + n1(x.span) + " h · " + n0(x.n) + " infracciones" + (x.restBefore != null ? " · descanso previo " + n1(x.restBefore) + " h" : ""); } } } },
+              scales: { y: { beginAtZero: true, title: { display: true, text: "h de manejo" } } } },
+          }} />
+          <p className="muted small">En rojo, los días con más de ${L.max_drive_day} h de manejo.</p></div>
+        <div><h3>Horas de manejo vs infracciones cada 100 km (cada punto es un día)</h3>
+          <${ChartView} height=${220} config=${{
+            type: "scatter",
+            data: { datasets: [{ label: "Días", data: days.filter(x => x.rate != null).map(x => ({ x: GI.round(x.dh, 1), y: GI.round(x.rate, 2), dk: x.dk })),
+              backgroundColor: "#2a78d6cc", pointRadius: 5, pointHoverRadius: 7 }] },
+            options: { plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => fmtDay(c.raw.dk) + ": " + n1(c.raw.x) + " h, " + n2(c.raw.y) + " pts/100 km" } } },
+              scales: { x: { beginAtZero: true, title: { display: true, text: "h de manejo en el día" } }, y: { beginAtZero: true, title: { display: true, text: "pts/100 km" } } } },
+          }} /></div>
+      </div>
+      <h3 style=${{ marginTop: "14px" }}>Su riesgo según horas acumuladas al volante en el día</h3>
+      <${ChartView} height=${180} config=${{
+        type: "bar",
+        data: { labels: d.cumBuckets.map(fatigueLabel), datasets: [{ label: "pts/100 km", data: d.cumBuckets.map(b => (b.rate == null ? null : GI.round(b.rate, 2))), backgroundColor: "#2a78d6", borderRadius: 3, borderSkipped: "start" }] },
+        options: { plugins: { legend: { display: false }, tooltip: { callbacks: { afterLabel: c => { const b = d.cumBuckets[c.dataIndex]; return n0(b.n) + " infracciones en " + n0(b.km) + " km"; } } } },
+          scales: { y: { beginAtZero: true, title: { display: true, text: "pts/100 km" } } } },
+      }} />
+      <h3 style=${{ marginTop: "14px" }}>Jornadas</h3>
+      <${DataTable} rowKey=${r => r.dk} rows=${worst} limit=${15} defaultSort=${{ key: "flags", dir: "desc" }} columns=${[
+        { key: "dk", label: "Día", value: r => r.s, fmt: r => fmtDay(r.dk) },
+        { key: "s", label: "Inicio", align: "num", fmt: r => fmtHour(r.s) },
+        { key: "e", label: "Fin", align: "num", fmt: r => fmtHour(r.e) },
+        { key: "span", label: "Jornada", align: "num", fmt: r => html`<span className=${r.span > L.max_span ? "delta bad" : ""}>${n1(r.span)} h</span>` },
+        { key: "dh", label: "Manejo", align: "num", fmt: r => html`<span className=${r.dh > L.max_drive_day ? "delta bad" : ""}>${n1(r.dh)} h</span>` },
+        { key: "restBefore", label: "Descanso previo", align: "num", fmt: r => (r.restBefore == null ? "–" : html`<span className=${r.restBefore < L.min_rest ? "delta bad" : ""}>${n1(r.restBefore)} h</span>`) },
+        { key: "km", label: "Km", align: "num", fmt: r => n0(r.km) },
+        { key: "n", label: "Infracciones", align: "num" },
+        { key: "rate", label: "pts/100 km", align: "num", fmt: r => (r.rate == null ? "–" : n2(r.rate)) },
+        { key: "flags", label: "Alertas", align: "num", fmt: r => (r.flags ? html`<span className="delta bad">${r.flags}</span>` : "0") },
+      ]} />
+    <//>`;
+  }
+
   function FatiguePanel({ view, rf, onDriver }) {
     const f = rf.fatigue, L = f.limits;
+    const [sel, setSel] = useState(null);
     const late = f.buckets.filter(b => b.factor != null && b.from >= 2).sort((a, b) => b.factor - a.factor)[0];
     const minKm = view.settings.drivers.min_km_ranking;
     const rows = f.drivers.filter(d => d.days > 0);
@@ -208,7 +283,10 @@
           <${Kpi} label=${"Días con más de " + L.max_drive_day + " h de manejo"} value=${n0(GI.sum(rows, d => d.longDays))} sub=${html`<span>en ${n0(rows.filter(d => d.longDays).length)} conductores</span>`} />
           <${Kpi} label=${"Descansos de menos de " + L.min_rest + " h"} value=${n0(GI.sum(rows, d => d.shortRests))} sub=${html`<span>en ${n0(rows.filter(d => d.shortRests).length)} conductores</span>`} />
         </div>
-        <${DataTable} rowKey=${r => r.id} rows=${rows} limit=${20} defaultSort=${{ key: "flags", dir: "desc" }} onRowClick=${onDriver ? r => onDriver(r.id) : null} columns=${[
+        ${f.longVsNormal != null || f.shortRestVsRested != null ? html`<div className=${"verdict-line " + ((f.longVsNormal || 0) >= 1.2 || (f.shortRestVsRested || 0) >= 1.2 ? "bad" : "")}><span className="vtag">Horas y riesgo</span><span>
+          ${f.longVsNormal != null ? html`En los días de más de ${L.max_drive_day} h de manejo, el riesgo de la flota es <b>${factorTxt(f.longVsNormal)}</b> el de los días normales. ` : null}
+          ${f.shortRestVsRested != null ? html`Después de un descanso de menos de ${L.min_rest} h, es <b>${factorTxt(f.shortRestVsRested)}</b> el de los días con descanso completo.` : null}</span></div>` : null}
+        <${DataTable} rowKey=${r => r.id} rows=${rows} limit=${20} defaultSort=${{ key: "flags", dir: "desc" }} onRowClick=${r => setSel(r)} columns=${[
           { key: "name", label: "Conductor" },
           { key: "flags", label: "Fatiga", value: r => r.flags * 1000 + r.longDays + r.shortRests, fmt: r => levelTag(r.level) },
           { key: "days", label: "Días trabajados", align: "num" },
@@ -219,7 +297,11 @@
           { key: "minRest", label: "Descanso más corto", align: "num", fmt: r => (r.minRest == null ? "–" : n1(r.minRest) + " h") },
           { key: "maxRow", label: "Días seguidos", align: "num", fmt: r => html`<span className=${r.maxRow >= L.max_days_row ? "delta bad" : ""}>${r.maxRow}</span>` },
           { key: "maxStint", label: "Continuo máx.", align: "num", fmt: r => html`${n1(r.maxStint)} h${r.longStints ? html` <span className="delta bad" title=${"Veces que manejó más de " + L.max_continuous + " h seguidas"}>${r.longStints}×</span>` : ""}` },
+          { key: "corr", label: "Horas ↔ infracciones", align: "num", title: "Correlación entre horas de manejo del día e infracciones por km (−1 a 1). Por encima de 0,4: más horas, más infracciones.",
+            fmt: r => { const w = corrWords(r.corr); return w ? html`<span className=${"delta " + w.tone} title=${w.text}>${GI.fmtNum(r.corr, 2)}</span>` : html`<span className="muted">–</span>`; } },
         ]} empty="Sin conductores identificados en el período." />
+        <p className="muted small">Click en un conductor para ver sus jornadas, descansos y si sus infracciones aumentan con las horas trabajadas.</p>
+        ${sel ? html`<${FatigueDetail} view=${view} d=${sel} limits=${L} onClose=${() => setSel(null)} />` : null}
       <//>
     </div>`;
   }
