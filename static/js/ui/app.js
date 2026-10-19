@@ -60,6 +60,19 @@
     const groupRef = useRef(GI._mgGroups || []);
     const [loadingLabel, setLoadingLabel] = useState("");
     const [largeFleet, setLargeFleet] = useState(false);
+    const [noShared, setNoShared] = useState(false);
+    const [sharing, setSharing] = useState(null);
+    const [sharingBusy, setSharingBusy] = useState(false);
+    async function shareNow() {
+      setSharingBusy(true);
+      try {
+        const saved = await GI.shareWithAll(api, settings, milestones);
+        setSettings(saved);
+        const shared = await GI.loadShared(api);
+        setSharing(await GI.sharingStatus(api, shared._settingsRecords));
+      } catch (e) { setError("No se pudo compartir la configuración: " + (e.message || e)); }
+      setSharingBusy(false);
+    }
 
     // ---- Arranque: catálogos + config compartida ----
     useEffect(() => {
@@ -71,6 +84,9 @@
           GI.applyCategories(s.categories);
           const admin = await GI.resolveIsAdmin(api, userName, s);
           setCatalogs(cat); setSettings(s); setMilestones(shared.milestones); setIsAdmin(admin);
+          setNoShared(!shared.settings);
+          // El administrador ve si hay usuarios que todavía no reciben su configuración.
+          if (admin && shared.settings) GI.sharingStatus(api, shared._settingsRecords).then(st => setSharing(st));
           setGran(s.ui.default_granularity);
           // Flota grande sin alcance definido: arranca con 30 días; el grupo
           // elegido arriba pasa a filtrar en la API (no en el navegador).
@@ -176,6 +192,8 @@
     async function saveSettings(next) {
       const saved = await GI.saveSettings(api, next);
       GI.applyCategories(saved.categories);
+      setNoShared(false);
+      GI.loadShared(api).then(sh => GI.sharingStatus(api, sh._settingsRecords)).then(st => setSharing(st)).catch(() => {});
       const prevRules = raw ? raw.ruleIds : new Set();
       const needsReload = GI.riskRuleIds(saved.rule_mapping).some(r => !prevRules.has(r));
       setSettings(saved);
@@ -250,6 +268,11 @@
       <nav className="tabs">${TABS.map(([k, l]) => html`<button key=${k} className=${tab === k ? "on" : ""} onClick=${() => setTab(k)}>${l}</button>`)}</nav>
       <div className="gi-main">
         ${error ? html`<${Info} tone="error">${error}<//>` : null}
+        ${noShared && !isAdmin ? html`<${Info} tone="warn">Estás viendo la configuración por defecto: un administrador todavía no la configuró, o la guardó antes de que se compartiera con tu grupo. Pedile que abra el add-in y guarde la configuración (o use "Compartir con todos").<//>` : null}
+        ${isAdmin && sharing && sharing.missingUsers.length ? html`<${Info} tone="warn">
+          <b>${GI.fmtNum(sharing.missingUsers.length)} usuarios no ven tu configuración</b> porque su acceso a datos es un grupo con el que todavía no está compartida
+          (${sharing.missingUsers.slice(0, 3).join(", ")}${sharing.missingUsers.length > 3 ? "…" : ""}). Hasta entonces ven los valores por defecto.
+          <button className="btn primary small" style=${{ marginLeft: "8px" }} disabled=${sharingBusy} onClick=${shareNow}>${sharingBusy ? "Compartiendo…" : "Compartir con todos"}</button><//>` : null}
         ${calcError ? html`<${Info} tone="error"><b>Error al calcular el tablero:</b> ${String(calcError.message || calcError)}
           <details><summary>Detalle técnico</summary><pre style=${{ whiteSpace: "pre-wrap", fontSize: "12px" }}>${String(calcError.stack || "")}</pre></details><//>` : null}
         ${raw && raw.fuelPending && (tab === "combustible" || tab === "resumen") ? html`<${Info}>Los datos de combustible se están cargando; los litros y costos se completan en unos segundos.<//>` : null}

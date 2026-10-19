@@ -10,12 +10,48 @@
 //
 // La restricción de edición (solo administradores) es de la interfaz: la
 // Storage API no permite limitar escritura por usuario.
+//
+// Visibilidad: AddInData se rige por grupos como cualquier entidad. Un
+// usuario cuyo acceso a datos es un subgrupo NO ve un registro guardado solo
+// en el grupo de la empresa. Por eso cada registro se guarda en el grupo de
+// la empresa + todos los grupos de acceso de los usuarios de la base.
 (function (GI) {
   "use strict";
 
   const ADDIN_ID = "a2jBAg7PpaFdQpimkOJ7Ajg";
   const CHUNK_SIZE = 8000;
   const ACCESS_GROUPS = [{ id: "GroupCompanyId" }];
+
+  // Grupos de acceso a datos de todos los usuarios (los "companyGroups").
+  // Requiere permiso para ver usuarios: lo usa el administrador al guardar.
+  async function userScopeGroups(api) {
+    const users = (await api.call("Get", { typeName: "User", propertySelector: { fields: ["id", "companyGroups"], isIncluded: true } })) || [];
+    const ids = new Set(["GroupCompanyId"]);
+    for (const u of users) for (const g of u.companyGroups || []) { const id = GI.idOf(g); if (id) ids.add(id); }
+    return [...ids];
+  }
+  async function shareGroups(api) {
+    try { return (await userScopeGroups(api)).map(id => ({ id })); }
+    catch (e) { return ACCESS_GROUPS; }
+  }
+
+  // ¿Qué usuarios no ven la configuración? (grupos de acceso que no están en
+  // los registros). Devuelve { missingGroups, missingUsers } o null si no se pudo.
+  async function sharingStatus(api, settingsRecords) {
+    try {
+      const users = (await api.call("Get", { typeName: "User", propertySelector: { fields: ["id", "name", "companyGroups"], isIncluded: true } })) || [];
+      const have = new Set();
+      for (const r of settingsRecords || []) for (const g of r.groups || []) have.add(GI.idOf(g));
+      const missingGroups = new Set(), missingUsers = [];
+      for (const u of users) {
+        const gs = (u.companyGroups || []).map(GI.idOf).filter(Boolean);
+        if (!gs.length || gs.some(g => have.has(g))) continue;
+        gs.forEach(g => missingGroups.add(g));
+        missingUsers.push(u.name || u.id);
+      }
+      return { missingGroups: [...missingGroups], missingUsers };
+    } catch (e) { return null; }
+  }
 
   async function getAll(api) {
     return (await api.call("Get", { typeName: "AddInData", search: { addInId: ADDIN_ID } })) || [];
@@ -37,7 +73,7 @@
     for (const rec of all) {
       const d = parseDetails(rec);
       if (!d) continue;
-      if (d.kind === "settings") settingsParts.push({ id: rec.id, ...d });
+      if (d.kind === "settings") settingsParts.push({ id: rec.id, groups: rec.groups || [], ...d });
       else if (d.kind === "milestone") milestones.push({ ...d, id: rec.id });
     }
     let settings = null;
@@ -65,9 +101,10 @@
     for (let i = 0; i < text.length; i += CHUNK_SIZE) chunks.push(text.slice(i, i + CHUNK_SIZE));
     const rev = Date.now();
     const before = (await getAll(api)).filter(r => (parseDetails(r) || {}).kind === "settings");
+    const groups = await shareGroups(api);
     await api.multiCall(chunks.map((chunk, part) => ["Add", {
       typeName: "AddInData",
-      entity: { addInId: ADDIN_ID, groups: ACCESS_GROUPS, details: { kind: "settings", rev, part, parts: chunks.length, chunk } },
+      entity: { addInId: ADDIN_ID, groups, details: { kind: "settings", rev, part, parts: chunks.length, chunk } },
     }]));
     if (before.length) {
       await api.multiCall(before.map(r => ["Remove", { typeName: "AddInData", entity: { id: r.id } }]));
@@ -79,14 +116,14 @@
   async function addMilestone(api, m) {
     const details = { kind: "milestone", ...m, created_at: new Date().toISOString() };
     delete details.id;
-    const id = await api.call("Add", { typeName: "AddInData", entity: { addInId: ADDIN_ID, groups: ACCESS_GROUPS, details } });
+    const id = await api.call("Add", { typeName: "AddInData", entity: { addInId: ADDIN_ID, groups: await shareGroups(api), details } });
     return { ...details, id };
   }
 
   async function updateMilestone(api, m) {
     const details = { kind: "milestone", ...m };
     delete details.id;
-    await api.call("Set", { typeName: "AddInData", entity: { id: m.id, addInId: ADDIN_ID, groups: ACCESS_GROUPS, details } });
+    await api.call("Set", { typeName: "AddInData", entity: { id: m.id, addInId: ADDIN_ID, groups: await shareGroups(api), details } });
     return m;
   }
 
@@ -108,5 +145,12 @@
     }
   }
 
-  Object.assign(GI, { ADDIN_ID, loadShared, saveSettings, addMilestone, updateMilestone, removeMilestone, resolveIsAdmin });
+  // Vuelve a guardar la config y los hitos con los grupos de todos los usuarios.
+  async function shareWithAll(api, settings, milestones) {
+    const saved = await saveSettings(api, settings);
+    for (const m of milestones || []) await updateMilestone(api, m);
+    return saved;
+  }
+
+  Object.assign(GI, { ADDIN_ID, loadShared, saveSettings, sharingStatus, shareWithAll, addMilestone, updateMilestone, removeMilestone, resolveIsAdmin });
 })(window.GI);
