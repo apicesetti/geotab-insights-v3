@@ -301,7 +301,7 @@
   function EventsEvolution({ view, riskCats }) {
     const allKeys = riskCats.map(c => c.key);
     const [sel, setSel] = useState(allKeys);
-    const [mode, setMode] = useState("rate");
+    const [mode, setMode] = useState("count");
     const [showKm, setShowKm] = useState(true);
     const [why, setWhy] = useState(false);
     useEffect(() => { setSel(s => (s.length ? s.filter(k => allKeys.includes(k)) : allKeys)); }, [allKeys.join()]);
@@ -363,7 +363,7 @@
     return html`<${Panel} title="Evolución de las infracciones"
       hint="Eventos cada 100 km normaliza por lo recorrido: si las infracciones se mantienen y los km suben, la tasa baja y es una mejora. En 'Eventos vs km' ambas líneas arrancan en 100, así se compara cuánto creció cada una."
       actions=${html`<${Segmented} value=${mode} onChange=${setMode} options=${[
-        { value: "rate", label: "Cada 100 km" }, { value: "index", label: "Eventos vs km" }, { value: "count", label: "Cantidad" }]} />
+        { value: "count", label: "Cantidad" }, { value: "rate", label: "Cada 100 km" }, { value: "index", label: "Eventos vs km" }]} />
         ${mode !== "index" ? html`<label className="inline"><input type="checkbox" checked=${showKm} onChange=${e => setShowKm(e.target.checked)} /> Km recorridos (línea)</label>` : null}`}>
       <div className="catbar" role="group" aria-label="Categorías visibles">
         <button className="btn small" onClick=${() => setSel(allKeys)}>Todas</button>
