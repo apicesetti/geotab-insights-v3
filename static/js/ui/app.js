@@ -303,11 +303,13 @@
   const risonStr = v => "'" + String(v).replace(/!/g, "!!").replace(/'/g, "!'") + "'";
   const risonList = arr => "!(" + arr.map(risonStr).join(",") + ")";
   GI.openEventsPage = function (o) {
-    const few = arr => (arr && arr.length && arr.length <= 100 ? arr : null);
+    // La página de Eventos no acepta el filtro de grupos por URL (groupsFilter
+    // la deja en blanco), así que el alcance se pasa como lista de vehículos.
+    const few = (arr, max) => (arr && arr.length && arr.length <= (max || 100) ? arr : null);
     const from = GI.parseDayKey(o.from).toISOString();
     const to = GI.addDays(GI.parseDayKey(o.to), 1).toISOString();
     const parts = [GI.EVENTS_PAGE, "activeTab:overview"];
-    const devs = few(o.deviceIds), drvs = few(o.driverIds), rules = few(o.ruleIds);
+    const devs = few(o.deviceIds, 600), drvs = few(o.driverIds), rules = few(o.ruleIds);
     if (devs) parts.push("assetsFilter:" + risonList(devs));
     parts.push("dateRangeFilter:(from:" + risonStr(from) + ",label:unknown,to:" + risonStr(to) + ")");
     if (drvs) parts.push("driversFilter:" + risonList(drvs));
