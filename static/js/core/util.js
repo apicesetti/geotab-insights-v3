@@ -1,6 +1,9 @@
 // Helpers genéricos sin dependencias. Todo el proyecto corre en el browser,
 // sin build: cada archivo define funciones globales dentro del namespace GI.
-window.GI = window.GI || {};
+// Cada versión del add-in (la normal y la BETA) crea su propio GI y guarda
+// su propio React: si las dos se cargan en la misma página de MyGeotab no se
+// pisan entre sí (antes compartían GI y React y fallaba con el error #321).
+window.GI = { React: window.React, ReactDOM: window.ReactDOM, htm: window.htm };
 
 (function (GI) {
   "use strict";

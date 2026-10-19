@@ -3,6 +3,7 @@
 // comparando ventanas iguales antes y después, normalizado por km.
 (function (GI) {
   "use strict";
+  const React = GI.React, ReactDOM = GI.ReactDOM;
   const { useState, useMemo } = React;
   const html = GI.html;
   const { Panel, Info, DataTable, ChartView, Delta, Modal } = GI;

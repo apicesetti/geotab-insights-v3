@@ -11,6 +11,7 @@
 // - Todo lo que es una fila (vehículo, conductor) se puede abrir con un click.
 (function (GI) {
   "use strict";
+  const React = GI.React, ReactDOM = GI.ReactDOM;
   const { useState, useMemo, useEffect } = React;
   const html = GI.html;
   const { Kpi, Delta, Panel, Info, DataTable, ChartView, Segmented, Modal } = GI;
