@@ -146,7 +146,7 @@
             ${counts ? html`<td className="num">${GI.fmtNum(counts[r.id] || 0)}</td>` : null}
             <td><select disabled=${ro} value=${cur} onChange=${e => setRule(r.id, e.target.value)}>
               <option value="">— No incluir —</option>
-              ${cats.map(c => html`<option key=${c.key} value=${c.key}>${c.label}${c.kind !== "riesgo" ? " (no se descarga)" : ""}${c.key === sug && c.key !== cur ? " (sugerida)" : ""}</option>`)}
+              ${cats.map(c => html`<option key=${c.key} value=${c.key}>${c.label}${c.kind !== "riesgo" ? " (operativa: no se consulta)" : ""}${c.key === sug && c.key !== cur ? " (sugerida)" : ""}</option>`)}
             </select></td>
             <td className="num">${cur && catKind(cur) === "riesgo" ? html`<input type="number" step="0.01" min="0" className="num-in" disabled=${ro} placeholder="–"
               value=${targets[r.id] != null ? targets[r.id] : ""} onChange=${e => setTarget(r.id, e.target.value)} />` : null}</td></tr>`;
@@ -285,7 +285,7 @@
       set(["category_weights"], { ...w, [key]: 1 });
     }
     return html`<${Panel} title="Categorías"
-      hint="Las categorías de riesgo se descargan, suman al índice de riesgo y se muestran en Seguridad. Las operativas no se descargan ni suman. Las primeras 8 de riesgo tienen color propio en los gráficos (en este orden); el resto aparece como 'Otras'.">
+      hint="Las categorías de riesgo se descargan, suman al índice de riesgo y se muestran en Seguridad. Las operativas no se consultan a MyGeotab ni suman al índice (el ralentí se calcula aparte, con los viajes y el combustible). Las primeras 8 de riesgo tienen color propio en los gráficos (en este orden); el resto aparece como 'Otras'.">
       <div className="table-wrap"><table className="tbl">
         <thead><tr><th></th><th>Nombre</th><th>Tipo</th><th className="num">Peso en el índice</th><th className="num">Reglas</th><th></th></tr></thead>
         <tbody>${cats.map((c, i) => html`<tr key=${c.key}>
