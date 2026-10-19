@@ -51,6 +51,7 @@
     lastName: ["Gómez", "Pérez", "Soares", "Carosio", "Barbera", "Rodrigo", "Veltri", "Frantom", "Cabaleiro", "Astobiza", "Lodato"][(i * 7) % 11] + " " + (i + 1),
     isDriver: true, risk: 0.3 + rnd() * 2.2, idleBias: 0.5 + rnd() * 1.5,
     driverGroups: [{ id: i < 8 ? "gBit" : "gCond" }],
+    companyGroups: [{ id: i < 8 ? "gBit" : "GroupCompanyId" }],
   }));
 
   // Flota: [tipo, servicio, cantidad]
