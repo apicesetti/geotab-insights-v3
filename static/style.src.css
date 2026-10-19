@@ -315,3 +315,7 @@ input:disabled, select:disabled { background: var(--sunken); color: var(--muted)
 .catmix-i { white-space: nowrap; font-size: 13px; }
 .catmix-i .dot { width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; }
 .catmix-i b { font-variant-numeric: tabular-nums; font-weight: 600; }
+
+/* Texto que se comporta como enlace dentro de una fila clickeable */
+.tbl tr.clickable .linkish { text-decoration: underline; text-decoration-color: var(--rule); text-underline-offset: 3px; }
+.tbl tr.clickable:hover .linkish { text-decoration-color: currentColor; }

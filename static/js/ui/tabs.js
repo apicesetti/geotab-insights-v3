@@ -672,6 +672,19 @@
       options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, title: { display: true, text: unit } } } } };
   }
 
+  // Tabla "Por categoría" de un vehículo o conductor: click en la fila o en
+  // el número abre esos eventos en MyGeotab.
+  function CatEventsTable({ view, rows, filter }) {
+    const ruleRows = riskRuleRows(view);
+    const open = k => openEvents(view, { ruleIds: ruleRows.filter(x => x.cat === k).map(x => x.id), ...filter });
+    return html`<${DataTable} rows=${rows} rowKey=${x => x.k} defaultSort=${{ key: "n", dir: "desc" }} empty="Sin infracciones en el período."
+      onRowClick=${x => open(x.k)} columns=${[
+        { key: "k", label: "Categoría", value: x => GI.catLabel(x.k), fmt: x => html`<span className="dot" style=${{ background: GI.catColor(x.k) }}></span><span className="linkish">${GI.catLabel(x.k)}</span>` },
+        { key: "n", label: "Eventos", align: "num", title: "Click para ver estos eventos en MyGeotab",
+          fmt: x => html`<button className="btn link" title="Ver estos eventos en MyGeotab" onClick=${e => { e.stopPropagation(); open(x.k); }}>${n0(x.n)} ↗</button>` }]} />
+      <p className="muted small" style=${{ marginTop: "6px" }}>Click en una categoría para ver sus eventos en MyGeotab.</p>`;
+  }
+
   function VehicleDetail({ view, id, onClose }) {
     const r = view.vRows.find(x => x.id === id);
     const s = useMemo(() => GI.series(view.model, new Set([id]), view.gran), [id, view.gran]);
@@ -699,8 +712,7 @@
         <div><h3>Consumo</h3><${ChartView} height=${200} config=${smallLine(s, "l100", "Consumo", "L/100 km", 1)} /></div>
         <div><h3>Ralentí</h3><${ChartView} height=${200} config=${smallLine(s, "idlePct", "Ralentí", "% del tiempo", 1)} /></div>
         <div><h3>Infracciones cada 100 km</h3><${ChartView} height=${200} config=${smallLine(s, "risk", "Riesgo", "pts/100 km", 2)} /></div>
-        <div><h3>Por categoría</h3><${DataTable} rows=${evRows} rowKey=${x => x.k} defaultSort=${{ key: "n", dir: "desc" }} empty="Sin infracciones en el período." columns=${[
-          { key: "k", label: "Categoría", fmt: x => GI.catLabel(x.k) }, { key: "n", label: "Eventos", align: "num" }]} /></div>
+        <div><h3>Por categoría</h3><${CatEventsTable} view=${view} rows=${evRows} filter=${{ deviceIds: [id] }} /></div>
       </div>
       <h3>Quién lo manejó</h3>
       <${DataTable} rows=${drivers} rowKey=${x => x.name} defaultSort=${{ key: "km", dir: "desc" }} columns=${[
@@ -745,8 +757,7 @@
       <div className="grid-2">
         <div><h3>Infracciones cada 100 km</h3><${ChartView} height=${200} config=${smallLine(s, "risk", "Riesgo", "pts/100 km", 2)} /></div>
         <div><h3>Ralentí</h3><${ChartView} height=${200} config=${smallLine(s, "idlePct", "Ralentí", "% del tiempo", 1)} /></div>
-        <div><h3>Por categoría</h3><${DataTable} rows=${evRows} rowKey=${x => x.k} defaultSort=${{ key: "n", dir: "desc" }} empty="Sin infracciones en el período."
-          columns=${[{ key: "k", label: "Categoría", fmt: x => GI.catLabel(x.k) }, { key: "n", label: "Eventos", align: "num" }]} /></div>
+        <div><h3>Por categoría</h3><${CatEventsTable} view=${view} rows=${evRows} filter=${id === "_unknown" ? { deviceIds: [...view.ids] } : { driverIds: [id] }} /></div>
         <div><h3>Vehículos que manejó</h3><${DataTable} rows=${vehicles} rowKey=${x => x.name} defaultSort=${{ key: "km", dir: "desc" }} columns=${[
           { key: "name", label: "Vehículo" }, { key: "km", label: "Km", align: "num", fmt: x => n0(x.km) }, { key: "n", label: "Infracciones", align: "num" }]} /></div>
       </div>
