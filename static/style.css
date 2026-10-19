@@ -933,3 +933,17 @@
 /* Texto que se comporta como enlace dentro de una fila clickeable */
 #gi3-root .tbl tr.clickable .linkish { text-decoration: underline; text-decoration-color: var(--rule); text-underline-offset: 3px; }
 #gi3-root .tbl tr.clickable:hover .linkish { text-decoration-color: currentColor; }
+
+/* ¿Por qué cambió el riesgo? */
+#gi3-root .why-btn { margin-left: 6px; font-weight: 700; white-space: nowrap; }
+#gi3-root .why-text { margin: 14px 0 18px; line-height: 1.55; }
+#gi3-root .why-text p { margin: 0 0 6px; }
+#gi3-root .contrib { display: inline-flex; align-items: center; gap: 8px; justify-content: flex-end; }
+#gi3-root .contrib-bar { width: 70px; height: 8px; background: var(--canvas); border-radius: 4px; overflow: hidden; display: inline-block; }
+#gi3-root .contrib-fill { display: block; height: 100%; border-radius: 4px; }
+#gi3-root .contrib-fill.bad { background: var(--bad); }
+#gi3-root .contrib-fill.good { background: var(--good); }
+#gi3-root .contrib-v { min-width: 48px; text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
+#gi3-root .contrib-v.bad { color: var(--bad); }
+#gi3-root .contrib-v.good { color: var(--good); }
+#gi3-root .why-block { margin-bottom: 18px; }

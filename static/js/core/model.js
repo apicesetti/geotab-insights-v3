@@ -449,6 +449,65 @@
     });
   }
 
+  // ---------- ¿Por qué cambió el riesgo? ----------
+  // Compara la 1.ª y la 2.ª mitad del período (mismos buckets completos que el
+  // aviso) y reparte el cambio del índice entre categorías, conductores y
+  // vehículos. Aporte de X = (puntos_X_2 / km_2 - puntos_X_1 / km_1) × 100:
+  // los aportes de cada lista suman el cambio total.
+  function riskChange(model, deviceIds, gran, driverOk) {
+    const ser = series(model, deviceIds, gran).filter(s => !s.partial && s.km > 0);
+    if (ser.length < 2) return null;
+    const h = Math.floor(ser.length / 2);
+    const half = new Map();
+    ser.forEach((s, i) => half.set(s.key, i < h ? 0 : 1));
+    const halfOf = dk => half.get(GI.bucketKey(dk, gran));
+    const weights = model.settings.category_weights || {};
+    const riskCats = new Set(GI.CATEGORIES.filter(c => c.kind === "riesgo").map(c => c.key));
+    const km = [0, 0], pts = [0, 0], evs = [0, 0];
+    const cats = new Map(), devs = new Map(), drvs = new Map();
+    const acc = (map, key, i, kmv, w, n) => {
+      const x = map.get(key) || { key, km: [0, 0], w: [0, 0], n: [0, 0] };
+      x.km[i] += kmv; x.w[i] += w; x.n[i] += n; map.set(key, x);
+    };
+    for (const dev of deviceIds) {
+      const m = model.dd.get(dev);
+      if (!m) continue;
+      for (const [dk, c] of m) {
+        const i = halfOf(dk);
+        if (i == null) continue;
+        km[i] += c.km; pts[i] += c.w; evs[i] += c.n;
+        acc(devs, dev, i, c.km, c.w, c.n);
+        for (const k in c.ev) if (riskCats.has(k)) acc(cats, k, i, 0, c.ev[k] * (weights[k] != null ? weights[k] : 1), c.ev[k]);
+      }
+    }
+    for (const [drv, cells] of model.drvCells) {
+      for (const [ck, c] of cells) {
+        const [dev, dk] = ck.split("|");
+        if (!deviceIds.has(dev)) continue;
+        const i = halfOf(dk);
+        if (i == null) continue;
+        acc(drvs, drv, i, c.km, c.w, c.n);
+      }
+    }
+    if (!km[0] || !km[1]) return null;
+    const rate = (w, k) => (k > 0 ? (w / k) * 100 : null);
+    const finish = (map, nameOf, keep) => [...map.values()].filter(x => !keep || keep(x.key)).map(x => ({
+      key: x.key, name: nameOf(x.key), n: x.n, km: x.km,
+      rate: [rate(x.w[0], x.km[0]), rate(x.w[1], x.km[1])],
+      contrib: (x.w[1] / km[1] - x.w[0] / km[0]) * 100,
+    })).sort((a, b) => Math.abs(b.contrib) - Math.abs(a.contrib));
+    const devName = new Map(model.devices.map(d => [d.id, d.name]));
+    return {
+      a: rate(pts[0], km[0]), b: rate(pts[1], km[1]),
+      km, pts, evs,
+      from: [ser[0].label, ser[h].label], to: [ser[h - 1].label, ser[ser.length - 1].label],
+      cats: finish(cats, k => (GI.CATEGORY_BY_KEY[k] || { label: k }).label),
+      vehicles: finish(devs, id => devName.get(id) || id),
+      drivers: finish(drvs, id => (id === "_unknown" ? "Sin conductor identificado" : model.driverName.get(id) || id),
+        id => id === "_unknown" || !driverOk || driverOk(id)),
+    };
+  }
+
   function targetFor(model, profile) {
     return model.settings.profile_targets[profile] || { l100: 0, idle_pct_max: 15, risk_max: 2 };
   }
@@ -764,7 +823,7 @@
 
   Object.assign(GI, {
     makeGroupResolver, pointInPolygon, makeZoneLocator, buildJourneys, counterDeltas,
-    buildModel, filterDevices, driverFilter, aggregate, series, kpis, vehicleRows, driverRows, routeRows, profileRows,
+    buildModel, filterDevices, driverFilter, riskChange, aggregate, series, kpis, vehicleRows, driverRows, routeRows, profileRows,
     milestoneImpact, findings, savings, linearTrend, rateSeries, targetFor, deviceInGroups,
   });
 })(window.GI);

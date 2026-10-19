@@ -319,3 +319,17 @@ input:disabled, select:disabled { background: var(--sunken); color: var(--muted)
 /* Texto que se comporta como enlace dentro de una fila clickeable */
 .tbl tr.clickable .linkish { text-decoration: underline; text-decoration-color: var(--rule); text-underline-offset: 3px; }
 .tbl tr.clickable:hover .linkish { text-decoration-color: currentColor; }
+
+/* ¿Por qué cambió el riesgo? */
+.why-btn { margin-left: 6px; font-weight: 700; white-space: nowrap; }
+.why-text { margin: 14px 0 18px; line-height: 1.55; }
+.why-text p { margin: 0 0 6px; }
+.contrib { display: inline-flex; align-items: center; gap: 8px; justify-content: flex-end; }
+.contrib-bar { width: 70px; height: 8px; background: var(--canvas); border-radius: 4px; overflow: hidden; display: inline-block; }
+.contrib-fill { display: block; height: 100%; border-radius: 4px; }
+.contrib-fill.bad { background: var(--bad); }
+.contrib-fill.good { background: var(--good); }
+.contrib-v { min-width: 48px; text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
+.contrib-v.bad { color: var(--bad); }
+.contrib-v.good { color: var(--good); }
+.why-block { margin-bottom: 18px; }
