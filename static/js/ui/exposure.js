@@ -2,6 +2,7 @@
 // y franja, y conductores con riesgo ajustado por los tramos que manejan.
 (function (GI) {
   "use strict";
+  const React = GI.React, ReactDOM = GI.ReactDOM;
   const { useState, useMemo } = React;
   const html = GI.html;
   const { Kpi, Panel, Info, DataTable, ChartView, Segmented } = GI;

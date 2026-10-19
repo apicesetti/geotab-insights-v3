@@ -1,6 +1,7 @@
 // Aplicación principal + entry point del Add-In.
 (function (GI) {
   "use strict";
+  const React = GI.React, ReactDOM = GI.ReactDOM;
   const { useState, useEffect, useMemo, useRef } = React;
   const html = GI.html;
   const { Segmented, Info, Progress } = GI;
@@ -332,15 +333,30 @@
   // SDK siempre los pase separados. El 2.º argumento de getSession, si se
   // usara, es un booleano (newSession), nunca un callback de error.
   let root = null;
+  // Versión: la BETA se sirve desde la rama beta (githack); la normal, desde GitHub Pages.
+  let SRC = (document.currentScript && document.currentScript.src) || "";
+  if (!SRC) { try { throw new Error("x"); } catch (e) { SRC = String(e.stack || ""); } }
+  const BUILD = /githack|\/beta\/|\/exposicion\//.test(SRC) ? "beta" : "main";
+  GI.BUILD = BUILD;
+  // Cada versión toma su propio contenedor #gi3-root (si las dos están en la
+  // página, getElementById devolvería siempre el primero).
+  function claimRoot() {
+    const all = [...document.querySelectorAll("#gi3-root")];
+    return all.find(el => el.dataset.giOwner === BUILD)
+      || all.slice().reverse().find(el => !el.dataset.giOwner)
+      || all[all.length - 1];
+  }
   window.geotab = window.geotab || {};
   window.geotab.addin = window.geotab.addin || {};
-  window.geotab.addin.cesettiInsightsV3 = function () {
+  window.geotab.addin[BUILD === "beta" ? "cesettiInsightsV3Beta" : "cesettiInsightsV3"] = function () {
     return {
       initialize: function (api, state, done) {
         GI._mgState = state;
         api.getSession(function (credentials, server) {
           if (!root) {
-            root = ReactDOM.createRoot(document.getElementById("gi3-root"));
+            const el = claimRoot();
+            el.dataset.giOwner = BUILD;
+            root = ReactDOM.createRoot(el);
             root.render(html`<${App} api=${GI.wrapApi(api)} database=${credentials.database} userName=${credentials.userName} />`);
           }
           done();

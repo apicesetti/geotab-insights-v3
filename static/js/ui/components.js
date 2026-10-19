@@ -1,8 +1,9 @@
 // Componentes reutilizables. React + htm (JSX sin build).
 (function (GI) {
   "use strict";
+  const React = GI.React, ReactDOM = GI.ReactDOM;
   const { useState, useEffect, useRef, useMemo } = React;
-  const html = htm.bind(React.createElement);
+  const html = GI.htm.bind(React.createElement);
   GI.html = html;
 
   // ---------- Estilo global de los gráficos ----------

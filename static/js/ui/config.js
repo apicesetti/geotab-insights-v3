@@ -2,6 +2,7 @@
 // resto la ve en modo lectura.
 (function (GI) {
   "use strict";
+  const React = GI.React, ReactDOM = GI.ReactDOM;
   const { useState, useMemo, useEffect } = React;
   const html = GI.html;
   const { Panel, Info, GroupMultiSelect } = GI;
