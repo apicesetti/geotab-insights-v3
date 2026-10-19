@@ -373,3 +373,4 @@ input:disabled, select:disabled { background: var(--sunken); color: var(--muted)
 .subnav { margin: 4px 0 14px; }
 .diag { margin: 6px 0 0; padding-left: 18px; }
 .diag li { margin: 3px 0; }
+.legend-line { display: inline-block; width: 22px; height: 4px; background: #1c5cab; border-radius: 2px; vertical-align: 3px; margin-right: 4px; }

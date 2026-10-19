@@ -712,6 +712,8 @@
     const [err, setErr] = useState(null);
     const [locs, setLocs] = useState(null);
     const [focus, setFocus] = useState(null);
+    // Trazado del recorrido elegido: GPS del viaje más reciente de ese tramo.
+    const [trace, setTrace] = useState(null);
     const mapRef = React.useRef(null);
     const mapObj = React.useRef(null);
     const runRef = React.useRef(0);
@@ -750,13 +752,43 @@
       const m = mapObj.current;
       if (m && focus) m.fitBounds(focus.bounds, { padding: [60, 60], maxZoom: 15 });
     }, [focus]);
-    useEffect(() => {
-      if (!points || !mapRef.current) return;
-      if (!mapObj.current) {
+    const ensureMap = () => {
+      if (!mapObj.current && mapRef.current) {
         mapObj.current = L.map(mapRef.current);
         L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 18, attribution: "© OpenStreetMap" }).addTo(mapObj.current);
         mapObj.current._fitted = false;
       }
+      return mapObj.current;
+    };
+    useEffect(() => {
+      setTrace(null);
+      if (!route) return;
+      const js = view.model.journeys.filter(j => view.ids.has(j.d) && !j.internal && j.o + "→" + j.dest === route.key).sort((a, b) => b.e - a.e);
+      const j = js[0];
+      if (!j) return;
+      let alive = true;
+      setTrace({ loading: true, j });
+      GI.loadTrace(api, j.d, j.s, j.e).then(pts => { if (alive) setTrace({ pts, j }); }).catch(e => { if (alive) setTrace({ error: String(e.message || e), j }); });
+      return () => { alive = false; };
+    }, [route && route.key]);
+    useEffect(() => {
+      const m = mapObj.current || (trace && trace.pts ? ensureMap() : null);
+      if (!m) return;
+      if (m._trace) { m.removeLayer(m._trace); m._trace = null; }
+      if (!trace || !trace.pts || !trace.pts.length) return;
+      const zones = view.model.cat.zones || [];
+      const zo = zones.find(z => z.id === trace.j.o), zd = zones.find(z => z.id === trace.j.dest);
+      const layers = [L.polyline(trace.pts, { color: "#1c5cab", weight: 4, opacity: 0.85 })];
+      for (const [z, color] of [[zo, "#0b7a3e"], [zd, "#b93a0f"]]) if (z) layers.push(L.polygon(z.pts.map(([x, y]) => [y, x]), { color, weight: 2, fillOpacity: 0.12 }).bindTooltip(z.name));
+      layers.push(L.circleMarker(trace.pts[0], { radius: 7, color: "#fff", weight: 2, fillColor: "#0b7a3e", fillOpacity: 1 }).bindTooltip("Salida: " + route.from));
+      layers.push(L.circleMarker(trace.pts[trace.pts.length - 1], { radius: 7, color: "#fff", weight: 2, fillColor: "#b93a0f", fillOpacity: 1 }).bindTooltip("Llegada: " + route.to));
+      m._trace = L.layerGroup(layers).addTo(m);
+      if (!points || !points.length) m.fitBounds(L.latLngBounds(trace.pts), { padding: [30, 30] });
+      setTimeout(() => m.invalidateSize(), 0);
+    }, [trace]);
+    useEffect(() => {
+      if (!points || !mapRef.current) return;
+      ensureMap();
       const m = mapObj.current;
       if (m._heat) m.removeLayer(m._heat);
       m._heat = L.heatLayer(points, { radius: 14, blur: 18, maxZoom: 12, max: 2 }).addTo(m);
@@ -781,7 +813,10 @@
         ${route.cats && route.cats.length ? html`<${CatMix} cats=${route.cats} />` : null}</div>` : html`<p className="muted small" style=${{ margin: "0 0 10px" }}>Tip: hacé click en un recorrido de la tabla de arriba para ver solo sus infracciones en el mapa.</p>`}
       ${progress != null ? html`<${GI.Progress} value=${progress} label=${"Ubicando " + n0(sample.length) + " eventos"} />` : null}
       ${err ? html`<${Info} tone="error">${err}<//>` : null}
-      <div ref=${mapRef} className=${"map" + (points ? "" : " hidden")}></div>
+      ${route && trace ? html`<p className="muted small" style=${{ margin: "0 0 8px" }}>${trace.loading ? "Dibujando el trazado del recorrido…"
+        : trace.error ? "No se pudo traer el trazado: " + trace.error
+        : html`<span className="legend-line"></span> Trazado del viaje más reciente de este recorrido (${new Date(trace.j.s).toLocaleDateString("es-AR")}, ${n0(trace.j.km)} km). Verde: salida y zona de origen; rojo: llegada y zona de destino.`}</p>` : null}
+      <div ref=${mapRef} className=${"map" + (points || (trace && trace.pts) ? "" : " hidden")}></div>
       ${spots ? html`<${HotspotList} spots=${spots} onFocus=${setFocus} title=${route ? route.from + " → " + route.to : ""} />` : null}
       ${!points && progress == null ? html`<div className="empty">${sample.length
         ? "Se van a ubicar los " + n0(sample.length) + " eventos más recientes" + (evs.length > sample.length ? " de " + n0(evs.length) : "") + ". Para ver un patrón alcanza con 500; más eventos tardan más la primera vez."

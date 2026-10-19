@@ -632,6 +632,23 @@
 
   // Ubicación de eventos (para el mapa de calor): el LogRecord más cercano a
   // activeFrom. Se pide solo al abrir el mapa y se cachea por id de evento.
+  // Trazado GPS de un recorrido (un vehículo entre dos instantes), reducido a
+  // ~1500 puntos. Se guarda en este navegador para no volver a pedirlo.
+  async function loadTrace(api, deviceId, from, to) {
+    const k = "trace|" + deviceId + "|" + from + "|" + to;
+    const hit = (await idbGetMany("locs", [k])).get(k);
+    if (hit && hit.pts) return hit.pts;
+    const recs = (await api.call("Get", {
+      typeName: "LogRecord", resultsLimit: 50000,
+      search: { deviceSearch: { id: deviceId }, fromDate: new Date(from).toISOString(), toDate: new Date(to).toISOString() },
+    })) || [];
+    const all = recs.filter(r => r.latitude || r.longitude).sort((a, b) => (a.dateTime < b.dateTime ? -1 : 1)).map(r => [GI.round(r.latitude, 5), GI.round(r.longitude, 5)]);
+    const step = Math.max(1, Math.ceil(all.length / 1500));
+    const pts = all.filter((_, i) => i % step === 0 || i === all.length - 1);
+    await idbPutMany("locs", [{ k, pts }]);
+    return pts;
+  }
+
   async function loadEventLocations(api, events, onProgress) {
     const keys = events.map(e => "loc|" + e.i);
     const cached = await idbGetMany("locs", keys);
@@ -672,7 +689,7 @@
   }
 
   Object.assign(GI, {
-    loadCatalogs, loadZones, loadZoneTypes, loadPeriod, loadFuel, loadEventLocations, clearCache,
+    loadCatalogs, loadZones, loadZoneTypes, loadPeriod, loadFuel, loadEventLocations, loadTrace, clearCache,
     _compactTrips: compactTrips, _compactExceptions: compactExceptions, _compactCounter: compactCounter, _loadFuelBoundaries: loadFuelBoundaries, _missingRuns: missingRuns,
   });
 })(window.GI);

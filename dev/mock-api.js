@@ -198,6 +198,17 @@
           const from = new Date(s.fromDate).getTime() / 1000, to = new Date(s.toDate).getTime() / 1000;
           out = [];
           for (let ts = Math.floor(from); ts <= to; ts++) { const l = logs.get(s.deviceSearch.id + "|" + ts); if (l) out.push(l); }
+          // Rangos largos (trazado de un recorrido): puntos cada 5 min entre el inicio y el fin de cada viaje.
+          if (to - from > 1200) {
+            const ts = trips.filter(t => t.device.id === s.deviceSearch.id && t.start >= s.fromDate && t.start < s.toDate).sort((a, b) => (a.start < b.start ? -1 : 1));
+            let prev = null;
+            for (const t of ts) {
+              const a = prev || [t.stopPoint.x - 0.4, t.stopPoint.y + 0.2], z = [t.stopPoint.x, t.stopPoint.y];
+              const t0 = new Date(t.start).getTime(), t1 = new Date(t.stop).getTime();
+              for (let k = t0; k <= t1; k += 300000) { const f = (k - t0) / Math.max(1, t1 - t0); out.push({ latitude: a[1] + (z[1] - a[1]) * f + Math.sin(f * 9) * 0.02, longitude: a[0] + (z[0] - a[0]) * f, dateTime: new Date(k).toISOString() }); }
+              prev = z;
+            }
+          }
           break;
         }
         default: throw new Error("Mock: Get " + p.typeName + " no soportado");
