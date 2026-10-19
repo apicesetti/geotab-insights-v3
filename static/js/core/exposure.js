@@ -264,5 +264,59 @@
     return { grid, byHour, fleetRate, fleetIdx, totKm, totN, minKmCell, highCells: cells, routes: routeRows, drivers, night };
   }
 
-  Object.assign(GI, { exposure, EXPO_DAYS: DAYS, EXPO_SLOTS: SLOTS, _spreadTrip: spreadTrip, sunTimes, _darkFraction: darkFraction });
+  // Exposición de un conductor: cuándo y por dónde maneja, y cómo le va en
+  // cada caso comparado con la flota. ex = resultado de exposure().
+  function exposureDriver(model, ids, drv, ex) {
+    const hours = Array.from({ length: 24 }, (_, h) => ({ h, km: 0, n: 0, w: 0 }));
+    const highSet = new Set(ex.highCells.map(c => c.di * 24 + c.h));
+    let km = 0, highKm = 0, nightKm = 0, nightW = 0, nightN = 0, totW = 0, totN = 0;
+    const routeKm = new Map();
+    for (const [dev, trips] of model.tripsByDevice) {
+      if (!ids.has(dev)) continue;
+      for (const t of trips) {
+        if (t.r !== drv || !(t.km > 0)) continue;
+        km += t.km;
+        nightKm += t.km * tripDark(t);
+        spreadTrip(t, (di, h, k) => { hours[h].km += k; if (highSet.has(di * 24 + h)) highKm += k; });
+      }
+    }
+    for (const j of model.journeys) {
+      if (!ids.has(j.d) || j.internal || j.o === "_unknown" || !(j.drvKm && j.drvKm[drv])) continue;
+      const k = j.o + "→" + j.dest;
+      const r = routeKm.get(k) || { key: k, name: j.oName + " → " + j.destName, km: 0, trips: 0, w: 0, n: 0 };
+      r.km += j.drvKm[drv]; r.trips++;
+      const bd = (j.byDrv || {})[drv];
+      if (bd) { r.w += bd.w; r.n += bd.n; }
+      routeKm.set(k, r);
+    }
+    for (const e of model.events) {
+      if (e.drv !== drv || !(e.w > 0) || !ids.has(e.d)) continue;
+      totW += e.w; totN++;
+      const h = new Date(e.t).getHours();
+      hours[h].n++; hours[h].w += e.w;
+      const trips = model.tripsByDevice.get(e.d);
+      const ti = trips && GI._findTrip ? GI._findTrip(trips, e.t) : -1;
+      const tp = ti >= 0 ? trips[ti] : null;
+      if (isDark(e.t, tp ? tp.y : null, tp ? tp.x : null)) { nightW += e.w; nightN++; }
+    }
+    hours.forEach(x => { x.rate = x.km >= 50 ? (x.n / x.km) * 100 : null; x.fleet = ex.byHour[x.h].rate; x.high = ex.highCells.some(c => c.h === x.h); });
+    const rIdx = new Map(ex.routes.map(r => [r.key, r]));
+    const routes = [...routeKm.values()].map(r => {
+      const fr = rIdx.get(r.key);
+      const idx = r.km > 0 ? (r.w / r.km) * 100 : null;
+      return { ...r, idx, routeIdx: fr ? fr.idx : null, danger: fr ? fr.danger : null,
+        conduct: fr && fr.idx > 0 && r.km >= 100 ? idx / fr.idx : null };
+    }).sort((a, b) => b.km - a.km);
+    const dayKm = km - nightKm;
+    return {
+      km, n: totN, hours, routes,
+      highPct: km > 0 ? (highKm / km) * 100 : null,
+      fleetHighPct: ex.totKm > 0 ? (ex.highCells.reduce((s, c) => s + c.km, 0) / ex.totKm) * 100 : null,
+      night: { km: nightKm, pct: km > 0 ? (nightKm / km) * 100 : null, idx: nightKm >= 50 ? (nightW / nightKm) * 100 : null, n: nightN,
+        dayIdx: dayKm >= 50 ? ((totW - nightW) / dayKm) * 100 : null },
+      fleetNightPct: ex.totKm > 0 ? (ex.night.km / ex.totKm) * 100 : null,
+    };
+  }
+
+  Object.assign(GI, { exposure, exposureDriver, EXPO_DAYS: DAYS, EXPO_SLOTS: SLOTS, _spreadTrip: spreadTrip, sunTimes, _darkFraction: darkFraction });
 })(window.GI);

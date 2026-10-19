@@ -150,7 +150,65 @@
     return html`<span className=${"tag expo-" + label.toLowerCase()}>${label}</span> <span className="muted small">${factorTxt(e)}</span>`;
   }
 
+  // Detalle de exposición de un conductor: conducta, exposición, horarios, noche y tramos.
+  function ExposureDetail({ view, ex, row: d, onClose, onDriver }) {
+    const x = useMemo(() => GI.exposureDriver(view.model, view.ids, d.id, ex), [d.id, ex]);
+    const msgs = [];
+    const badC = d.conduct != null && d.conduct >= 1.3, badE = d.exposure != null && d.exposure >= 1.2;
+    if (badC && badE) msgs.push(html`<li><b>Conducta y exposición:</b> maneja en tramos más riesgosos que el promedio (${factorTxt(d.exposure)}) y además en esos tramos comete más infracciones de lo esperable (${factorTxt(d.conduct)}). Conviene capacitación y revisar qué tramos se le asignan.</li>`);
+    else if (badC) msgs.push(html`<li><b>Es conducta, no el lugar:</b> en los mismos tramos comete ${factorTxt(d.conduct)} las infracciones que la flota. Su riesgo se explica por cómo maneja: conviene capacitación o acompañamiento.</li>`);
+    else if (badE) msgs.push(html`<li><b>Es exposición:</b> maneja como el promedio, pero sus tramos son ${factorTxt(d.exposure)} más riesgosos que los de la flota. Conviene revisar la asignación de tramos u horarios.</li>`);
+    else if (d.conduct != null && d.conduct <= 0.8) msgs.push(html`<li><b>Buen desempeño:</b> en sus tramos comete menos infracciones de lo esperable (${factorTxt(d.conduct)}).</li>`);
+    else msgs.push(html`<li>Su riesgo está dentro de lo esperable para los tramos que hace.</li>`);
+    if (x.highPct != null && x.fleetHighPct != null && x.highPct > Math.max(5, x.fleetHighPct * 1.3)) msgs.push(html`<li><b>Horarios de riesgo:</b> hace el ${GI.fmtPct(x.highPct, 0)} de sus km en las horas más riesgosas de la flota (la flota, ${GI.fmtPct(x.fleetHighPct, 0)}).</li>`);
+    if (x.night.pct != null && x.fleetNightPct != null && x.night.pct > Math.max(5, x.fleetNightPct * 1.3)) msgs.push(html`<li><b>Noche:</b> maneja de noche el ${GI.fmtPct(x.night.pct, 0)} de sus km (la flota, ${GI.fmtPct(x.fleetNightPct, 0)})${x.night.idx != null && x.night.dayIdx ? html`; de noche su riesgo es ${factorTxt(x.night.idx / x.night.dayIdx)} el de día` : ""}.</li>`);
+    if (d.longStints) msgs.push(html`<li><b>Fatiga:</b> manejó ${d.longStints} veces más de 4 h seguidas (máximo ${n1(d.maxStint)} h).</li>`);
+    const worstRoute = x.routes.filter(r => r.conduct != null && r.km >= 200).sort((a, b) => b.conduct - a.conduct)[0];
+    if (worstRoute && worstRoute.conduct >= 1.5) msgs.push(html`<li><b>Tramo a revisar:</b> en ${worstRoute.name} tiene ${factorTxt(worstRoute.conduct)} las infracciones de la flota en ese mismo tramo.</li>`);
+    return html`<${GI.Modal} title=${d.name + " · exposición al riesgo"} onClose=${onClose} wide>
+      <div className="readouts compact">
+        <${Kpi} label="Riesgo real" value=${n2(d.actual)} unit="pts/100 km" sub=${html`<span>esperado en sus tramos: ${n2(d.expected)}</span>`} />
+        <${Kpi} label="Conducta" value=${factorTxt(d.conduct)} sub=${html`<span>${d.conduct == null ? "–" : d.conduct >= 1.3 ? "peor que lo esperable" : d.conduct <= 0.8 ? "mejor que lo esperable" : "como lo esperable"}</span>`} />
+        <${Kpi} label="Exposición" value=${factorTxt(d.exposure)} sub=${html`<span>${d.exposure == null ? "–" : d.exposure >= 1.2 ? "alta" : d.exposure <= 0.8 ? "baja" : "media"}: riesgo de sus tramos vs la flota</span>`} />
+        <${Kpi} label="Km en horario de riesgo" value=${GI.fmtPct(x.highPct, 0)} sub=${html`<span>flota: ${GI.fmtPct(x.fleetHighPct, 0)}</span>`} />
+        <${Kpi} label="Km de noche" value=${GI.fmtPct(x.night.pct, 0)} sub=${html`<span>flota: ${GI.fmtPct(x.fleetNightPct, 0)}</span>`} />
+      </div>
+      <div className="why-text"><b>Diagnóstico</b><ul className="diag">${msgs}</ul></div>
+      <div className="grid-2">
+        <div><h3>Cuándo maneja (km por hora del día)</h3>
+          <${ChartView} height=${210} config=${{
+            type: "bar",
+            data: { labels: x.hours.map(h => hh(h.h)), datasets: [{ label: "km", data: x.hours.map(h => GI.round(h.km, 0)),
+              backgroundColor: x.hours.map(h => (h.high ? "#e34948" : "#2a78d6")), borderRadius: 3, borderSkipped: "start" }] },
+            options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, title: { display: true, text: "km" } } } },
+          }} />
+          <p className="muted small">En rojo, las horas de mayor riesgo de la flota.</p></div>
+        <div><h3>Sus infracciones cada 100 km por hora del día</h3>
+          <${ChartView} height=${210} config=${{
+            type: "bar",
+            data: { labels: x.hours.map(h => hh(h.h)), datasets: [{ label: "infracciones / 100 km", data: x.hours.map(h => (h.rate == null ? null : GI.round(h.rate, 2))),
+              backgroundColor: x.hours.map(h => (h.rate != null && h.fleet && h.rate >= h.fleet * 1.5 ? "#e34948" : "#2a78d6")), borderRadius: 3, borderSkipped: "start" }] },
+            options: { plugins: { legend: { display: false }, tooltip: { callbacks: { afterLabel: c => { const h = x.hours[c.dataIndex]; return n0(h.n) + " infracciones en " + n0(h.km) + " km · flota " + (h.fleet == null ? "–" : n2(h.fleet)); } } } },
+              scales: { y: { beginAtZero: true, title: { display: true, text: "infracciones / 100 km" } } } },
+          }} />
+          <p className="muted small">En rojo, las horas en que su tasa es 1,5 veces o más la de la flota en esa hora.</p></div>
+      </div>
+      <h3 style=${{ marginTop: "12px" }}>Sus tramos</h3>
+      <${DataTable} rowKey=${r => r.key} rows=${x.routes} limit=${10} defaultSort=${{ key: "km", dir: "desc" }} columns=${[
+        { key: "name", label: "Tramo" },
+        { key: "trips", label: "Recorridos", align: "num" },
+        { key: "km", label: "Km", align: "num", fmt: r => n0(r.km) },
+        { key: "danger", label: "Peligrosidad", align: "num", title: "Riesgo del tramo para toda la flota, respecto del promedio", fmt: r => (r.danger == null ? "–" : html`<span className=${"delta " + (r.danger >= 1.3 ? "bad" : r.danger <= 0.8 ? "good" : "flat")}>${factorTxt(r.danger)}</span>`) },
+        { key: "idx", label: "Su riesgo", align: "num", fmt: r => (r.idx == null ? "–" : n2(r.idx)) },
+        { key: "routeIdx", label: "Flota en el tramo", align: "num", fmt: r => (r.routeIdx == null ? "–" : n2(r.routeIdx)) },
+        { key: "conduct", label: "Conducta en el tramo", align: "num", fmt: r => (r.conduct == null ? html`<span className="muted">–</span>` : html`<span className=${"delta " + (r.conduct >= 1.3 ? "bad" : r.conduct <= 0.8 ? "good" : "flat")}>${factorTxt(r.conduct)}</span>`) },
+      ]} empty="Sin recorridos entre zonas en el período." />
+      ${onDriver ? html`<div style=${{ marginTop: "12px" }}><button className="btn" onClick=${() => { onClose(); onDriver(d.id); }}>Ver infracciones y ralentí del conductor</button></div>` : null}
+    <//>`;
+  }
+
   function DriversExposure({ view, ex, onDriver }) {
+    const [sel, setSel] = useState(null);
     const minKm = view.settings.drivers.min_km_ranking;
     const rows = ex.drivers.filter(d => d.km >= minKm);
     const worse = rows.filter(d => d.conduct != null && d.conduct >= 1.3).length;
@@ -164,7 +222,7 @@
         <${Kpi} label="Con tramos de más de 4 h seguidas" value=${n0(tired)} sub=${html`<span>riesgo de fatiga</span>`} />
       </div>
       <${DataTable} rowKey=${r => r.id} rows=${rows} limit=${20} defaultSort=${{ key: "conduct", dir: "desc" }}
-        onRowClick=${onDriver ? r => onDriver(r.id) : null} columns=${[
+        onRowClick=${r => setSel(r)} columns=${[
         { key: "name", label: "Conductor" },
         { key: "km", label: "Km", align: "num", fmt: r => n0(r.km) },
         { key: "actual", label: "Riesgo real", align: "num", title: "pts/100 km", fmt: r => n2(r.actual) },
@@ -176,6 +234,8 @@
         { key: "maxStint", label: "Manejo continuo máx.", align: "num", fmt: r => html`${n1(r.maxStint)} h${r.longStints ? html` <span className="delta bad" title="Veces que manejó más de 4 h seguidas">${r.longStints} veces +4 h</span>` : ""}` },
         { key: "top", label: "Tramo principal", value: r => (r.topRoutes[0] ? r.topRoutes[0].name : ""), fmt: r => (r.topRoutes[0] ? html`<span className="small">${r.topRoutes[0].name}</span>` : html`<span className="muted">–</span>`) },
       ]} empty="No hay conductores con suficientes km en el período." />
+      <p className="muted small">Click en un conductor para ver su diagnóstico de exposición: conducta, horarios, noche y tramos.</p>
+      ${sel ? html`<${ExposureDetail} view=${view} ex=${ex} row=${sel} onClose=${() => setSel(null)} onDriver=${onDriver} />` : null}
     <//>`;
   }
 

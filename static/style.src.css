@@ -359,3 +359,5 @@ input:disabled, select:disabled { background: var(--sunken); color: var(--muted)
 .leaflet-tooltip.spot-label { background: #b02f2e; color: #fff; border: 0; border-radius: 10px; padding: 0 6px; font-weight: 700; box-shadow: none; }
 .leaflet-tooltip.spot-label::before { display: none; }
 .subnav { margin: 4px 0 14px; }
+.diag { margin: 6px 0 0; padding-left: 18px; }
+.diag li { margin: 3px 0; }
