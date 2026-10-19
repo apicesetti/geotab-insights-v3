@@ -363,7 +363,7 @@
     </div>`;
   }
 
-  const SECTIONS = [["horarios", "Horarios y tráfico"], ["conductores", "Conductores"], ["fatiga", "Jornada y fatiga"], ["familiaridad", "Tramos nuevos"], ["gravedad", "Gravedad"]];
+  const SECTIONS = [["horarios", "Horarios y tráfico"], ["conductores", "Conductores"], ["fatiga", "Jornada y fatiga"], ["gravedad", "Gravedad"]];
 
   function ExposureTab({ view, onDriver }) {
     const [sec, setSec] = useState("horarios");
@@ -389,7 +389,6 @@
       ${sec === "horarios" ? html`<${HourGrid} ex=${ex} /><${RoutesTraffic} view=${view} ex=${ex} />`
         : sec === "conductores" ? html`<${DriversExposure} view=${view} ex=${ex} onDriver=${onDriver} />`
         : sec === "fatiga" ? html`<${FatiguePanel} view=${view} rf=${rf} onDriver=${onDriver} />`
-        : sec === "familiaridad" ? html`<${FamiliarityPanel} rf=${rf} />`
         : html`<${SeverityPanel} view=${view} rf=${rf} onDriver=${onDriver} />`}
     </div>`;
   }
