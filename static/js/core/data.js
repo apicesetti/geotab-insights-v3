@@ -99,7 +99,7 @@
   // caché la versión compacta: en bases grandes (miles de usuarios) el objeto
   // completo pesa decenas de MB.
   async function cachedCatalog(api, database, typeName, params, fields, compact, force) {
-    const k = database + "|cat2|" + typeName;
+    const k = database + "|cat4|" + typeName;
     if (!force) {
       const hit = (await idbGetMany("meta", [k])).get(k);
       if (hit && Date.now() - hit.at < CATALOG_TTL_MS) return hit.v;
@@ -166,8 +166,9 @@
       cachedCatalog(api, database, "Device", null, ["id", "name", "serialNumber", "groups"],
         d => ({ id: d.id, name: d.name || d.id, serial: d.serialNumber || "", groups: (d.groups || []).map(GI.idOf) }), force),
       cachedRules(api, database, force),
-      cachedCatalog(api, database, "User", { search: { isDriver: true } }, ["id", "name", "firstName", "lastName"],
-        u => ({ id: u.id, name: [u.firstName, u.lastName].filter(Boolean).join(" ").trim() || u.name || u.id, login: u.name || "" }), force).catch(() => []),
+      cachedCatalog(api, database, "User", { search: { isDriver: true } }, ["id", "name", "firstName", "lastName", "driverGroups"],
+        u => ({ id: u.id, name: [u.firstName, u.lastName].filter(Boolean).join(" ").trim() || u.name || u.id, login: u.name || "",
+          groups: (u.driverGroups || []).map(GI.idOf).filter(Boolean) }), force).catch(() => []),
     ]);
     return { groups, devices, rules, drivers, zones: null };
   }

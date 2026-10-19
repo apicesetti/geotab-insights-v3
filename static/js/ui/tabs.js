@@ -329,7 +329,7 @@
   function driverTrendMap(view) {
     const out = new Map();
     for (const [drv, cells] of view.model.drvCells) {
-      if (drv === "_unknown") continue;
+      if (drv === "_unknown" || (view.driverOk && !view.driverOk(drv))) continue;
       const ser = GI.rateSeries(view.model, view.ids, view.gran, c => c.w, cells).filter(x => !x.partial);
       out.set(drv, { tr: GI.linearTrend(ser.map(x => (x.km >= 50 ? x.rate : null))), ser });
     }
@@ -357,6 +357,7 @@
     const rows = useMemo(() => {
       const out = [];
       for (const [drv, cells] of view.model.drvCells) {
+        if (view.driverOk && !view.driverOk(drv)) continue;
         let n = 0, km = 0;
         const devs = new Set();
         for (const [ck, c] of cells) {

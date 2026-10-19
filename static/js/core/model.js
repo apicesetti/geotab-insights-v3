@@ -489,9 +489,22 @@
     return rows;
   }
 
-  function driverRows(model, deviceIds) {
+  // Conductores de los grupos elegidos (grupos de conductor de MyGeotab,
+  // incluye subgrupos). null = sin filtro. Si la base no informa grupos de
+  // conductor para nadie, no se filtra (para no dejar la lista vacía).
+  function driverFilter(model, groupIds) {
+    if (!groupIds || !groupIds.length) return null;
+    const drivers = model.cat.drivers || [];
+    if (!drivers.some(u => u.groups && u.groups.length)) return null;
+    const set = model.gr.expand(groupIds);
+    const ok = new Set(drivers.filter(u => (u.groups || []).some(g => set.has(g))).map(u => u.id));
+    return id => id === "_unknown" || ok.has(id);
+  }
+
+  function driverRows(model, deviceIds, driverOk) {
     const rows = [];
     for (const [drv, m] of model.drvCells) {
+      if (driverOk && !driverOk(drv)) continue;
       const c = emptyCell();
       const vehicles = new Set();
       for (const [ck, dc] of m) {
@@ -727,7 +740,7 @@
 
   Object.assign(GI, {
     makeGroupResolver, pointInPolygon, makeZoneLocator, buildJourneys, counterDeltas,
-    buildModel, filterDevices, aggregate, series, kpis, vehicleRows, driverRows, routeRows, profileRows,
+    buildModel, filterDevices, driverFilter, aggregate, series, kpis, vehicleRows, driverRows, routeRows, profileRows,
     milestoneImpact, findings, savings, linearTrend, rateSeries, targetFor, deviceInGroups,
   });
 })(window.GI);

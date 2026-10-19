@@ -50,6 +50,7 @@
     id: "u" + i, name: "chofer" + i, firstName: ["Juan", "Pedro", "Luis", "Carlos", "Diego", "Martín", "Sergio", "Pablo", "Raúl", "Hugo", "Omar"][i % 11],
     lastName: ["Gómez", "Pérez", "Soares", "Carosio", "Barbera", "Rodrigo", "Veltri", "Frantom", "Cabaleiro", "Astobiza", "Lodato"][(i * 7) % 11] + " " + (i + 1),
     isDriver: true, risk: 0.3 + rnd() * 2.2, idleBias: 0.5 + rnd() * 1.5,
+    driverGroups: [{ id: i < 8 ? "gBit" : "gCond" }],
   }));
 
   // Flota: [tipo, servicio, cantidad]

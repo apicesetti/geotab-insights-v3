@@ -155,12 +155,16 @@
       const series = GI.series(model, ids, gran);
       const total = GI.kpis(GI.aggregate(model, ids));
       const vRows = GI.vehicleRows(model, ids);
-      const dRows = GI.driverRows(model, ids);
+      // Conductores: además del vehículo, su propio grupo de conductor debe
+      // estar en el filtro (si no, aparecen choferes de otros grupos de trabajo
+      // que manejaron un vehículo del grupo).
+      const driverOk = GI.driverFilter(model, mgGroups.length ? mgGroups : settings.scope_group_ids);
+      const dRows = GI.driverRows(model, ids, driverOk);
       const rRows = GI.routeRows(model, ids);
       const pRows = GI.profileRows(model, ids);
       const events = model.events.filter(e => ids.has(e.d));
       return {
-        model, ids, gran, settings, series, total, vRows, dRows, rRows, pRows, events, milestones,
+        model, ids, gran, settings, series, total, vRows, dRows, rRows, pRows, events, milestones, driverOk,
         findings: GI.findings(model, ids, vRows, dRows),
         savings: GI.savings(vRows),
       };
