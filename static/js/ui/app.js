@@ -20,7 +20,7 @@
   function mergeDefaults(saved, defaults) {
     if (!saved) return defaults;
     const out = { ...defaults, ...saved };
-    for (const k of ["service", "fuel", "journeys", "drivers", "ui"]) out[k] = { ...defaults[k], ...(saved[k] || {}) };
+    for (const k of ["service", "fuel", "journeys", "drivers", "ui", "fatigue", "severity"]) out[k] = { ...defaults[k], ...(saved[k] || {}) };
     out.service.group_ids = { ...defaults.service.group_ids, ...((saved.service || {}).group_ids || {}) };
     out.category_weights = { ...defaults.category_weights, ...(saved.category_weights || {}) };
     out.categories = saved.categories && saved.categories.length ? saved.categories : defaults.categories;

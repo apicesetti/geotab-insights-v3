@@ -966,3 +966,10 @@
 #gi3-root .tag.expo-alta { background: var(--bad-soft); color: var(--bad); }
 #gi3-root .tag.expo-media { background: var(--canvas); color: var(--text-2); }
 #gi3-root .tag.expo-baja { background: var(--good-soft); color: var(--good); }
+
+/* Puntos calientes */
+#gi3-root .hotspots { margin-top: 16px; }
+#gi3-root .hotspots-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+#gi3-root .leaflet-tooltip.spot-label { background: #b02f2e; color: #fff; border: 0; border-radius: 10px; padding: 0 6px; font-weight: 700; box-shadow: none; }
+#gi3-root .leaflet-tooltip.spot-label::before { display: none; }
+#gi3-root .subnav { margin: 4px 0 14px; }

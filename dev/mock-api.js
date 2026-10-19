@@ -119,7 +119,11 @@
             exceptions.push({ id, rule: { id: rule }, device: { id: d.id }, driver: rnd() < 0.5 && drv ? { id: drv.id } : "UnknownDriverId",
               activeFrom: new Date(et).toISOString(), activeTo: new Date(et + 20000).toISOString(), duration: "00:00:20", state: "ExceptionEventStateValidId" });
             const fr = (et - start) / (stop - start);
-            logs.set(d.id + "|" + Math.round(et / 1000), { latitude: zc[pos][1] + (end[1] - zc[pos][1]) * fr, longitude: zc[pos][0] + (end[0] - zc[pos][0]) * fr, dateTime: new Date(et).toISOString() });
+            // 12% de los eventos en una "curva peligrosa" fija (para probar puntos calientes).
+            const curve = rnd() < 0.12;
+            logs.set(d.id + "|" + Math.round(et / 1000), curve
+              ? { latitude: -34.3 + (rnd() - 0.5) * 0.002, longitude: -59.3 + (rnd() - 0.5) * 0.002, dateTime: new Date(et).toISOString() }
+              : { latitude: zc[pos][1] + (end[1] - zc[pos][1]) * fr, longitude: zc[pos][0] + (end[0] - zc[pos][0]) * fr, dateTime: new Date(et).toISOString() });
           }
           if (ih > 0.2) exceptions.push({ id: "e" + (++eid), rule: { id: "RuleIdlingId" }, device: { id: d.id }, driver: drv ? { id: drv.id } : "UnknownDriverId",
             activeFrom: new Date(start + 600000).toISOString(), duration: dur(ih), state: "ExceptionEventStateValidId" });

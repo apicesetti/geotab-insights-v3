@@ -13,6 +13,7 @@
     ["servicio", "Corta / larga distancia"],
     ["objetivos", "Objetivos por perfil"],
     ["recorridos", "Recorridos"],
+    ["fatiga", "Fatiga y gravedad"],
     ["alcance", "Combustible y alcance"],
     ["general", "General"],
   ];
@@ -53,6 +54,7 @@
       objetivos: html`<${TargetsSection} draft=${draft} set=${set} ro=${ro} model=${model} />`,
       categorias: html`<${CategoriesSection} draft=${draft} set=${set} ro=${ro} />`,
       recorridos: html`<${RoutesSection} api=${api} draft=${draft} set=${set} ro=${ro} />`,
+      fatiga: html`<${FatigueSection} draft=${draft} set=${set} ro=${ro} />`,
       alcance: html`<${ScopeSection} draft=${draft} set=${set} groups=${groups} ro=${ro} model=${model} />`,
       general: html`<${GeneralSection} draft=${draft} set=${set} ro=${ro} />`,
     }[section];
@@ -323,6 +325,36 @@
       ${types == null ? html`<div className="muted">Cargando tipos de zona…</div>` : html`<div className="checks">${types.map(t => html`<label key=${t.id} className="check">
         <input type="checkbox" disabled=${ro} checked=${sel.includes(t.id)} onChange=${() => toggle(t.id)} /> ${t.name}</label>`)}</div>`}
     <//>`;
+  }
+
+  // ---------- Fatiga y gravedad ----------
+  function FatigueSection({ draft, set, ro }) {
+    const f = Object.assign({ max_drive_day: 9, max_span: 12, min_rest: 8, max_continuous: 4, max_days_row: 6 }, draft.fatigue || {});
+    const sv = Object.assign({ by_duration: false, per_minute: 0.5, max: 3, long_minutes: 1 }, draft.severity || {});
+    const num = (path, v, props) => html`<input type="number" disabled=${ro} value=${v} onChange=${e => set(path, +e.target.value)} ...${props || {}} />`;
+    return html`<div>
+      <${Panel} title="Jornada y fatiga"
+        hint="Límites con los que se marca a un conductor en Exposición → Jornada y fatiga. Son valores de referencia: ajustalos a la política de la empresa y a la normativa que aplique a cada operación.">
+        <div className="form two-col">
+          <label>Manejo máximo por día (h)${num(["fatigue", "max_drive_day"], f.max_drive_day, { min: 1, step: 0.5 })}</label>
+          <label>Jornada máxima, del primer arranque al último corte (h)${num(["fatigue", "max_span"], f.max_span, { min: 1, step: 0.5 })}</label>
+          <label>Descanso mínimo entre jornadas (h)${num(["fatigue", "min_rest"], f.min_rest, { min: 1, step: 0.5 })}</label>
+          <label>Manejo continuo máximo sin pausa de 15 min (h)${num(["fatigue", "max_continuous"], f.max_continuous, { min: 0.5, step: 0.5 })}</label>
+          <label>Días seguidos de trabajo como máximo${num(["fatigue", "max_days_row"], f.max_days_row, { min: 1 })}</label>
+        </div>
+      <//>
+      <${Panel} title="Gravedad de las infracciones"
+        hint="Una infracción que dura más (por ejemplo un exceso de velocidad de 3 minutos) es más peligrosa que una de segundos. Si activás la ponderación, cada minuto de duración suma un porcentaje del peso de la categoría, con un tope. Las infracciones instantáneas (frenadas, giros) no cambian.">
+        <div className="form two-col">
+          <label className="inline"><input type="checkbox" disabled=${ro} checked=${!!sv.by_duration} onChange=${e => set(["severity", "by_duration"], e.target.checked)} /> Ponderar el índice de riesgo por la duración de cada infracción</label>
+          <span></span>
+          <label>Cada minuto suma (% del peso)${num(["severity", "per_minute"], GI.round(sv.per_minute * 100, 0), { min: 0, step: 5, onChange: e => set(["severity", "per_minute"], +e.target.value / 100) })}</label>
+          <label>Tope (veces el peso)${num(["severity", "max"], sv.max, { min: 1, step: 0.5 })}</label>
+          <label>Se considera prolongada desde (min)${num(["severity", "long_minutes"], sv.long_minutes, { min: 0.1, step: 0.5 })}</label>
+        </div>
+        <p className="muted small">Ejemplo con los valores actuales: una infracción de 2 minutos pesa ${GI.fmtNum(Math.min(sv.max, 1 + sv.per_minute * 2), 1)} veces lo normal.</p>
+      <//>
+    </div>`;
   }
 
   // ---------- Alcance y combustible ----------

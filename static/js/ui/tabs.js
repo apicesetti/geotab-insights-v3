@@ -709,6 +709,8 @@
     const [progress, setProgress] = useState(null);
     const [points, setPoints] = useState(null);
     const [err, setErr] = useState(null);
+    const [locs, setLocs] = useState(null);
+    const [focus, setFocus] = useState(null);
     const mapRef = React.useRef(null);
     const mapObj = React.useRef(null);
     const runRef = React.useRef(0);
@@ -728,11 +730,25 @@
           // Redibuja como máximo cada 10% para no trabar la página.
           if (p - last >= 0.1 || p === 1) { last = p; setPoints(toPoints(partial)); }
         });
-        if (id === runRef.current) setPoints(toPoints(locs));
+        if (id === runRef.current) { setPoints(toPoints(locs)); setLocs(locs); }
       } catch (e) { setErr("No se pudieron ubicar los eventos: " + (e.message || e)); }
       if (id === runRef.current) setProgress(null);
     }
-    useEffect(() => { runRef.current++; setPoints(null); setProgress(null); }, [cat, limit, view, route && route.key]);
+    useEffect(() => { runRef.current++; setPoints(null); setProgress(null); setLocs(null); setFocus(null); }, [cat, limit, view, route && route.key]);
+    // Puntos calientes: lugares con muchas infracciones de varios conductores.
+    const spots = useMemo(() => (locs && progress == null ? GI.hotspots(sample, locs) : null), [locs, progress]);
+    useEffect(() => {
+      const m = mapObj.current;
+      if (!m) return;
+      if (m._spots) { m.removeLayer(m._spots); m._spots = null; }
+      if (!spots || !spots.length) return;
+      m._spots = L.layerGroup(spots.slice(0, 15).map((h, i) => L.rectangle(h.bounds, { color: "#b02f2e", weight: 2, fill: false })
+        .bindTooltip(String(i + 1), { permanent: true, direction: "center", className: "spot-label" }))).addTo(m);
+    }, [spots]);
+    useEffect(() => {
+      const m = mapObj.current;
+      if (m && focus) m.fitBounds(focus.bounds, { padding: [60, 60], maxZoom: 15 });
+    }, [focus]);
     useEffect(() => {
       if (!points || !mapRef.current) return;
       if (!mapObj.current) {
@@ -765,10 +781,30 @@
       ${progress != null ? html`<${GI.Progress} value=${progress} label=${"Ubicando " + n0(sample.length) + " eventos"} />` : null}
       ${err ? html`<${Info} tone="error">${err}<//>` : null}
       <div ref=${mapRef} className=${"map" + (points ? "" : " hidden")}></div>
+      ${spots ? html`<${HotspotList} spots=${spots} onFocus=${setFocus} title=${route ? route.from + " → " + route.to : ""} />` : null}
       ${!points && progress == null ? html`<div className="empty">${sample.length
         ? "Se van a ubicar los " + n0(sample.length) + " eventos más recientes" + (evs.length > sample.length ? " de " + n0(evs.length) : "") + ". Para ver un patrón alcanza con 500; más eventos tardan más la primera vez."
         : "No hay infracciones en este período."}</div>` : null}
     <//>`;
+  }
+
+  // Tabla de puntos calientes + descarga KML para crear zonas en MyGeotab.
+  function HotspotList({ spots, onFocus, title }) {
+    if (!spots.length) return html`<p className="muted small" style=${{ marginTop: "10px" }}>No hay puntos calientes: ningún lugar de ~500 m junta 5 o más infracciones de 2 o más conductores entre los eventos ubicados.</p>`;
+    const top = spots.slice(0, 15);
+    const kml = () => GI.downloadText("puntos-calientes" + (title ? "-" + title.replace(/[^\w]+/g, "_") : "") + ".kml", GI.hotspotsKml(top, "Puntos calientes" + (title ? " " + title : "")));
+    return html`<div className="hotspots">
+      <div className="hotspots-head"><h3>Puntos calientes</h3>
+        <button className="btn" onClick=${kml} title="Descarga un KML con un polígono por punto caliente">Descargar KML para crear zonas</button></div>
+      <p className="muted small">Lugares de ~500 m donde ${n0(GI.sum(top, h => h.n))} infracciones las cometieron varios conductores distintos: el riesgo es del lugar (curva, cruce, acceso), no de una persona. Importá el KML con el add-in <b>Import KML Zones</b> y creá una regla de velocidad o un aviso para esas zonas. Click en una fila para ubicarla en el mapa.</p>
+      <${DataTable} rowKey=${r => r.key} rows=${top.map((h, i) => ({ ...h, nro: i + 1 }))} defaultSort=${{ key: "nro", dir: "asc" }} onRowClick=${onFocus} columns=${[
+        { key: "nro", label: "#", align: "num" },
+        { key: "n", label: "Infracciones", align: "num" },
+        { key: "drivers", label: "Conductores", align: "num", value: r => Math.max(r.drivers, r.devices), fmt: r => n0(Math.max(r.drivers, r.devices)) },
+        { key: "cats", label: "Tipos", value: r => (r.cats[0] ? r.cats[0].n : 0), fmt: r => html`<${CatMix} cats=${r.cats} max=${3} />` },
+        { key: "pos", label: "Ubicación", value: r => r.lat, fmt: r => html`<a href=${"https://www.google.com/maps?q=" + r.lat.toFixed(5) + "," + r.lng.toFixed(5)} target="_blank" rel="noopener" onClick=${e => e.stopPropagation()}>${r.lat.toFixed(4)}, ${r.lng.toFixed(4)} ↗</a>` },
+      ]} />
+    </div>`;
   }
 
   // ======================= DETALLES =======================

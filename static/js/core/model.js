@@ -338,6 +338,7 @@
     // Eventos
     const mapping = settings.rule_mapping;
     const weights = settings.category_weights;
+    const sev = settings.severity || {};
     const riskCats = new Set(GI.CATEGORIES.filter(c => c.kind === "riesgo").map(c => c.key));
     const events = [];
     for (const ev of raw.exceptions) {
@@ -352,7 +353,9 @@
         if (trip) drv = trip.r;
       }
       const j = findContaining(journeysByDevice.get(ev.d) || [], ev.t);
-      const w = riskCats.has(catKey) ? (weights[catKey] != null ? weights[catKey] : 1) : 0;
+      let w = riskCats.has(catKey) ? (weights[catKey] != null ? weights[catKey] : 1) : 0;
+      // Gravedad por duración: cada minuto suma un % del peso, con tope.
+      if (w > 0 && sev.by_duration && ev.h > 0) w *= Math.min(sev.max || 3, 1 + (sev.per_minute || 0) * ev.h * 60);
       const e = { ...ev, cat: catKey, dk, drv: drv || null, j, w };
       events.push(e);
       const c = cell(ev.d, dk);

@@ -3,7 +3,7 @@ const fs = require("fs");
 const vm = require("vm");
 const ctx = { window: {}, console, Date, Math, Map, Set, Number, JSON, Object, Array, String, Promise, setTimeout };
 vm.createContext(ctx);
-for (const f of ["util", "catalog", "model", "exposure"]) {
+for (const f of ["util", "catalog", "model", "exposure", "riskfactors"]) {
   vm.runInContext(fs.readFileSync(require("path").join(__dirname, "../static/js/core", f + ".js"), "utf8"), ctx);
 }
 const GI = ctx.window.GI;
@@ -180,5 +180,33 @@ assert.strictEqual(GI.durationToHours("00:11:42.0300000").toFixed(4), (11 / 60 +
     assert.ok(d.expected >= 0 && d.actual >= 0);
     assert.ok(d.nightPct == null || (d.nightPct >= 0 && d.nightPct <= 100));
   }
+}
+// Factores de riesgo: los km de los tramos de fatiga suman los km de viajes.
+{
+  const ids = GI.filterDevices(model, {});
+  const ex = GI.exposure(model, ids, null);
+  const rmap = new Map(ex.routes.filter(r => r.stable && r.idx != null).map(r => [r.key, r.idx]));
+  const rf = GI.riskFactors(model, ids, null, rmap, ex.fleetIdx);
+  const fk = GI.sum(rf.fatigue.buckets, b => b.km);
+  assert.ok(Math.abs(fk - ex.totKm) < 1e-6 * Math.max(1, fk), "km fatiga " + fk + " vs " + ex.totKm);
+  const trips = [{ s: 0, e: 100 }, { s: 200, e: 300 }];
+  assert.strictEqual(GI._findTrip(trips, 250), 1);
+  assert.strictEqual(GI._findTrip(trips, -5), -1);
+  for (const d of rf.fatigue.drivers) assert.ok(["alta", "media", "baja"].includes(d.level));
+}
+// Sol: Neuquén 19/10/2026 sale ~06:41 y se pone ~19:55 (hora argentina).
+{
+  const st = GI.sunTimes(new Date("2026-10-19T15:00:00Z").getTime(), -38.95, -68.06);
+  const hm = ms => { const d = new Date(ms); return d.getHours() * 60 + d.getMinutes(); };
+  assert.ok(Math.abs(hm(st.rise) - (6 * 60 + 41)) <= 5, "salida " + new Date(st.rise));
+  assert.ok(Math.abs(hm(st.set) - (19 * 60 + 55)) <= 6, "puesta " + new Date(st.set));
+  // Un viaje de 18 a 22 h en junio en Neuquén es casi todo de noche (puesta ~18:18).
+  const a = new Date(2026, 5, 21, 18).getTime(), b = new Date(2026, 5, 21, 22).getTime();
+  const fJun = GI._darkFraction(a, b, -38.95, -68.06);
+  assert.ok(fJun > 0.9, "junio " + fJun);
+  // El mismo horario en diciembre (puesta ~20:58) es mitad de noche.
+  const c = new Date(2026, 11, 21, 18).getTime(), d = new Date(2026, 11, 21, 22).getTime();
+  const fDic = GI._darkFraction(c, d, -38.95, -68.06);
+  assert.ok(fDic > 0.15 && fDic < 0.4, "diciembre " + fDic);
 }
 console.log("OK");

@@ -58,6 +58,8 @@
         ${top.map((c, i) => html`${i ? (i === top.length - 1 ? " y " : ", ") : ""}<b>${DAYS_LONG[c.di]} de ${hh(c.h)} a ${hh(c.h + 1)} h</b> (${factorTxt(c.factor)})`)}${" "}tienen más infracciones por km que el promedio de la flota.
         ${ex.highCells.length > 3 ? html` <span className="muted">${ex.highCells.length} horas en total superan ×1,5.</span>` : null}</span></div>`
         : html`<div className="verdict-line"><span className="vtag">Sin horarios críticos</span><span>Ninguna hora supera ×1,5 el promedio de infracciones por km de la flota.</span></div>`}
+      ${ex.night.factor != null ? html`<div className=${"verdict-line " + (ex.night.factor >= 1.2 ? "bad" : ex.night.factor <= 0.85 ? "good" : "")}><span className="vtag">Noche</span><span>
+        De noche (entre la puesta y la salida del sol, según fecha y lugar) se hace el <b>${GI.fmtPct((ex.night.km / ex.totKm) * 100, 0)}</b> de los km y el riesgo es${" "}<b>${factorTxt(ex.night.factor)}</b> el del día (${n2(ex.night.idx)} vs ${n2(ex.night.dayIdx)} pts/100 km).</span></div>` : null}
       <div className="hgrid-wrap">
         <div className="hgrid" role="table" aria-label="Infracciones por día y hora">
           <div className="hgrid-row hgrid-head" role="row"><span className="hgrid-day"></span>
@@ -169,29 +171,143 @@
         { key: "conduct", label: "Conducta", fmt: r => conductTag(r.conduct) },
         { key: "exposure", label: "Exposición", fmt: r => exposureTag(r.exposure) },
         { key: "riskPct", label: "Horario de riesgo", align: "num", fmt: r => GI.fmtPct(r.riskPct, 0) },
-        { key: "nightPct", label: "Nocturno", align: "num", title: "% de km entre las 22 y las 6 h", fmt: r => GI.fmtPct(r.nightPct, 0) },
+        { key: "nightPct", label: "De noche", align: "num", title: "% de km entre la puesta y la salida del sol (según fecha y ubicación del viaje)", fmt: r => GI.fmtPct(r.nightPct, 0) },
         { key: "maxStint", label: "Manejo continuo máx.", align: "num", fmt: r => html`${n1(r.maxStint)} h${r.longStints ? html` <span className="delta bad" title="Veces que manejó más de 4 h seguidas">${r.longStints} veces +4 h</span>` : ""}` },
         { key: "top", label: "Tramo principal", value: r => (r.topRoutes[0] ? r.topRoutes[0].name : ""), fmt: r => (r.topRoutes[0] ? html`<span className="small">${r.topRoutes[0].name}</span>` : html`<span className="muted">–</span>`) },
       ]} empty="No hay conductores con suficientes km en el período." />
     <//>`;
   }
 
+  // ---------- Fatiga ----------
+  const fatigueLabel = b => (b.to === Infinity ? "+" + b.from + " h" : b.from + "–" + b.to + " h");
+  function levelTag(l) { return html`<span className=${"tag expo-" + l}>${l === "alta" ? "Alta" : l === "media" ? "Media" : "Baja"}</span>`; }
+
+  function FatiguePanel({ view, rf, onDriver }) {
+    const f = rf.fatigue, L = f.limits;
+    const late = f.buckets.filter(b => b.factor != null && b.from >= 2).sort((a, b) => b.factor - a.factor)[0];
+    const minKm = view.settings.drivers.min_km_ranking;
+    const rows = f.drivers.filter(d => d.days > 0);
+    return html`<div>
+      <${Panel} title="Riesgo según horas al volante en el día"
+        hint="Índice de riesgo (pts/100 km) según cuántas horas de manejo llevaba el vehículo ese día al momento de cada viaje o infracción. Si sube con las horas, hay un efecto de cansancio.">
+        ${late && late.factor >= 1.3 ? html`<div className="verdict-line bad"><span className="vtag">Fatiga</span><span>Con <b>${fatigueLabel(late)}</b> de manejo acumulado en el día, el riesgo es <b>${factorTxt(late.factor)}</b> el de las primeras 2 horas.</span></div>`
+          : html`<div className="verdict-line"><span className="vtag">Sin efecto claro</span><span>El riesgo no sube de forma marcada con las horas de manejo del día.</span></div>`}
+        <${ChartView} height=${220} config=${{
+          type: "bar",
+          data: { labels: f.buckets.map(fatigueLabel), datasets: [{ label: "pts/100 km", data: f.buckets.map(b => (b.rate == null ? null : GI.round(b.rate, 2))),
+            backgroundColor: f.buckets.map(b => (b.factor != null && b.factor >= 1.3 ? "#e34948" : "#2a78d6")), borderRadius: 4, borderSkipped: "start" }] },
+          options: { plugins: { legend: { display: false }, tooltip: { callbacks: { afterLabel: c => { const b = f.buckets[c.dataIndex]; return n0(b.n) + " infracciones en " + n0(b.km) + " km" + (b.factor != null ? " (" + factorTxt(b.factor) + ")" : ""); } } } },
+            scales: { x: { title: { display: true, text: "horas de manejo acumuladas en el día" } }, y: { beginAtZero: true, title: { display: true, text: "pts/100 km" } } } },
+        }} />
+      <//>
+      <${Panel} title="Jornada y descanso por conductor"
+        hint=${"Límites de referencia (se cambian en Configuración → Fatiga y gravedad): manejo máximo " + L.max_drive_day + " h por día, jornada máxima " + L.max_span + " h (del primer arranque al último corte), descanso mínimo " + L.min_rest + " h entre jornadas, hasta " + L.max_days_row + " días seguidos y manejo continuo de hasta " + L.max_continuous + " h (pausas de menos de 15 min no cortan). Nivel: Alta si incumple 3 o más, Media si incumple alguno."}>
+        <div className="readouts compact inset">
+          <${Kpi} label="Fatiga alta" value=${n0(rows.filter(d => d.level === "alta").length)} sub=${html`<span>3 o más límites superados</span>`} />
+          <${Kpi} label=${"Días con más de " + L.max_drive_day + " h de manejo"} value=${n0(GI.sum(rows, d => d.longDays))} sub=${html`<span>en ${n0(rows.filter(d => d.longDays).length)} conductores</span>`} />
+          <${Kpi} label=${"Descansos de menos de " + L.min_rest + " h"} value=${n0(GI.sum(rows, d => d.shortRests))} sub=${html`<span>en ${n0(rows.filter(d => d.shortRests).length)} conductores</span>`} />
+        </div>
+        <${DataTable} rowKey=${r => r.id} rows=${rows} limit=${20} defaultSort=${{ key: "flags", dir: "desc" }} onRowClick=${onDriver ? r => onDriver(r.id) : null} columns=${[
+          { key: "name", label: "Conductor" },
+          { key: "flags", label: "Fatiga", value: r => r.flags * 1000 + r.longDays + r.shortRests, fmt: r => levelTag(r.level) },
+          { key: "days", label: "Días trabajados", align: "num" },
+          { key: "avgDay", label: "Manejo prom./día", align: "num", fmt: r => n1(r.avgDay) + " h" },
+          { key: "maxDay", label: "Máx. en un día", align: "num", fmt: r => html`<span className=${r.maxDay > L.max_drive_day ? "delta bad" : ""}>${n1(r.maxDay)} h</span>` },
+          { key: "longSpans", label: "Jornadas +" + L.max_span + " h", align: "num", fmt: r => (r.longSpans ? html`<span className="delta bad">${r.longSpans}</span>` : "0") },
+          { key: "shortRests", label: "Descansos −" + L.min_rest + " h", align: "num", fmt: r => (r.shortRests ? html`<span className="delta bad">${r.shortRests}</span>` : "0") },
+          { key: "minRest", label: "Descanso más corto", align: "num", fmt: r => (r.minRest == null ? "–" : n1(r.minRest) + " h") },
+          { key: "maxRow", label: "Días seguidos", align: "num", fmt: r => html`<span className=${r.maxRow >= L.max_days_row ? "delta bad" : ""}>${r.maxRow}</span>` },
+          { key: "maxStint", label: "Continuo máx.", align: "num", fmt: r => html`${n1(r.maxStint)} h${r.longStints ? html` <span className="delta bad" title=${"Veces que manejó más de " + L.max_continuous + " h seguidas"}>${r.longStints}×</span>` : ""}` },
+        ]} empty="Sin conductores identificados en el período." />
+      <//>
+    </div>`;
+  }
+
+  // ---------- Familiaridad ----------
+  function FamiliarityPanel({ rf }) {
+    const fm = rf.familiarity;
+    const first = fm.buckets[0], rest = fm.buckets[fm.buckets.length - 1];
+    return html`<div>
+      <${Panel} title="Riesgo según cuántas veces hizo el recorrido"
+        hint="Cada pasada de un conductor por un recorrido se compara con el promedio de ese recorrido (1 = igual que la flota en ese tramo). Para no confundir con quien ya lo conocía de antes, no se cuentan los pares conductor-recorrido que aparecen en los primeros 14 días cargados. Cuanto más largo el período, más confiable.">
+        ${first.ratio != null && rest.ratio != null && first.ratio > rest.ratio * 1.2 ? html`<div className="verdict-line bad"><span className="vtag">Tramos nuevos</span><span>La <b>primera vez</b> en un recorrido el riesgo es <b>${factorTxt(first.ratio)}</b> el normal del tramo; con experiencia baja a ${factorTxt(rest.ratio)}. Conviene acompañar o capacitar antes de asignar un recorrido nuevo.</span></div>`
+          : first.ratio != null ? html`<div className="verdict-line"><span className="vtag">Sin efecto claro</span><span>La primera vez en un recorrido el riesgo es ${factorTxt(first.ratio)} el normal del tramo.</span></div>`
+          : html`<${Info}>Todavía no hay suficientes recorridos nuevos en el período para medirlo. Probá con un período más largo.<//>`}
+        <${ChartView} height=${200} config=${{
+          type: "bar",
+          data: { labels: fm.buckets.map(b => b.label), datasets: [{ label: "Real ÷ esperado", data: fm.buckets.map(b => (b.ratio == null ? null : GI.round(b.ratio, 2))),
+            backgroundColor: fm.buckets.map(b => (b.ratio != null && b.ratio >= 1.3 ? "#e34948" : "#2a78d6")), borderRadius: 4, borderSkipped: "start" }] },
+          options: { plugins: { legend: { display: false }, tooltip: { callbacks: { afterLabel: c => { const b = fm.buckets[c.dataIndex]; return n0(b.n) + " pasadas, " + n0(b.km) + " km"; } } } },
+            scales: { x: { title: { display: true, text: "número de pasada por el recorrido" } }, y: { beginAtZero: true, title: { display: true, text: "real ÷ esperado (1 = normal del tramo)" } } } },
+        }} />
+      <//>
+      <${Panel} title="Conductores nuevos en tramos peligrosos" hint="Conductores que en los últimos 21 días hicieron 3 veces o menos un recorrido cuya peligrosidad es ×1,3 o más la de la flota.">
+        <${DataTable} rowKey=${r => r.drv + r.route} rows=${fm.newcomers} limit=${15} defaultSort=${{ key: "danger", dir: "desc" }} columns=${[
+          { key: "name", label: "Conductor" },
+          { key: "route", label: "Recorrido" },
+          { key: "times", label: "Veces", align: "num" },
+          { key: "danger", label: "Peligrosidad del tramo", align: "num", fmt: r => html`<span className="delta bad">${factorTxt(r.danger)}</span>` },
+          { key: "last", label: "Última vez", align: "num", fmt: r => new Date(r.last).toLocaleDateString("es-AR") },
+        ]} empty="Ninguno en los últimos 21 días." />
+      <//>
+    </div>`;
+  }
+
+  // ---------- Gravedad ----------
+  function SeverityPanel({ view, rf, onDriver }) {
+    const p = rf.prolonged;
+    const sevOn = view.settings.severity && view.settings.severity.by_duration;
+    return html`<div>
+      <${Panel} title="Infracciones prolongadas"
+        hint=${"No es lo mismo un exceso de velocidad de 5 segundos que uno de 3 minutos. Se considera prolongada la infracción que dura " + p.longMin + " minuto(s) o más. " + (sevOn ? "El índice de riesgo ya pondera cada infracción por su duración (Configuración → Fatiga y gravedad)." : "Podés hacer que el índice pondere cada infracción por su duración en Configuración → Fatiga y gravedad.")}>
+        <h3>Por categoría</h3>
+        <${DataTable} rowKey=${r => r.cat} rows=${p.cats} defaultSort=${{ key: "long", dir: "desc" }} columns=${[
+          { key: "cat", label: "Categoría", value: r => GI.catLabel(r.cat), fmt: r => html`<span className="dot" style=${{ background: GI.catColor(r.cat) }}></span>${GI.catLabel(r.cat)}` },
+          { key: "n", label: "Infracciones", align: "num", fmt: r => n0(r.n) },
+          { key: "long", label: "Prolongadas", align: "num", fmt: r => n0(r.long) },
+          { key: "pct", label: "% prolongadas", align: "num", fmt: r => GI.fmtPct(r.pct, 0) },
+          { key: "avgMin", label: "Duración promedio", align: "num", fmt: r => (r.avgMin >= 1 ? n1(r.avgMin) + " min" : n0(r.avgMin * 60) + " s") },
+        ]} empty="Sin infracciones en el período." />
+        <h3 style=${{ marginTop: "16px" }}>Conductores con más tiempo en infracción</h3>
+        <${DataTable} rowKey=${r => r.id} rows=${p.drivers} limit=${15} defaultSort=${{ key: "minutes", dir: "desc" }} onRowClick=${onDriver ? r => onDriver(r.id) : null} columns=${[
+          { key: "name", label: "Conductor" },
+          { key: "n", label: "Prolongadas", align: "num" },
+          { key: "minutes", label: "Minutos en infracción", align: "num", fmt: r => n0(r.minutes) },
+          { key: "maxMin", label: "La más larga", align: "num", fmt: r => n1(r.maxMin) + " min" },
+          { key: "cats", label: "Tipos", value: r => (r.cats[0] ? r.cats[0].n : 0), fmt: r => html`<span className="small">${r.cats.slice(0, 3).map(c => GI.catLabel(c.cat) + " " + c.n).join(" · ")}</span>` },
+        ]} empty="No hay infracciones prolongadas." />
+      <//>
+    </div>`;
+  }
+
+  const SECTIONS = [["horarios", "Horarios y tráfico"], ["conductores", "Conductores"], ["fatiga", "Jornada y fatiga"], ["familiaridad", "Tramos nuevos"], ["gravedad", "Gravedad"]];
+
   function ExposureTab({ view, onDriver }) {
+    const [sec, setSec] = useState("horarios");
     const ex = useMemo(() => GI.exposure(view.model, view.ids, view.driverOk), [view]);
+    const rf = useMemo(() => {
+      if (!ex.totKm) return null;
+      const rmap = new Map(ex.routes.filter(r => r.stable && r.idx != null).map(r => [r.key, r.idx]));
+      return GI.riskFactors(view.model, view.ids, view.driverOk, rmap, ex.fleetIdx);
+    }, [ex]);
     if (!ex.totKm) return html`<${Info}>No hay viajes en el período para analizar la exposición.<//>`;
     const top = ex.highCells[0];
-    let nk = 0;
-    ex.grid.forEach(row => row.forEach((c, h) => { if (h >= 22 || h < 6) nk += c.km; }));
+    const nt = ex.night;
     return html`<div>
       <div className="readouts">
-        <${Kpi} label="Infracciones cada 100 km" value=${n2(ex.fleetRate)} sub=${html`<span>promedio de la flota en el período</span>`} />
-        <${Kpi} label="Hora más riesgosa" value=${top ? DAYS[top.di] + " " + hh(top.h) + " h" : "–"} sub=${html`<span>${top ? factorTxt(top.factor) + " el promedio" : "ninguna supera ×1,5"}</span>`} />
-        <${Kpi} label="Km nocturnos" value=${GI.fmtPct((nk / ex.totKm) * 100, 0)} sub=${html`<span>${n0(nk)} km entre las 22 y las 6 h</span>`} />
+        <${Kpi} label="Hora más riesgosa" value=${top ? DAYS[top.di] + " " + hh(top.h) + " h" : "–"} sub=${html`<span>${top ? factorTxt(top.factor) + " el promedio de " + n2(ex.fleetRate) + " cada 100 km" : "ninguna supera ×1,5"}</span>`} />
         <${Kpi} label="Recorridos con tráfico" value=${n0(ex.routes.filter(r => r.drop >= 25).length)} sub=${html`<span>van 25% o más lento en alguna franja</span>`} />
+        <${Kpi} label="Conductores con fatiga alta" value=${n0(rf.fatigue.drivers.filter(d => d.level === "alta").length)} sub=${html`<span>3 o más límites de jornada superados</span>`} />
+        <${Kpi} label="Km de noche" value=${GI.fmtPct((nt.km / ex.totKm) * 100, 0)}
+          sub=${html`<span>${nt.factor != null ? "riesgo " + factorTxt(nt.factor) + " el del día" : n0(nt.km) + " km"}</span>`}
+          hint="Noche real: entre la puesta y la salida del sol en la ubicación y la fecha de cada viaje (cambia con la estación y la latitud)." />
       </div>
-      <${HourGrid} ex=${ex} />
-      <${RoutesTraffic} view=${view} ex=${ex} />
-      <${DriversExposure} view=${view} ex=${ex} onDriver=${onDriver} />
+      <div className="subnav"><${Segmented} value=${sec} onChange=${setSec} options=${SECTIONS.map(([value, label]) => ({ value, label }))} /></div>
+      ${sec === "horarios" ? html`<${HourGrid} ex=${ex} /><${RoutesTraffic} view=${view} ex=${ex} />`
+        : sec === "conductores" ? html`<${DriversExposure} view=${view} ex=${ex} onDriver=${onDriver} />`
+        : sec === "fatiga" ? html`<${FatiguePanel} view=${view} rf=${rf} onDriver=${onDriver} />`
+        : sec === "familiaridad" ? html`<${FamiliarityPanel} rf=${rf} />`
+        : html`<${SeverityPanel} view=${view} rf=${rf} onDriver=${onDriver} />`}
     </div>`;
   }
 
