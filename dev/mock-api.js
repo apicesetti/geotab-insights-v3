@@ -205,6 +205,12 @@
       if (p.typeName === "Trip" && !p.sort) out = [...out].sort((a, b) => (a.start < b.start ? -1 : 1)).slice(0, 100);
       return p.resultsLimit ? out.slice(0, p.resultsLimit) : out;
     }
+    if (method === "Add" || method === "Set") {
+      // Como el servidor real: no acepta grupos donde uno contiene a otro.
+      const gs = ((p.entity && p.entity.groups) || []).map(g => g.id);
+      const desc = id => { const out = new Set(); const q = [id]; while (q.length) { const g = groups.find(x => x.id === q.shift()); for (const c of (g && g.children) || []) if (!out.has(c.id)) { out.add(c.id); q.push(c.id); } } return out; };
+      for (const a of gs) { const d = desc(a); if (gs.some(b => b !== a && d.has(b))) throw new Error("Cannot add an entity with groups that have a parent-child relationship."); }
+    }
     if (method === "Add") { const id = "ad" + (++aid); addInData.push({ ...JSON.parse(JSON.stringify(p.entity)), id }); return id; }
     if (method === "Set") { const i = addInData.findIndex(a => a.id === p.entity.id); addInData[i] = JSON.parse(JSON.stringify(p.entity)); return null; }
     if (method === "Remove") { const i = addInData.findIndex(a => a.id === p.entity.id); if (i >= 0) addInData.splice(i, 1); return null; }

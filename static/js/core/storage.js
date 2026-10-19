@@ -24,11 +24,37 @@
 
   // Grupos de acceso a datos de todos los usuarios (los "companyGroups").
   // Requiere permiso para ver usuarios: lo usa el administrador al guardar.
+  // Árbol de grupos: hijo -> padre (para saber quién contiene a quién).
+  async function groupParents(api) {
+    const groups = (await api.call("Get", { typeName: "Group", propertySelector: { fields: ["id", "children"], isIncluded: true } })) || [];
+    const parent = new Map();
+    for (const g of groups) for (const c of g.children || []) { const cid = GI.idOf(c); if (cid && !parent.has(cid)) parent.set(cid, g.id); }
+    return parent;
+  }
+  function ancestorsOf(id, parent) {
+    const out = [];
+    const seen = new Set([id]);
+    let cur = parent.get(id);
+    while (cur && !seen.has(cur)) { out.push(cur); seen.add(cur); cur = parent.get(cur); }
+    return out;
+  }
+  // MyGeotab no acepta guardar un registro en dos grupos donde uno contiene
+  // al otro. Un usuario ve el registro si está en su grupo de acceso o en
+  // algún subgrupo, así que alcanza con quedarse con los grupos "más
+  // profundos": se descarta todo grupo que contenga a otro de la lista.
+  function deepestOnly(ids, parent) {
+    const set = new Set(ids);
+    const drop = new Set();
+    for (const id of set) for (const a of ancestorsOf(id, parent)) if (set.has(a)) drop.add(a);
+    const out = [...set].filter(id => !drop.has(id));
+    return out.length ? out : ["GroupCompanyId"];
+  }
   async function userScopeGroups(api) {
     const users = (await api.call("Get", { typeName: "User", propertySelector: { fields: ["id", "companyGroups"], isIncluded: true } })) || [];
     const ids = new Set(["GroupCompanyId"]);
     for (const u of users) for (const g of u.companyGroups || []) { const id = GI.idOf(g); if (id) ids.add(id); }
-    return [...ids];
+    const parent = await groupParents(api);
+    return deepestOnly([...ids], parent);
   }
   async function shareGroups(api) {
     try { return (await userScopeGroups(api)).map(id => ({ id })); }
@@ -39,13 +65,19 @@
   // los registros). Devuelve { missingGroups, missingUsers } o null si no se pudo.
   async function sharingStatus(api, settingsRecords) {
     try {
-      const users = (await api.call("Get", { typeName: "User", propertySelector: { fields: ["id", "name", "companyGroups"], isIncluded: true } })) || [];
+      const [users, parent] = await Promise.all([
+        api.call("Get", { typeName: "User", propertySelector: { fields: ["id", "name", "companyGroups"], isIncluded: true } }).then(r => r || []),
+        groupParents(api),
+      ]);
       const have = new Set();
       for (const r of settingsRecords || []) for (const g of r.groups || []) have.add(GI.idOf(g));
+      // El usuario de grupo U ve el registro si alguno de sus grupos es U o un subgrupo de U.
+      const visibleTo = new Set();
+      for (const g of have) { visibleTo.add(g); for (const a of ancestorsOf(g, parent)) visibleTo.add(a); }
       const missingGroups = new Set(), missingUsers = [];
       for (const u of users) {
         const gs = (u.companyGroups || []).map(GI.idOf).filter(Boolean);
-        if (!gs.length || gs.some(g => have.has(g))) continue;
+        if (!gs.length || gs.some(g => visibleTo.has(g))) continue;
         gs.forEach(g => missingGroups.add(g));
         missingUsers.push(u.name || u.id);
       }
@@ -152,5 +184,5 @@
     return saved;
   }
 
-  Object.assign(GI, { ADDIN_ID, loadShared, saveSettings, sharingStatus, shareWithAll, addMilestone, updateMilestone, removeMilestone, resolveIsAdmin });
+  Object.assign(GI, { _deepestOnly: deepestOnly, ADDIN_ID, loadShared, saveSettings, sharingStatus, shareWithAll, addMilestone, updateMilestone, removeMilestone, resolveIsAdmin });
 })(window.GI);
