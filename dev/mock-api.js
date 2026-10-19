@@ -98,7 +98,9 @@
         const parts = km > 200 ? 2 : 1;
         for (let p = 0; p < parts; p++) {
           const pkm = km / parts;
-          const dh = pkm / (d._svc === "larga" ? 70 : 45);
+          // Hora pico 17–20 h: más tráfico (más lento) y más infracciones.
+          const peakH = new Date(t).getHours(), peak = peakH >= 17 && peakH < 20;
+          const dh = (pkm / (d._svc === "larga" ? 70 : 45)) * (peak ? 1.35 : 1);
           const idleBase = d._svc === "corta" ? 0.18 : 0.07;
           const ih = dh * idleBase * (drv ? drv.idleBias : 1) * (after ? 0.75 : 1) * (0.6 + rnd() * 0.8);
           const start = t, stop = t + dh * H;
@@ -107,7 +109,7 @@
             start: new Date(start).toISOString(), stop: new Date(stop).toISOString(), distance: pkm,
             drivingDuration: dur(dh), idlingDuration: dur(ih), stopPoint: { x: end[0], y: end[1] } });
           // eventos
-          const risk = drv ? drv.risk : 1.2;
+          const risk = (drv ? drv.risk : 1.2) * (peak ? 1.8 : 1);
           const nEv = Math.floor((pkm / 100) * risk * (rnd() * 1.2));
           for (let e = 0; e < nEv; e++) {
             let rule = pick(["RuleSeatbeltId", "RuleSeatbeltId", "RulePostedSpeedingId", "RuleHarshBrakingId", "RuleJackrabbitStartsId", "aPhone", "aDist", "RuleHarshCorneringId", "aVel"]);

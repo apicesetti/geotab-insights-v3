@@ -109,6 +109,7 @@
           };
         }
         cur.e = t.e; cur.km += t.km; cur.dh += t.dh; cur.ih += t.ih; cur.n++;
+        (cur.tr = cur.tr || []).push(t);
         // Km por conductor dentro del recorrido (puede haber relevo).
         const rk = t.r || "_unknown";
         cur.drvKm = cur.drvKm || {};
@@ -387,7 +388,7 @@
     }
 
     return {
-      raw, cat, settings, gr, devices, devById, driverName, vtypeOf, serviceOf, serviceSource, profileOf, fuelTypeOf, priceOf,
+      raw, cat, settings, gr, devices, devById, driverName, tripsByDevice, vtypeOf, serviceOf, serviceSource, profileOf, fuelTypeOf, priceOf,
       exclusionImpact, excludedCount, fleetCount: withSerial.length,
       hasPrice: [...priceOf.values()].some(p => p > 0),
       dd, drvCells, events, journeys, dayKeys, hasFuel: fuelDeltas.size > 0,

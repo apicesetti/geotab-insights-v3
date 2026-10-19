@@ -3,7 +3,7 @@ const fs = require("fs");
 const vm = require("vm");
 const ctx = { window: {}, console, Date, Math, Map, Set, Number, JSON, Object, Array, String, Promise, setTimeout };
 vm.createContext(ctx);
-for (const f of ["util", "catalog", "model"]) {
+for (const f of ["util", "catalog", "model", "exposure"]) {
   vm.runInContext(fs.readFileSync(require("path").join(__dirname, "../static/js/core", f + ".js"), "utf8"), ctx);
 }
 const GI = ctx.window.GI;
@@ -161,5 +161,24 @@ assert.strictEqual(GI.durationToHours("00:11:42.0300000").toFixed(4), (11 / 60 +
 {
   const t = GI.linearTrend([1, 2, 3, 4, 5]);
   assert.ok(Math.abs(t.slope - 1) < 1e-9 && Math.abs(t.at(2) - 7) < 1e-9 && t.periodsTo(8) === 3);
+}
+// Exposición: km de la matriz = km de viajes; eventos de la matriz = eventos de riesgo.
+{
+  const ids = GI.filterDevices(model, {});
+  const ex = GI.exposure(model, ids, null);
+  let gk = 0, gn = 0;
+  for (const row of ex.grid) for (const c of row) { gk += c.km; gn += c.n; }
+  const tk = GI.sum([...model.tripsByDevice].filter(([d]) => ids.has(d)).flatMap(([, ts]) => ts), t => t.km > 0 ? t.km : 0);
+  assert.ok(Math.abs(gk - tk) < 1e-6 * Math.max(1, tk), "km de la matriz " + gk + " vs viajes " + tk);
+  assert.strictEqual(gn, model.events.filter(e => e.w > 0 && ids.has(e.d)).length);
+  // spreadTrip reparte proporcional al tiempo
+  const parts = [];
+  const s = new Date(2026, 0, 5, 10, 30).getTime();
+  GI._spreadTrip({ s, e: s + 2 * 3600000, km: 100, dh: 2 }, (di, h, km) => parts.push([h, Math.round(km)]));
+  assert.strictEqual(JSON.stringify(parts), JSON.stringify([[10, 25], [11, 50], [12, 25]]));
+  for (const d of ex.drivers) {
+    assert.ok(d.expected >= 0 && d.actual >= 0);
+    assert.ok(d.nightPct == null || (d.nightPct >= 0 && d.nightPct <= 100));
+  }
 }
 console.log("OK");
