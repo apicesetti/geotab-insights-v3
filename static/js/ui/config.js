@@ -15,13 +15,14 @@
     ["objetivos", "Objetivos por perfil"],
     ["recorridos", "Recorridos"],
     ["fatiga", "Fatiga y gravedad"],
+    ["referencias", "Conductores y referencias"],
     ["alcance", "Combustible y alcance"],
     ["general", "General"],
   ];
 
   function clone(o) { return JSON.parse(JSON.stringify(o)); }
 
-  function ConfigTab({ api, settings, catalogs, groups, model, isAdmin, userName, onSave }) {
+  function ConfigTab({ api, settings, catalogs, groups, model, isAdmin, userName, onSave, benchmark, onPublishBenchmark, mgGroups }) {
     const [draft, setDraft] = useState(() => clone(settings));
     const [section, setSection] = useState("categorias");
     const [saving, setSaving] = useState(false);
@@ -56,6 +57,7 @@
       categorias: html`<${CategoriesSection} draft=${draft} set=${set} ro=${ro} />`,
       recorridos: html`<${RoutesSection} api=${api} draft=${draft} set=${set} ro=${ro} />`,
       fatiga: html`<${FatigueSection} draft=${draft} set=${set} ro=${ro} />`,
+      referencias: html`<${ReferenceSection} draft=${draft} set=${set} ro=${ro} model=${model} benchmark=${benchmark} onPublish=${onPublishBenchmark} mgGroups=${mgGroups} groups=${groups} />`,
       alcance: html`<${ScopeSection} draft=${draft} set=${set} groups=${groups} ro=${ro} model=${model} />`,
       general: html`<${GeneralSection} draft=${draft} set=${set} ro=${ro} />`,
     }[section];
@@ -326,6 +328,39 @@
       ${types == null ? html`<div className="muted">Cargando tipos de zona…</div>` : html`<div className="checks">${types.map(t => html`<label key=${t.id} className="check">
         <input type="checkbox" disabled=${ro} checked=${sel.includes(t.id)} onChange=${() => toggle(t.id)} /> ${t.name}</label>`)}</div>`}
     <//>`;
+  }
+
+  // ---------- Conductores y valores de referencia ----------
+  function ReferenceSection({ draft, set, ro, model, benchmark: b, onPublish, mgGroups, groups }) {
+    const [busy, setBusy] = useState(false);
+    const [msg, setMsg] = useState(null);
+    const scoped = (mgGroups && mgGroups.length) || (draft.scope_group_ids || []).length;
+    const gname = id => ((groups || []).find(g => g.id === id) || {}).name || id;
+    async function publish() {
+      setBusy(true); setMsg(null);
+      try { await onPublish(); setMsg({ tone: "ok", text: "Valores de referencia publicados." }); }
+      catch (e) { setMsg({ tone: "error", text: "No se pudieron publicar: " + (e.message || e) }); }
+      setBusy(false);
+    }
+    const age = b && b.published_at ? Math.round((Date.now() - new Date(b.published_at).getTime()) / 86400000) : null;
+    return html`<div>
+      <${Panel} title="Vista de los conductores"
+        hint="Los usuarios marcados como conductor en MyGeotab (y que no son administradores ni editores) ven solo la pestaña 'Mi desempeño' con sus propios datos, comparados con los valores de referencia de la empresa. Nunca ven a otros conductores. Los supervisores (usuarios que no son conductores) ven el add-in completo con los datos que MyGeotab les permite.">
+        <label className="inline"><input type="checkbox" disabled=${ro} checked=${draft.driver_view !== false} onChange=${e => set(["driver_view"], e.target.checked)} />
+          Los conductores ven solo "Mi desempeño" (sus datos, sin compañeros)</label>
+      <//>
+      <${Panel} title="Valores de referencia de la empresa"
+        hint="Promedios de la flota sin nombres de conductores ni vehículos: índice de riesgo, infracciones por categoría, riesgo por hora y de noche, peligrosidad y velocidad de cada recorrido, riesgo según horas de manejo y valores por perfil. Con ellos un conductor o un supervisor se compara con la empresa sin ver los datos de otros. Se publican a mano y se calculan con los datos cargados en este momento.">
+        ${b ? html`<p>Publicados el <b>${new Date(b.published_at).toLocaleString("es-AR")}</b> (hace ${age} días), con ${GI.fmtNum(b.vehicles)} vehículos y ${GI.fmtNum(b.km)} km del ${b.from} al ${b.to}.
+          Índice de la empresa: <b>${GI.fmtNum(b.fleetIdx, 2)}</b> pts/100 km.</p>
+          ${age > 30 ? html`<${Info} tone="warn">Tienen más de un mes: conviene publicarlos de nuevo.<//>` : null}`
+          : html`<${Info} tone="warn">Todavía no se publicaron. Hasta entonces, "Mi desempeño" no puede comparar al conductor con la empresa.<//>`}
+        ${model ? html`<p className="muted">Se van a calcular con lo cargado ahora: <b>${GI.fmtNum(model.devices.length)} vehículos</b>, del ${model.dayKeys[0]} al ${model.dayKeys[model.dayKeys.length - 1]}.
+          ${scoped ? html` <span className="delta bad">Atención: hay un filtro de grupos activo${mgGroups && mgGroups.length ? " (" + mgGroups.map(gname).join(", ") + ")" : ""}; la referencia sería solo de ese alcance. Para la empresa completa, quitá el filtro y cargá "Toda la flota".</span>` : null}</p>` : null}
+        ${!ro ? html`<button className="btn primary" disabled=${busy || !model} onClick=${publish}>${busy ? "Publicando…" : b ? "Volver a publicar con los datos cargados" : "Publicar con los datos cargados"}</button>` : null}
+        ${msg ? html`<p className=${"msg " + msg.tone}>${msg.text}</p>` : null}
+      <//>
+    </div>`;
   }
 
   // ---------- Fatiga y gravedad ----------

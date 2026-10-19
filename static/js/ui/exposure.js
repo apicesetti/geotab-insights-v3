@@ -151,7 +151,7 @@
   }
 
   // Detalle de exposición de un conductor: conducta, exposición, horarios, noche y tramos.
-  function ExposureDetail({ view, ex, row: d, onClose, onDriver }) {
+  function ExposureDetail({ view, ex, row: d, onClose, onDriver, inline }) {
     const x = useMemo(() => GI.exposureDriver(view.model, view.ids, d.id, ex), [d.id, ex]);
     const msgs = [];
     const badC = d.conduct != null && d.conduct >= 1.3, badE = d.exposure != null && d.exposure >= 1.2;
@@ -165,7 +165,7 @@
     if (d.longStints) msgs.push(html`<li><b>Fatiga:</b> manejó ${d.longStints} veces más de 4 h seguidas (máximo ${n1(d.maxStint)} h).</li>`);
     const worstRoute = x.routes.filter(r => r.conduct != null && r.km >= 200).sort((a, b) => b.conduct - a.conduct)[0];
     if (worstRoute && worstRoute.conduct >= 1.5) msgs.push(html`<li><b>Tramo a revisar:</b> en ${worstRoute.name} tiene ${factorTxt(worstRoute.conduct)} las infracciones de la flota en ese mismo tramo.</li>`);
-    return html`<${GI.Modal} title=${d.name + " · exposición al riesgo"} onClose=${onClose} wide>
+    const content = html`<div>
       <div className="readouts compact">
         <${Kpi} label="Riesgo real" value=${n2(d.actual)} unit="pts/100 km" sub=${html`<span>esperado en sus tramos: ${n2(d.expected)}</span>`} />
         <${Kpi} label="Conducta" value=${factorTxt(d.conduct)} sub=${html`<span>${d.conduct == null ? "–" : d.conduct >= 1.3 ? "peor que lo esperable" : d.conduct <= 0.8 ? "mejor que lo esperable" : "como lo esperable"}</span>`} />
@@ -204,7 +204,8 @@
         { key: "conduct", label: "Conducta en el tramo", align: "num", fmt: r => (r.conduct == null ? html`<span className="muted">–</span>` : html`<span className=${"delta " + (r.conduct >= 1.3 ? "bad" : r.conduct <= 0.8 ? "good" : "flat")}>${factorTxt(r.conduct)}</span>`) },
       ]} empty="Sin recorridos entre zonas en el período." />
       ${onDriver ? html`<div style=${{ marginTop: "12px" }}><button className="btn" onClick=${() => { onClose(); onDriver(d.id); }}>Ver infracciones y ralentí del conductor</button></div>` : null}
-    <//>`;
+    </div>`;
+    return inline ? content : html`<${GI.Modal} title=${d.name + " · exposición al riesgo"} onClose=${onClose} wide>${content}<//>`;
   }
 
   function DriversExposure({ view, ex, onDriver }) {
@@ -255,13 +256,13 @@
   const fmtHour = ms => new Date(ms).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
 
   // Detalle de jornada, descanso y fatiga de un conductor.
-  function FatigueDetail({ view, d, limits: L, onClose }) {
+  function FatigueDetail({ view, d, limits: L, onClose, inline }) {
     const days = d.dayList;
     const cw = corrWords(d.corr);
     const worst = days.map(x => ({ ...x,
       flags: (x.dh > L.max_drive_day ? 1 : 0) + (x.span > L.max_span ? 1 : 0) + (x.restBefore != null && x.restBefore < L.min_rest ? 1 : 0) }));
     const lvf = d.longIdx != null && d.normalIdx ? d.longIdx / d.normalIdx : null;
-    return html`<${GI.Modal} title=${d.name + " · jornada y descanso"} onClose=${onClose} wide>
+    const content = html`<div>
       <div className="readouts compact">
         <${Kpi} label="Nivel de fatiga" value=${d.level === "alta" ? "Alta" : d.level === "media" ? "Media" : "Baja"} sub=${html`<span>${d.flags} de 5 límites superados</span>`} />
         <${Kpi} label="Días trabajados" value=${n0(d.days)} sub=${html`<span>hasta ${d.maxRow} días seguidos</span>`} />
@@ -314,7 +315,8 @@
         { key: "rate", label: "pts/100 km", align: "num", fmt: r => (r.rate == null ? "–" : n2(r.rate)) },
         { key: "flags", label: "Alertas", align: "num", fmt: r => (r.flags ? html`<span className="delta bad">${r.flags}</span>` : "0") },
       ]} />
-    <//>`;
+    </div>`;
+    return inline ? content : html`<${GI.Modal} title=${d.name + " · jornada y descanso"} onClose=${onClose} wide>${content}<//>`;
   }
 
   function FatiguePanel({ view, rf, onDriver }) {
@@ -453,5 +455,5 @@
     </div>`;
   }
 
-  Object.assign(GI, { ExposureTab });
+  Object.assign(GI, { ExposureTab, ExposureDetail, FatigueDetail });
 })(window.GI);

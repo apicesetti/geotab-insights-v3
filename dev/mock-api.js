@@ -143,7 +143,9 @@
     }
   }
 
-  const addInData = [];
+  // AddInData persiste en sessionStorage para poder probar admin → conductor recargando la página.
+  const addInData = (() => { try { return JSON.parse(sessionStorage.getItem("mockAddInData") || "[]"); } catch (e) { return []; } })();
+  const persist = () => { try { sessionStorage.setItem("mockAddInData", JSON.stringify(addInData)); } catch (e) { /* sin storage */ } };
   let aid = 0;
   const calls = { Get: 0, GetCountOf: 0, multi: 0 };
 
@@ -171,7 +173,12 @@
         case "Group": out = groups; break;
         case "Device": out = devices.filter(d => !s.groups || inGroups({ id: d.id }, { deviceSearch: { groups: s.groups } })).map(({ id, name, serialNumber, groups }) => ({ id, name, serialNumber, groups })); break;
         case "Rule": out = rules; break;
-        case "User": out = s.name ? [{ id: "admin", name: s.name, securityGroups: [{ id: "GroupEverythingSecurityId" }] }] : drivers; break;
+        case "User": {
+          const drv = s.name && drivers.find(d => d.name === s.name);
+          out = drv ? [{ ...drv, securityGroups: [{ id: "GroupDriveUserSecurityId" }] }]
+            : s.name ? [{ id: "admin", name: s.name, securityGroups: [{ id: "GroupEverythingSecurityId" }] }] : drivers;
+          break;
+        }
         case "Zone": out = zones; break;
         case "ZoneType": out = [{ id: "ztPuerto", name: "Puerto" }]; break;
         // Como el servidor real: Trip ignora deviceSearch.groups; solo filtra por id.
@@ -211,9 +218,9 @@
       const desc = id => { const out = new Set(); const q = [id]; while (q.length) { const g = groups.find(x => x.id === q.shift()); for (const c of (g && g.children) || []) if (!out.has(c.id)) { out.add(c.id); q.push(c.id); } } return out; };
       for (const a of gs) { const d = desc(a); if (gs.some(b => b !== a && d.has(b))) throw new Error("Cannot add an entity with groups that have a parent-child relationship."); }
     }
-    if (method === "Add") { const id = "ad" + (++aid); addInData.push({ ...JSON.parse(JSON.stringify(p.entity)), id }); return id; }
-    if (method === "Set") { const i = addInData.findIndex(a => a.id === p.entity.id); addInData[i] = JSON.parse(JSON.stringify(p.entity)); return null; }
-    if (method === "Remove") { const i = addInData.findIndex(a => a.id === p.entity.id); if (i >= 0) addInData.splice(i, 1); return null; }
+    if (method === "Add") { const id = "ad" + Date.now().toString(36) + (++aid); addInData.push({ ...JSON.parse(JSON.stringify(p.entity)), id }); persist(); return id; }
+    if (method === "Set") { const i = addInData.findIndex(a => a.id === p.entity.id); addInData[i] = JSON.parse(JSON.stringify(p.entity)); persist(); return null; }
+    if (method === "Remove") { const i = addInData.findIndex(a => a.id === p.entity.id); if (i >= 0) addInData.splice(i, 1); persist(); return null; }
     throw new Error("Mock: método " + method);
   }
 
@@ -226,7 +233,8 @@
       calls.multi++;
       latency().then(() => { try { ok(list.map(([m, p]) => handle(m, p))); } catch (e) { (err || console.error)(e); } });
     },
-    getSession(cb) { cb({ database: "yusen_demo", userName: "mt@cesetti.com.ar", sessionId: "x" }, "my.geotab.com"); },
+    // ?usuario=chofer3 en la URL: entra como ese conductor (sin permisos de administrador).
+    getSession(cb) { cb({ database: "yusen_demo", userName: (typeof window !== "undefined" && window.__mockUser) || "mt@cesetti.com.ar", sessionId: "x" }, "my.geotab.com"); },
     _stats: calls,
     _sizes: { trips: trips.length, exceptions: exceptions.length, status: status.length },
   };
