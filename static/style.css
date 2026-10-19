@@ -752,6 +752,18 @@
   box-shadow: 0 8px 24px rgba(16, 24, 40, .18);
 }
 #gi3-root .hint:hover > .hint-body, #gi3-root .hint > button:focus + .hint-body { display: block; }
+/* "?" en encabezados de tabla */
+#gi3-root .th-hint { display: inline-flex; margin-left: 4px; vertical-align: 1px; }
+#gi3-root .th-hint > button {
+  width: 15px; height: 15px; border-radius: 50%; border: 1px solid var(--rule-strong); background: var(--surface);
+  color: var(--muted); font: 600 10px/1 var(--sans); cursor: help; padding: 0; display: inline-flex; align-items: center; justify-content: center;
+}
+#gi3-root .th-hint > button:hover, #gi3-root .th-hint > button:focus { border-color: var(--ink); color: var(--ink); }
+#gi3-root .th-hint-body {
+  position: fixed; z-index: 20000; width: 320px; padding: 10px 12px; background: var(--ink); color: #f4f6f8; border-radius: 6px;
+  font: 400 13px/1.45 var(--sans); letter-spacing: 0; text-transform: none; text-align: left; white-space: normal; pointer-events: none;
+  box-shadow: 0 8px 24px rgba(16, 24, 40, .18);
+}
 
 /* ---------- Tablero de lectura (indicadores) ---------- */
 #gi3-root .readouts {
