@@ -584,12 +584,46 @@
           { key: "cats", label: "Tipos de infracción", value: r => (r.cats[0] ? r.cats[0].n : null),
             title: "Qué infracciones hubo en este recorrido (cantidad), de la más frecuente a la menos",
             fmt: r => html`<${CatMix} cats=${r.cats} max=${3} />` },
+          { key: "top", label: "Más infracciones", value: r => (topDriver(view, r) || {}).n,
+            title: "Conductor con más infracciones en este recorrido. Click en la fila para ver todos.",
+            fmt: r => { const d = topDriver(view, r); return d ? html`${d.name} <span className="muted small">(${n0(d.n)})</span>` : html`<span className="muted">—</span>`; } },
           { key: "risk", label: "Riesgo", align: "num", fmt: r => n2(r.risk), title: "Puntos cada 100 km" },
           { key: "idlePct", label: "Ralentí", align: "num", fmt: r => GI.fmtPct(r.idlePct) },
         ]} empty="Ningún recorrido llega a los mínimos. Ampliá el período o bajá los mínimos en Configuración → General." />
       <//>
+      ${route ? html`<${RouteDrivers} view=${view} route=${rows.find(r => r.key === route.key) || route} onClose=${() => setRoute(null)} />`
+        : rows.length ? html`<p className="muted small" style=${{ margin: "-6px 0 14px" }}>Click en un recorrido para ver quiénes lo manejaron y sus infracciones.</p>` : null}
       <${HeatmapPanel} view=${view} api=${api} route=${route} onClearRoute=${() => setRoute(null)} />
     </div>`;
+  }
+
+  // Conductores visibles de un recorrido (respeta el filtro de grupo de conductor).
+  function routeDrivers(view, r) {
+    return (r.drivers || []).filter(d => d.unknown || !view.driverOk || view.driverOk(d.id));
+  }
+  function topDriver(view, r) {
+    const ds = routeDrivers(view, r).filter(d => !d.unknown && d.n > 0).sort((a, b) => b.n - a.n);
+    return ds[0] || null;
+  }
+
+  // Quiénes manejaron un recorrido y qué infracciones cometieron.
+  function RouteDrivers({ view, route, onClose }) {
+    const rows = routeDrivers(view, route);
+    const ruleIds = riskRuleRows(view).map(r => r.id);
+    const devs = [...view.ids];
+    return html`<${Panel} title=${"Conductores en " + route.from + " → " + route.to}
+      hint="Km y recorridos de cada conductor en este origen-destino, con las infracciones que cometió durante esos recorridos. 'Riesgo' es en puntos cada 100 km recorridos en esta ruta. Click en el número de infracciones para verlas en MyGeotab (todas las del período para ese conductor)."
+      actions=${html`<button className="btn" onClick=${onClose}>Cerrar</button>`}>
+      <${DataTable} rowKey=${r => r.id} rows=${rows} limit=${15} defaultSort=${{ key: "n", dir: "desc" }} columns=${[
+        { key: "name", label: "Conductor" },
+        { key: "trips", label: "Recorridos", align: "num" },
+        { key: "km", label: "Km", align: "num", fmt: r => n0(r.km) },
+        { key: "n", label: "Infracciones", align: "num",
+          fmt: r => (r.n ? html`<button className="btn link" title="Ver en MyGeotab" onClick=${e => { e.stopPropagation(); openEvents(view, r.unknown ? { ruleIds, deviceIds: devs } : { ruleIds, driverIds: [r.id] }); }}>${n0(r.n)} ↗</button>` : "0") },
+        { key: "cats", label: "Tipos de infracción", value: r => (r.cats[0] ? r.cats[0].n : null), fmt: r => html`<${CatMix} cats=${r.cats} max=${3} />` },
+        { key: "risk", label: "Riesgo", align: "num", fmt: r => n2(r.risk), title: "Puntos cada 100 km en este recorrido" },
+      ]} empty="Sin datos de conductores en este recorrido." />
+    <//>`;
   }
 
   // Mapa de calor: se ubica cada evento (LogRecord más cercano) solo al

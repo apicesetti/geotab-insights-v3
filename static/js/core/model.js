@@ -109,6 +109,10 @@
           };
         }
         cur.e = t.e; cur.km += t.km; cur.dh += t.dh; cur.ih += t.ih; cur.n++;
+        // Km por conductor dentro del recorrido (puede haber relevo).
+        const rk = t.r || "_unknown";
+        cur.drvKm = cur.drvKm || {};
+        cur.drvKm[rk] = (cur.drvKm[rk] || 0) + t.km;
         const next = trips[i + 1];
         const stopMs = next ? next.s - t.e : Infinity;
         const zoneHit = zoneAt(t.x, t.y);
@@ -360,7 +364,13 @@
       if (w > 0) { dc.w += w; dc.n += 1; }
       if (j) {
         j.w = (j.w || 0) + w; j.nEv = (j.nEv || 0) + (w > 0 ? 1 : 0);
-        if (w > 0) { j.byCat = j.byCat || {}; j.byCat[catKey] = (j.byCat[catKey] || 0) + 1; }
+        if (w > 0) {
+          j.byCat = j.byCat || {}; j.byCat[catKey] = (j.byCat[catKey] || 0) + 1;
+          const dk2 = drv || "_unknown";
+          j.byDrv = j.byDrv || {};
+          const bd = j.byDrv[dk2] || (j.byDrv[dk2] = { n: 0, w: 0, cats: {} });
+          bd.n++; bd.w += w; bd.cats[catKey] = (bd.cats[catKey] || 0) + 1;
+        }
       }
     }
 
@@ -538,11 +548,25 @@
       const g = groups.get(key);
       g.n++; g.km += j.km; g.dh += j.dh; g.ih += j.ih; g.w += j.w || 0; g.nEv += j.nEv || 0; g.devices.add(j.d);
       for (const k in j.byCat || {}) g.byCat[k] = (g.byCat[k] || 0) + j.byCat[k];
+      // Conductores del recorrido: km, recorridos e infracciones de cada uno.
+      g.drv = g.drv || new Map();
+      const touch = id => g.drv.get(id) || (g.drv.set(id, { id, km: 0, trips: 0, n: 0, w: 0, cats: {} }), g.drv.get(id));
+      for (const [id, km] of Object.entries(j.drvKm || {})) { const x = touch(id); x.km += km; x.trips++; }
+      for (const [id, bd] of Object.entries(j.byDrv || {})) {
+        const x = touch(id); x.n += bd.n; x.w += bd.w;
+        for (const k in bd.cats) x.cats[k] = (x.cats[k] || 0) + bd.cats[k];
+      }
     }
     return [...groups.values()].map(g => ({
       ...g, devices: g.devices.size,
       // Tipos de infracción del recorrido, de más a menos frecuente.
       cats: Object.entries(g.byCat).sort((a, b) => b[1] - a[1]).map(([cat, n]) => ({ cat, n })),
+      drivers: [...(g.drv || new Map()).values()].map(x => ({
+        ...x, unknown: x.id === "_unknown",
+        name: x.id === "_unknown" ? "Sin conductor identificado" : model.driverName.get(x.id) || x.id,
+        risk: x.km > 0 ? (x.w / x.km) * 100 : null,
+        cats: Object.entries(x.cats).sort((a, b) => b[1] - a[1]).map(([cat, n]) => ({ cat, n })),
+      })),
       avgKm: g.km / g.n, risk: g.km > 0 ? (g.w / g.km) * 100 : null,
       idlePct: g.dh + g.ih > 0 ? (g.ih / (g.dh + g.ih)) * 100 : null,
     }));
