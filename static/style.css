@@ -996,3 +996,10 @@
 #gi3-root .hgrid.band .hgrid-c { height: 14px; border-radius: 2px; }
 #gi3-root .hgrid.band .hgrid-row { gap: 1px; }
 #gi3-root .hgrid.band { gap: 1px; max-height: 560px; overflow-y: auto; }
+#gi3-root .conf { display: inline-block; font-size: 11px; line-height: 1; padding: 3px 6px; border-radius: 10px; border: 1px solid var(--rule); color: var(--text-2); white-space: nowrap; vertical-align: 1px; }
+#gi3-root .conf-alta { background: #e6f2ea; border-color: #b9dcc4; color: #0b5a2e; }
+#gi3-root .conf-media { background: #fbf2dc; border-color: #ecd9a6; color: #6e5100; }
+#gi3-root .action-line { cursor: pointer; }
+#gi3-root .action-line:hover { filter: brightness(0.98); }
+#gi3-root .action-line .seg-name { font-size: 14px; }
+#gi3-root .action-line > span:last-child, #gi3-root .diag > span:last-child { color: var(--ink); font-weight: 400; }

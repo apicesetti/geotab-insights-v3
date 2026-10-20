@@ -382,3 +382,10 @@ input:disabled, select:disabled { background: var(--sunken); color: var(--muted)
 .hgrid.band .hgrid-c { height: 14px; border-radius: 2px; }
 .hgrid.band .hgrid-row { gap: 1px; }
 .hgrid.band { gap: 1px; max-height: 560px; overflow-y: auto; }
+.conf { display: inline-block; font-size: 11px; line-height: 1; padding: 3px 6px; border-radius: 10px; border: 1px solid var(--rule); color: var(--text-2); white-space: nowrap; vertical-align: 1px; }
+.conf-alta { background: #e6f2ea; border-color: #b9dcc4; color: #0b5a2e; }
+.conf-media { background: #fbf2dc; border-color: #ecd9a6; color: #6e5100; }
+.action-line { cursor: pointer; }
+.action-line:hover { filter: brightness(0.98); }
+.action-line .seg-name { font-size: 14px; }
+.action-line > span:last-child, .diag > span:last-child { color: var(--ink); font-weight: 400; }

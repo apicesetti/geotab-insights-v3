@@ -242,6 +242,34 @@ assert.strictEqual(GI.durationToHours("00:11:42.0300000").toFixed(4), (11 / 60 +
   const band = GI.corridorBand(cm, trace);
   assert.ok(Math.abs(band.total - 6) < 0.05);
   assert.ok(band.bins.reduce((s, b) => s + b.km[8], 0) > 30);
+  // Tramos: una recta de 6 km (dos pasadas para que los pasos cuenten) = 1 tramo.
+  {
+    const acc3 = new Map(), edges = new Map();
+    C.aggregateWindow(recs, acc3, null, null, edges);
+    C.aggregateWindow(recs.map(r => ({ ...r, dateTime: new Date(new Date(r.dateTime).getTime() + 3600000).toISOString() })), acc3, null, null, edges);
+    const rows3 = [...acc3.values()].map(r => [0, r[1], r[2], r[3], r[4], r[5], r[6]]);
+    const cm3 = GI.corridorModel(fake, new Map([["2026-10-10", { devs: ["d1"], rows: rows3, edges: [...edges] }]]), new Set(["d1"]), [ev], locs, { minKm: 1 });
+    const sg = GI.corridorSegments(cm3);
+    const tramos = sg.list.filter(x => x.type === "tramo");
+    assert.strictEqual(sg.list.length, 1, "segs " + sg.list.map(x => x.type + x.cellKeys.length).join(","));
+    assert.ok(Math.abs(tramos[0].length - 6) < 1.5, "largo " + tramos[0].length);
+    assert.strictEqual(tramos[0].n, 1);
+    // con 1 sola infracción la confianza es baja y el factor suavizado queda cerca de 1
+    assert.strictEqual(tramos[0].conf, "baja");
+    // Cruce: una segunda ruta este-oeste corta la primera a mitad de camino.
+    const recs2 = [];
+    const kmLng = 111.32 * Math.cos(-38.87 * Math.PI / 180);
+    for (let i = 0; i <= 40; i++) recs2.push({ device: { id: "d2" }, dateTime: new Date(t0 + i * 10000).toISOString(), latitude: -38.9 + 3 / 111.2, longitude: -68.04 + i * 0.2 / kmLng, speed: 72 });
+    for (let pass = 0; pass < 2; pass++) C.aggregateWindow(recs2.map(r => ({ ...r, dateTime: new Date(new Date(r.dateTime).getTime() + pass * 7200000).toISOString() })), acc3, null, null, edges);
+    const rows4 = [...acc3.values()].map(r => [r[0] === "d1" ? 0 : 1, r[1], r[2], r[3], r[4], r[5], r[6]]);
+    const cm4 = GI.corridorModel(fake, new Map([["2026-10-10", { devs: ["d1", "d2"], rows: rows4, edges: [...edges] }]]), new Set(["d1", "d2"]), [ev], locs, { minKm: 1 });
+    const sg4 = GI.corridorSegments(cm4, cm4);
+    const types = sg4.list.map(x => x.type);
+    assert.strictEqual(types.filter(t => t === "nudo").length, 1, types.join(","));
+    assert.ok(types.filter(t => t === "tramo").length >= 3, types.join(","));
+    const totCells = sg4.list.reduce((a, x) => a + x.cellKeys.length, 0);
+    assert.strictEqual(totCells, cm4.cells.filter(c => c.km > 0).length);
+  }
   // Flota grande: filas agregadas pesados/livianos del alcance, escala 12.
   const acc2 = new Map(), seen = new Map();
   C.aggregateWindow(recs, acc2, id => (id === "d1" ? "@p" : null), seen);

@@ -165,8 +165,19 @@
     return (!s.fromDate || iso >= s.fromDate) && (!s.toDate || iso < s.toDate);
   }
 
+  // Geocodificación inversa de prueba: ruta según el corredor y la localidad más cercana.
+  const towns = [["Campana", -59.05, -34.14], ["Zárate", -59.03, -34.1], ["Escobar", -58.79, -34.35], ["Pilar", -58.91, -34.46], ["Buenos Aires", -58.37, -34.58],
+    ["San Pedro", -59.67, -33.68], ["Rosario", -60.64, -32.95], ["Villa María", -63.24, -32.41], ["Marcos Juárez", -62.1, -32.7], ["Córdoba", -64.18, -31.42], ["Baradero", -59.5, -33.8]];
+  function fakeAddress(x, y) {
+    let best = null;
+    for (const [n, tx, ty] of towns) { const d = (tx - x) ** 2 + (ty - y) ** 2; if (!best || d < best.d) best = { n, d }; }
+    const street = y > -34.2 ? (x < -60.7 ? "Ruta Nacional 9" : "Autopista Rosario - Buenos Aires") : "Ruta Nacional 9 Panamericana";
+    return { street, city: best.n, region: "Buenos Aires", formattedAddress: street + ", " + best.n };
+  }
+
   function handle(method, p) {
     const s = (p && p.search) || {};
+    if (method === "GetAddresses") { calls.addr = (calls.addr || 0) + 1; return (p.coordinates || []).map(c => fakeAddress(c.x, c.y)); }
     if (method === "Get" || method === "GetCountOf") {
       calls[method]++;
       let out;

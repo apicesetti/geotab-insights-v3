@@ -59,7 +59,7 @@
     { value: "pesados", label: "% pesados" },
   ];
   const LAYER_HELP = {
-    riesgo: "Puntos de infracción cada 100 km recorridos en el tramo, comparado con el promedio de todos los tramos: rojo es más riesgoso, azul menos. Los tramos con pocos km quedan en gris claro porque la tasa no sería confiable.",
+    riesgo: "Infracciones por km del tramo comparadas con el promedio de todos los tramos (ya descontada la casualidad): rojo es más riesgoso, azul menos. Los tramos con pocos datos quedan en gris: no alcanza para juzgarlos.",
     transito: "Km por día que la flota recorre en el tramo (estimado con la muestra de GPS). Más oscuro = más tránsito propio.",
     velocidad: "Velocidad media de la flota en el tramo (sin contar los momentos detenida).",
     dispersion: "Cuánto varía la velocidad en el tramo (desvío estándar en km/h). Mucha dispersión = tránsito mezclado (unos van rápido y otros lento): más riesgo de alcances y sobrepasos.",
@@ -83,6 +83,106 @@
       c.n ? n0(c.n) + " infracciones" + (c.idx != null ? " · " + n2(c.idx) + " pts/100 km (" + factorTxt(c.factor) + " el promedio)" : " · pocos km para calcular la tasa") : "Sin infracciones",
       "Hora de más tránsito: " + hh(c.peakH) + " h" + (c.evPeakH != null ? " · más infracciones a las " + hh(c.evPeakH) + " h" : ""),
     ].filter(Boolean).join("<br>");
+  }
+
+
+  const CONF = { alta: "Confianza alta", media: "Confianza media", baja: "Pocos datos" };
+  const confBadge = c => html`<span className=${"conf conf-" + c} title=${c === "alta" ? "10 o más infracciones y km suficientes: el resultado es firme." : c === "media" ? "Entre 5 y 10 infracciones: tendencia probable, conviene confirmarla con más días." : "Muy pocas infracciones o km: puede ser casualidad."}>${CONF[c]}</span>`;
+  const franjaTxt = f => (f ? hh(f.from) + " a " + hh(f.to) + " h" : null);
+  const pct = v => GI.fmtPct(v * 100, 0);
+
+  function segTip(x, c, layer) {
+    if (!x) return cellTip(c);
+    const head = "<b>" + x.name + "</b>" + (x.length ? " · " + n0(x.length) + " km" : "");
+    if (layer !== "riesgo") return head + "<br>" + cellTip(c);
+    return [head,
+      x.conf === "baja" ? "Pocos datos para juzgar (" + n0(x.n) + " infracciones)" : "Riesgo " + factorTxt(x.factorS) + " el promedio · " + CONF[x.conf].toLowerCase(),
+      n0(x.n) + " infracciones · " + n0(x.kmDay) + " km/día de la flota",
+      x.franja ? "Franja crítica: " + franjaTxt(x.franja) : "",
+    ].filter(Boolean).join("<br>");
+  }
+
+  // Frase de diagnóstico de un tramo.
+  function diagnose(x, model) {
+    const parts = [];
+    parts.push(html`<b>${factorTxt(x.factorS)}</b> el riesgo promedio por km`);
+    if (x.franja && x.franja.share >= 0.35) parts.push(html`, sobre todo <b>de ${franjaTxt(x.franja)}</b> (${pct(x.franja.share)} de sus infracciones)`);
+    parts.push(". ");
+    const c0 = x.cats[0];
+    if (c0) parts.push(html`El ${pct(c0.n / x.n)} son <b>${catLabel(c0.cat).toLowerCase()}</b>${x.cats[1] ? html`, seguido de ${catLabel(x.cats[1].cat).toLowerCase()} (${pct(x.cats[1].n / x.n)})` : ""}. `);
+    if (x.drivers >= 4 && x.topShare != null && x.topShare < 0.35) parts.push(html`Las cometen <b>${n0(x.drivers)} conductores distintos</b>: es un problema del lugar más que de una persona. `);
+    else if (x.topShare != null && x.topShare >= 0.5 && x.topDrivers[0]) parts.push(html`Se concentran en <b>${model.driverName.get(x.topDrivers[0].id) || "un conductor"}</b> (${pct(x.topShare)} de las que tienen conductor identificado). `);
+    else if (x.drivers) parts.push(html`${n0(x.drivers)} conductores con infracciones. `);
+    parts.push(html`Por ahí pasa el ${GI.fmtPct(x.share * 100, x.share < 0.01 ? 1 : 0)} de los km de la flota.`);
+    return parts;
+  }
+
+  function ActionSummary({ sg, cm, model, hoursLabel, named, onPick }) {
+    const top = sg.action.slice(0, 3);
+    const doubtful = sg.list.filter(x => x.conf === "baja" && x.n >= 3 && x.factorS >= 1.3).length;
+    return html`<${Panel} title="Qué tramos requieren acción"
+      hint="Se eligen los tramos con más infracciones por encima de lo esperable para los km que tienen (no solo la tasa más alta: un tramo con mucho tránsito y riesgo alto pesa más que uno casi sin uso). El riesgo se calcula descontando la casualidad: con pocos datos se acerca al promedio. Solo entran tramos con confianza media o alta."
+      sub=${hoursLabel !== "Todo el día" ? "Horario: " + hoursLabel : null}>
+      ${!named ? html`<p className="muted small">Buscando los nombres de rutas y localidades…</p>` : null}
+      ${top.length ? top.map((x, i) => html`<div key=${x.id} className="verdict-line bad action-line" role="button" tabIndex="0" onClick=${() => onPick(x.id)} onKeyDown=${e => e.key === "Enter" && onPick(x.id)}>
+          <span className="vtag">${i + 1}</span>
+          <span><b className="seg-name">${x.name}</b>${x.length ? html` <span className="muted">(${n0(x.length)} km)</span>` : html` <span className="muted">(cruce o zona urbana)</span>`}${" "}${confBadge(x.conf)}<br />${diagnose(x, model)}</span>
+        </div>`)
+        : html`<div className="verdict-line good"><span className="vtag">Sin tramos críticos</span><span>Ningún tramo con datos suficientes supera 1,3 veces el riesgo promedio en este horario.</span></div>`}
+      ${sg.action.length > 3 ? html`<p className="muted small">${sg.action.length === 4 ? "1 tramo más" : n0(sg.action.length - 3) + " tramos más"} en la tabla de abajo.</p>` : null}
+      ${doubtful ? html`<p className="muted small">${doubtful === 1 ? "1 tramo tiene" : n0(doubtful) + " tramos tienen"} riesgo alto pero pocos datos (a confirmar con más días).</p>` : null}
+    <//>`;
+  }
+
+  function SegmentTable({ sg, cm, onPick }) {
+    const [showLow, setShowLow] = useState(false);
+    const rows = sg.list.filter(x => x.km > 0 && (showLow || x.conf !== "baja"));
+    return html`<${Panel} title="Tramos"
+      hint="Cada fila es un tramo de ruta (de un cruce a otro, hasta 20 km) o un cruce / zona urbana. Riesgo: infracciones por km respecto del promedio, descontada la casualidad. Exceso: infracciones con peso por encima de lo esperable para sus km (lo que se ganaría si el tramo fuera promedio)."
+      actions=${html`<label className="inline"><input type="checkbox" checked=${showLow} onChange=${e => setShowLow(e.target.checked)} /> Incluir tramos con pocos datos</label>`}>
+      <${DataTable} rowKey=${r => r.id} rows=${rows} limit=${15} defaultSort=${{ key: "excess", dir: "desc" }} onRowClick=${r => onPick(r.id)} columns=${[
+        { key: "name", label: "Tramo", fmt: r => html`<span>${r.name}${r.type === "nudo" ? html` <span className="muted small">cruce/zona</span>` : ""}</span>` },
+        { key: "length", label: "Largo", align: "num", fmt: r => (r.length ? n0(r.length) + " km" : "–") },
+        { key: "kmDay", label: "Km/día", align: "num", fmt: r => n0(r.kmDay), help: "Km por día que la flota recorre en el tramo (estimado con la muestra de GPS)." },
+        { key: "share", label: "% km flota", align: "num", fmt: r => GI.fmtPct(r.share * 100, r.share < 0.01 ? 1 : 0), help: "Qué parte de todos los km de la flota pasa por este tramo." },
+        { key: "factorS", label: "Riesgo", align: "num", fmt: r => html`<span className=${"delta " + (r.factorS >= 1.3 ? "bad" : r.factorS <= 0.8 ? "good" : "flat")}>${factorTxt(r.factorS)}</span>`, help: "Infracciones por km respecto del promedio de todos los tramos, descontada la casualidad (con pocos datos se acerca a ×1)." },
+        { key: "conf", label: "Confianza", value: r => ({ alta: 3, media: 2, baja: 1 })[r.conf], fmt: r => confBadge(r.conf) },
+        { key: "n", label: "Infracciones", align: "num", fmt: r => n0(r.n) },
+        { key: "excess", label: "Exceso", align: "num", fmt: r => (r.excess > 0 ? "+" + n0(r.excess) : "–"), help: "Puntos de infracción por encima de lo esperable para los km del tramo. Sirve para priorizar: donde más se puede bajar." },
+        { key: "drivers", label: "Conductores", align: "num", fmt: r => n0(r.drivers) },
+        { key: "franja", label: "Franja crítica", value: r => (r.franja ? r.franja.from : null), fmt: r => franjaTxt(r.franja) || "–", help: "Las 3 horas del día con más infracciones por encima de lo esperable en el tramo." },
+        { key: "cats", label: "Tipo principal", value: r => (r.cats[0] ? r.cats[0].cat : ""), fmt: r => (r.cats[0] ? catLabel(r.cats[0].cat) : "–") },
+      ]} />
+    <//>`;
+  }
+
+  function SegmentDetail({ seg, cm, model, onClose }) {
+    const x = seg;
+    const rate = x.byHour.map((km, h) => (km >= 20 ? (x.evByHour[h] / km) * 100 : null));
+    const p = x.mid;
+    return html`<${Panel} title=${x.name}
+      sub=${(x.type === "nudo" ? "Cruce o zona urbana" : "Tramo de " + n0(x.length) + " km") + " · " + CONF[x.conf]}
+      actions=${html`${p ? html`<a className="btn" target="_blank" rel="noopener" href=${"https://www.google.com/maps?q=" + p[0].toFixed(5) + "," + p[1].toFixed(5)}>Ver en Google Maps</a>` : null}
+        <button className="btn" onClick=${onClose}>Cerrar</button>`}>
+      ${x.n ? html`<div className=${"verdict-line diag " + (x.factorS >= 1.3 ? "bad" : x.factorS <= 0.8 ? "good" : "")}><span className="vtag">Diagnóstico</span><span>${diagnose(x, model)}</span></div>` : null}
+      <div className="readouts compact inset">
+        <${Kpi} label="Km por día" value=${n0(x.kmDay)} sub=${html`<span>${n0(x.vehicles)} vehículos el día de más tránsito</span>`} />
+        <${Kpi} label="Velocidad media" value=${x.speed == null ? "–" : n0(x.speed)} unit=" km/h" sub=${html`<span>± ${x.sd == null ? "–" : n0(x.sd)} km/h</span>`} />
+        <${Kpi} label="Pesados" value=${x.heavyPct == null ? "–" : n0(x.heavyPct) + "%"} />
+        <${Kpi} label="Riesgo" value=${factorTxt(x.factorS)} tone=${x.factorS >= 1.3 ? "bad" : ""} sub=${html`<span>${n0(x.n)} infracciones · esperables ${n0(x.expected)}</span>`} hint="Respecto del promedio de todos los tramos, descontada la casualidad. 'Esperables' = las que tendría si fuera un tramo promedio con los mismos km." />
+      </div>
+      ${x.topDrivers.length ? html`<p className="small">Conductores con más infracciones acá: ${x.topDrivers.map((d, i) => html`${i ? ", " : ""}<b>${model.driverName.get(d.id) || d.id}</b> ${n0(d.n)}`)}.</p>` : null}
+      <h3>Por hora del día</h3>
+      <${ChartView} height=${200} config=${{
+        type: "bar",
+        data: { labels: x.byHour.map((_, h) => hh(h)), datasets: [
+          { type: "bar", label: "Km por día", data: x.byHour.map(km => GI.round(km / cm.nDays, 1)), backgroundColor: "#9ec5f4", borderRadius: 3, yAxisID: "y" },
+          { type: "line", label: "pts/100 km", data: rate.map(r => (r == null ? null : GI.round(r, 2))), borderColor: "#e34948", backgroundColor: "#e34948", spanGaps: false, yAxisID: "y1" },
+        ] },
+        options: { scales: { y: { beginAtZero: true, title: { display: true, text: "km por día" } }, y1: { beginAtZero: true, position: "right", grid: { drawOnChartArea: false }, title: { display: true, text: "pts/100 km" } } } },
+      }} />
+      <p className="muted small">Barras: tránsito de la flota en el tramo. Línea roja: infracciones cada 100 km (solo en horas con 20 km o más).</p>
+    <//>`;
   }
 
   function CorridorTab({ view, api, database }) {
@@ -124,8 +224,34 @@
     }
 
     const hSel = HOURS.find(x => x.value === hours) || HOURS[0];
-    const cm = useMemo(() => (data ? GI.corridorModel(view.model, data.days, view.ids, data.evs, data.locs, { hours: hSel.h, evScale: data.evScale }) : null), [data, view.ids, hours]);
+    // Geometría de los tramos: todas las horas (no cambia al mover el horario).
+    const cmAll = useMemo(() => (data ? GI.corridorModel(view.model, data.days, view.ids, data.evs, data.locs, { evScale: data.evScale }) : null), [data, view.ids]);
+    const cm = useMemo(() => (data ? (hSel.h ? GI.corridorModel(view.model, data.days, view.ids, data.evs, data.locs, { hours: hSel.h, evScale: data.evScale }) : cmAll) : null), [cmAll, hours]);
+    const sg = useMemo(() => (cm ? GI.corridorSegments(cmAll, cm) : null), [cm]);
     const points = data ? [...data.days.values()].reduce((s, v) => s + (v.points || 0), 0) : 0;
+    // Nombres (zonas de MyGeotab y direcciones de Geotab): se buscan para los
+    // tramos que importan (los que requieren acción y los de más tránsito).
+    const [names, setNames] = useState(null);
+    useEffect(() => {
+      if (!cmAll) return;
+      let alive = true;
+      setNames(null);
+      const geo = GI.corridorSegments(cmAll, cmAll);
+      const ranked = [...geo.action, ...[...geo.list].sort((a, b) => b.km - a.km)];
+      const uniq = [...new Map(ranked.map(x => [x.id, x])).values()];
+      GI.nameSegments(api, uniq, view.model.cat.zones || [], 120)
+        .then(list => { if (alive) setNames(new Map(list.map(x => [x.id, { name: x.name, road: x.road }]))); })
+        .catch(() => { if (alive) setNames(new Map()); });
+      return () => { alive = false; };
+    }, [cmAll]);
+    if (sg) {
+      for (const x of sg.list) { const nm = names && names.get(x.id); x.name = nm ? nm.name : x.type === "nudo" ? "Cruce o zona urbana" : "Tramo de " + n0(x.length) + " km"; x.named = !!nm; }
+      // Nombres repetidos (varios tramos de la misma ruta junto a la misma
+      // localidad): se numeran de norte a sur.
+      const byName = GI.groupBy(sg.list.filter(x => x.named), x => x.name);
+      for (const [, xs] of byName) if (xs.length > 1) xs.sort((a, b) => b.mid[0] - a.mid[0]).forEach((x, i) => { x.name += " (" + (i + 1) + ")"; });
+    }
+    const selSeg = sg && sel ? sg.list.find(x => x.id === sel) : null;
 
     return html`<div>
       <${Panel} title="Corredores: tránsito, velocidad y riesgo por tramo"
@@ -140,27 +266,31 @@
           La primera vez cada día lleva ${plan.scopeKey ? "~24 consultas a MyGeotab (una por hora)" : "~48 consultas a MyGeotab (una por media hora)"}; después queda guardado.</div>` : null}
         ${cm ? html`<div className="readouts compact inset">
           <${Kpi} label="Km por día de la flota" value=${n0(cm.kmDay)} hint="Estimado con la muestra de GPS (×6, o ×12 en flotas grandes), solo los vehículos del alcance y las horas elegidas." />
-          <${Kpi} label="Tramos recorridos" value=${n0(cm.cells.filter(c => c.km > 0).length)} sub=${html`<span>celdas de ~1 km</span>`} />
+          <${Kpi} label="Tramos analizados" value=${n0(sg.list.filter(x => x.km > 0).length)} sub=${html`<span>${n0(sg.list.filter(x => x.type === "tramo").length)} tramos de ruta y ${n0(sg.list.filter(x => x.type === "nudo").length)} cruces o zonas urbanas</span>`} hint="Las celdas de ~1 km se unen siguiendo los caminos que recorre la flota: un tramo va de un cruce a otro (hasta 20 km); los cruces, pueblos y bases forman una zona aparte." />
           <${Kpi} label="Riesgo promedio" value=${cm.fleetIdx == null ? "–" : n2(cm.fleetIdx)} unit=" pts/100 km" hint="Puntos de infracción (con peso por tipo) cada 100 km en todos los tramos." />
-          <${Kpi} label="Puntos negros" value=${n0(cm.black.length)} tone=${cm.black.length ? "bad" : ""} sub=${html`<span>1,5× el promedio o más</span>`} hint="Tramos con al menos 3 infracciones, de 2 o más conductores, y una tasa de 1,5 veces el promedio o más." />
+          <${Kpi} label="Requieren acción" value=${n0(sg.action.length)} tone=${sg.action.length ? "bad" : ""} sub=${html`<span>tramos con riesgo ×1,3 o más</span>`} hint="Tramos con riesgo de 1,3 veces el promedio o más (ya descontada la casualidad) y confianza media o alta. Se ordenan por cuántas infracciones tienen por encima de lo esperable para sus km." />
         </div>
         <p className="muted small">${n0(points)} puntos GPS de la muestra · ${n0(cm.nEv)} infracciones ubicadas${data.nEvAll > data.nEvUsed ? " (muestra pareja de " + n0(data.nEvUsed) + " sobre " + n0(data.nEvAll) + "; cada una cuenta por " + n1(data.evScale) + ")" : ""}${plan.scopeKey ? " · Flota grande: muestra de 5 min por hora, guardada para este alcance de grupos" : ""}.</p>` : null}
       <//>
-      ${cm ? html`<${CorridorMap} cm=${cm} layer=${layer} setLayer=${setLayer} hours=${hours} setHours=${setHours} sel=${sel} setSel=${setSel} />` : null}
-      ${cm && sel ? html`<${CellDetail} cell=${cm.cells.find(c => c.key === sel)} cm=${cm} onClose=${() => setSel(null)} />` : null}
-      ${cm ? html`<${BlackSpots} cm=${cm} onFocus=${setSel} hoursLabel=${hSel.label} />` : null}
+      ${cm ? html`<${ActionSummary} sg=${sg} cm=${cm} model=${view.model} hoursLabel=${hSel.label} named=${!!names} onPick=${setSel} />` : null}
+      ${cm ? html`<${CorridorMap} cm=${cm} sg=${sg} layer=${layer} setLayer=${setLayer} hours=${hours} setHours=${setHours} sel=${selSeg} setSel=${setSel} />` : null}
+      ${selSeg ? html`<${SegmentDetail} seg=${selSeg} cm=${cm} model=${view.model} onClose=${() => setSel(null)} />` : null}
+      ${cm ? html`<${SegmentTable} sg=${sg} cm=${cm} onPick=${setSel} />` : null}
+      ${cm ? html`<${BlackSpots} cm=${cm} sg=${sg} onFocus=${k => { const x = sg.segOf.get(k); if (x) setSel(x.id); }} hoursLabel=${hSel.label} />` : null}
       ${cm ? html`<${CorridorBandPanel} cm=${cm} view=${view} api=${api} />` : null}
     </div>`;
   }
 
-  function CorridorMap({ cm, layer, setLayer, hours, setHours, sel, setSel }) {
+  function CorridorMap({ cm, sg, layer, setLayer, hours, setHours, sel, setSel }) {
     const ref = useRef(null), mapObj = useRef(null);
     const [zoom, setZoom] = useState(null);
     const color = useMemo(() => {
-      if (layer === "riesgo") return c => (c.idx != null && c.n === 0 ? NO_EV : divColor(c.factor));
+      // Riesgo: color del tramo entero (con el riesgo ya descontada la
+      // casualidad); los tramos con confianza baja, en gris.
+      if (layer === "riesgo") return c => { const x = sg.segOf.get(c.key); if (!x || x.conf === "baja") return null; return x.n === 0 ? NO_EV : divColor(x.factorS); };
       const f = quantColor(cm.cells.map(c => layerValue(layer, c)));
       return c => f(layerValue(layer, c));
-    }, [cm, layer]);
+    }, [cm, sg, layer]);
     useEffect(() => {
       if (!ref.current) return;
       if (!mapObj.current) {
@@ -180,19 +310,21 @@
       const z = m.getZoom ? m.getZoom() : 10;
       const lat0 = cells.length ? cells[0].center[0] : -38.9;
       const cellPx = 1100 / ((156543.03 * Math.cos((lat0 * Math.PI) / 180)) / Math.pow(2, z));
+      const inSel = new Set(sel ? sel.cellKeys : []);
       const rects = cells.map(c => {
         const col = color(c);
-        const st = { stroke: c.key === sel, color: "#111", weight: 2, fillColor: col || "#d9d8d4", fillOpacity: col ? 0.8 : 0.35 };
+        const x = sg.segOf.get(c.key);
+        const st = { stroke: inSel.has(c.key), color: "#111", weight: 2, fillColor: col || "#d9d8d4", fillOpacity: col ? 0.85 : 0.4 };
         const shape = cellPx >= 9 ? L.rectangle(c.bounds, st) : L.circleMarker(c.center, { ...st, radius: Math.max(3, cellPx / 2 + 1) });
-        return shape.bindTooltip(cellTip(c), { sticky: true }).on("click", () => setSel(c.key));
+        return shape.bindTooltip(segTip(x, c, layer), { sticky: true }).on("click", () => x && setSel(x.id));
       });
       m._cells = L.featureGroup(rects).addTo(m);
       setTimeout(() => m.invalidateSize(), 0);
     }, [cm, color, sel, zoom]);
     useEffect(() => {
-      const m = mapObj.current, c = sel && cm.cells.find(x => x.key === sel);
-      if (m && c) m.fitBounds(c.bounds, { maxZoom: 14, padding: [80, 80] });
-    }, [sel]);
+      const m = mapObj.current;
+      if (m && sel) m.fitBounds(sel.bounds, { maxZoom: 13, padding: [60, 60] });
+    }, [sel && sel.id]);
     useEffect(() => () => { if (mapObj.current) { mapObj.current.remove(); mapObj.current = null; } }, []);
 
     return html`<${Panel} title="Mapa de tramos" hint=${LAYER_HELP[layer]}
@@ -204,47 +336,23 @@
         <b className="small">${hours.startsWith("h") ? hh(+hours.slice(1)) + " a " + hh(+hours.slice(1) + 1) + " h" : (HOURS.find(x => x.value === hours) || HOURS[0]).label}</b></div>
       <div ref=${ref} className="map"></div>
       <div className="hgrid-legend row">${layer === "riesgo"
-        ? [["Mucho menos", DIV_LOW[0]], ["Menos", DIV_LOW[2]], ["Como el promedio", DIV_MID], ["Más", DIV_HIGH[1]], ["Mucho más (×3,5+)", DIV_HIGH[3]], ["Sin infracciones", NO_EV], ["Pocos km", "#d9d8d4"]].map(([l, c]) => html`<div key=${l}><span className="sw" style=${{ background: c }}></span>${l}</div>`)
+        ? [["Mucho menos", DIV_LOW[0]], ["Menos", DIV_LOW[2]], ["Como el promedio", DIV_MID], ["Más", DIV_HIGH[1]], ["Mucho más (×3,5+)", DIV_HIGH[3]], ["Sin infracciones", NO_EV], ["Pocos datos para juzgar", "#d9d8d4"]].map(([l, c]) => html`<div key=${l}><span className="sw" style=${{ background: c }}></span>${l}</div>`)
         : html`<div><span className="sw" style=${{ background: SEQ[0] }}></span>Bajo</div><div><span className="sw" style=${{ background: SEQ[5] }}></span>Alto (5% de los tramos más altos)</div>`}</div>
-      <p className="muted small">Hacé click en un tramo para ver su perfil por hora.</p>
+      <p className="muted small">Hacé click en un tramo para ver su ficha. En la capa Riesgo todo el tramo toma el mismo color.</p>
     <//>`;
   }
 
-  function CellDetail({ cell, cm, onClose }) {
-    if (!cell) return null;
-    const rate = cell.byHour.map((km, h) => (km >= 20 ? (cell.evByHour[h] / km) * 100 : null));
-    return html`<${Panel} title=${"Tramo en " + cell.center[0].toFixed(4) + ", " + cell.center[1].toFixed(4)}
-      actions=${html`<a className="btn" target="_blank" rel="noopener" href=${"https://www.google.com/maps?q=" + cell.center[0].toFixed(5) + "," + cell.center[1].toFixed(5)}>Ver en Google Maps</a>
-        <button className="btn" onClick=${onClose}>Cerrar</button>`}>
-      <div className="readouts compact inset">
-        <${Kpi} label="Km por día" value=${n0(cell.kmDay)} sub=${html`<span>${n0(cell.vehicles)} vehículos distintos</span>`} />
-        <${Kpi} label="Velocidad media" value=${cell.speed == null ? "–" : n0(cell.speed)} unit=" km/h" sub=${html`<span>± ${cell.sd == null ? "–" : n0(cell.sd)} km/h</span>`} />
-        <${Kpi} label="Pesados" value=${cell.heavyPct == null ? "–" : n0(cell.heavyPct) + "%"} />
-        <${Kpi} label="Riesgo" value=${cell.idx == null ? "–" : n2(cell.idx)} unit=" pts/100 km" tone=${cell.factor >= 1.5 ? "bad" : ""} sub=${html`<span>${factorTxt(cell.factor)} el promedio · ${n0(cell.n)} infracciones</span>`} />
-      </div>
-      ${cell.cats.length ? html`<p className="small">Tipos: ${cell.cats.slice(0, 4).map((x, i) => html`${i ? ", " : ""}<b>${GI.catLabel ? GI.catLabel(x.cat) : x.cat}</b> ${n0(x.n)}`)}</p>` : null}
-      <${ChartView} height=${200} config=${{
-        type: "bar",
-        data: { labels: cell.byHour.map((_, h) => hh(h)), datasets: [
-          { type: "bar", label: "Km por día", data: cell.byHour.map(km => GI.round(km / cm.nDays, 1)), backgroundColor: "#9ec5f4", borderRadius: 3, yAxisID: "y" },
-          { type: "line", label: "pts/100 km", data: rate.map(r => (r == null ? null : GI.round(r, 2))), borderColor: "#e34948", backgroundColor: "#e34948", spanGaps: false, yAxisID: "y1" },
-        ] },
-        options: { scales: { y: { beginAtZero: true, title: { display: true, text: "km por día" } }, y1: { beginAtZero: true, position: "right", grid: { drawOnChartArea: false }, title: { display: true, text: "pts/100 km" } } } },
-      }} />
-      <p className="muted small">La línea roja solo se dibuja en las horas con 20 km o más en el período.</p>
-    <//>`;
-  }
-
-  function BlackSpots({ cm, onFocus, hoursLabel }) {
+  function BlackSpots({ cm, sg, onFocus, hoursLabel }) {
     const rows = cm.black.slice(0, 50).map((c, i) => ({ ...c, rank: i + 1 }));
     const kml = () => GI.downloadText("puntos-negros.kml", GI.corridorKml(rows, "Puntos negros (" + hoursLabel + ")"), "application/vnd.google-earth.kml+xml");
-    return html`<${Panel} title="Puntos negros"
-      hint="Tramos de ~1 km con al menos 3 infracciones, de 2 o más conductores, y 1,5 veces o más el riesgo promedio por km. Se ordenan por puntos × factor (pesa tanto la cantidad como la intensidad). El KML se puede importar como zonas en MyGeotab (add-in Import KML Zones) para ponerles una regla o avisar a los conductores al entrar."
+    return html`<${Panel} title="Puntos negros (detalle de 1 km)"
+      hint="Dentro de los tramos, los lugares puntuales de ~1 km con al menos 3 infracciones, de 2 o más conductores, y 1,5 veces o más el riesgo promedio por km (descontada la casualidad, confianza media o alta). Se ordenan por infracciones por encima de lo esperable. El KML se puede importar como zonas en MyGeotab (add-in Import KML Zones) para ponerles una regla o avisar a los conductores al entrar."
       actions=${rows.length ? html`<button className="btn" onClick=${kml}>Descargar KML</button>` : null}>
       ${rows.length ? html`<${DataTable} rowKey=${r => r.key} rows=${rows} limit=${15} defaultSort=${{ key: "rank", dir: "asc" }} onRowClick=${r => onFocus(r.key)} columns=${[
         { key: "rank", label: "#", align: "num" },
-        { key: "center", label: "Ubicación", value: r => r.center[0], fmt: r => r.center[0].toFixed(4) + ", " + r.center[1].toFixed(4), help: "Centro del tramo (latitud, longitud). Click en la fila para verlo en el mapa." },
-        { key: "factor", label: "Riesgo", align: "num", fmt: r => html`<span className="delta bad">${factorTxt(r.factor)}</span>`, help: "Infracciones por km del tramo respecto del promedio de todos los tramos." },
+        { key: "center", label: "Ubicación", value: r => (sg.segOf.get(r.key) || {}).name || "", fmt: r => html`<span>${(sg.segOf.get(r.key) || {}).name || "–"}<br /><a className="muted small" target="_blank" rel="noopener" onClick=${e => e.stopPropagation()} href=${"https://www.google.com/maps?q=" + r.center[0].toFixed(5) + "," + r.center[1].toFixed(5)}>${r.center[0].toFixed(4) + ", " + r.center[1].toFixed(4)}</a></span>`, help: "Tramo al que pertenece y centro del punto (link a Google Maps). Click en la fila para ver el tramo." },
+        { key: "factorS", label: "Riesgo", align: "num", fmt: r => html`<span className="delta bad">${factorTxt(r.factorS)}</span>`, help: "Infracciones por km del punto respecto del promedio, descontada la casualidad." },
+        { key: "conf", label: "Confianza", value: r => ({ alta: 3, media: 2, baja: 1 })[r.conf], fmt: r => confBadge(r.conf) },
         { key: "n", label: "Infracciones", align: "num", fmt: r => n0(r.n) },
         { key: "drivers", label: "Conductores", align: "num", fmt: r => n0(r.drivers), help: "Conductores distintos con infracciones en el tramo: si son varios, el problema es del lugar más que de una persona." },
         { key: "cats", label: "Tipo principal", value: r => (r.cats[0] ? r.cats[0].cat : ""), fmt: r => (r.cats[0] ? catLabel(r.cats[0].cat) : "–") },
