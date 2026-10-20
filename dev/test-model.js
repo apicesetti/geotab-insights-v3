@@ -3,7 +3,7 @@ const fs = require("fs");
 const vm = require("vm");
 const ctx = { window: {}, console, Date, Math, Map, Set, Number, JSON, Object, Array, String, Promise, setTimeout };
 vm.createContext(ctx);
-for (const f of ["util", "catalog", "model", "exposure", "riskfactors"]) {
+for (const f of ["util", "catalog", "model", "exposure", "riskfactors", "hotspots", "corridor"]) {
   vm.runInContext(fs.readFileSync(require("path").join(__dirname, "../static/js/core", f + ".js"), "utf8"), ctx);
 }
 const GI = ctx.window.GI;
@@ -208,5 +208,49 @@ assert.strictEqual(GI.durationToHours("00:11:42.0300000").toFixed(4), (11 / 60 +
   const c = new Date(2026, 11, 21, 18).getTime(), d = new Date(2026, 11, 21, 22).getTime();
   const fDic = GI._darkFraction(c, d, -38.95, -68.06);
   assert.ok(fDic > 0.15 && fDic < 0.4, "diciembre " + fDic);
+}
+// Corredores: segmentos de una ventana -> celdas; modelo y banda.
+{
+  const C = GI._corr;
+  const t0 = new Date(2026, 9, 10, 8, 0, 0).getTime();
+  // d1 a 72 km/h hacia el norte: 20 m por segundo -> 10 s = 0,2 km.
+  const recs = [];
+  for (let i = 0; i <= 30; i++) recs.push({ device: { id: "d1" }, dateTime: new Date(t0 + i * 10000).toISOString(), latitude: -38.9 + i * 0.2 / 111.2, longitude: -68.0, speed: 72 });
+  // salto de GPS y punto aislado: no deben sumar
+  recs.push({ device: { id: "d2" }, dateTime: new Date(t0).toISOString(), latitude: -38.9, longitude: -68 , speed: 0 });
+  recs.push({ device: { id: "d2" }, dateTime: new Date(t0 + 10000).toISOString(), latitude: -37.9, longitude: -68 , speed: 0 });
+  const acc = new Map();
+  C.aggregateWindow(recs, acc);
+  let km = 0, sec = 0;
+  for (const r of acc.values()) { assert.strictEqual(r[0], "d1"); assert.strictEqual(r[2], 8); km += r[3]; sec += r[4]; }
+  assert.ok(Math.abs(km - 6) < 0.05, "km " + km);
+  assert.strictEqual(sec, 300);
+  assert.strictEqual(C.dayWindows("2026-10-10").length, 48);
+  const rows = [...acc.values()].map(r => [0, r[1], r[2], r[3], r[4], r[5], r[6]]);
+  const fake = { vtypeOf: new Map([["d1", "camion"]]) };
+  const days = new Map([["2026-10-10", { devs: ["d1"], rows }]]);
+  const ev = { i: "e1", d: "d1", t: t0 + 60000, w: 1.5, cat: "velocidad", drv: "u1" };
+  const locs = new Map([["e1", [-38.9 + 1.2 / 111.2, -68.0]]]);
+  const cm = GI.corridorModel(fake, days, new Set(["d1"]), [ev], locs, { minKm: 1 });
+  assert.ok(Math.abs(cm.totKm - 36) < 0.3, "totKm " + cm.totKm); // muestra × 6
+  const hit = cm.cells.find(c => c.n === 1);
+  assert.ok(hit && hit.heavyPct === 100 && Math.abs(hit.speed - 72) < 0.01 && hit.sd < 0.01);
+  assert.strictEqual(cm.cells.filter(c => c.km > 0).length >= 6, true);
+  const none = GI.corridorModel(fake, days, new Set(["d1"]), [ev], locs, { hours: [10, 12] });
+  assert.strictEqual(none.totKm, 0);
+  const trace = [[-38.9, -68.0], [-38.9 + 6 / 111.2, -68.0]];
+  const band = GI.corridorBand(cm, trace);
+  assert.ok(Math.abs(band.total - 6) < 0.05);
+  assert.ok(band.bins.reduce((s, b) => s + b.km[8], 0) > 30);
+  // Flota grande: filas agregadas pesados/livianos del alcance, escala 12.
+  const acc2 = new Map(), seen = new Map();
+  C.aggregateWindow(recs, acc2, id => (id === "d1" ? "@p" : null), seen);
+  const rows2 = [...acc2.values()].map(r => [0, r[1], r[2], r[3], r[4], r[5], r[6]]);
+  const vd = {}; for (const [c, st] of seen) vd[c] = st.size;
+  const days2 = new Map([["2026-10-10", { devs: ["@p"], rows: rows2, vd, scale: 12, bucketed: true }]]);
+  const cm2 = GI.corridorModel(fake, days2, new Set(["d1"]), [ev], locs, { minKm: 1, evScale: 2 });
+  assert.ok(Math.abs(cm2.totKm - 72) < 0.6, "big totKm " + cm2.totKm);
+  const hit2 = cm2.cells.find(c => c.n === 1);
+  assert.ok(hit2.heavyPct === 100 && hit2.vehicles === 1 && hit2.w === 3);
 }
 console.log("OK");

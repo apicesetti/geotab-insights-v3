@@ -690,6 +690,7 @@
 
   Object.assign(GI, {
     loadCatalogs, loadZones, loadZoneTypes, loadPeriod, loadFuel, loadEventLocations, loadTrace, clearCache,
+    _idbGetMany: idbGetMany, _idbPutMany: idbPutMany,
     _compactTrips: compactTrips, _compactExceptions: compactExceptions, _compactCounter: compactCounter, _loadFuelBoundaries: loadFuelBoundaries, _missingRuns: missingRuns,
   });
 })(window.GI);

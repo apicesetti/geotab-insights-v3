@@ -108,7 +108,8 @@
           const end = p === parts - 1 ? zc[dest] : [(zc[pos][0] + zc[dest][0]) / 2 + 0.3, (zc[pos][1] + zc[dest][1]) / 2];
           trips.push({ id: "t" + (++tid), device: { id: d.id }, driver: drv ? { id: drv.id } : "UnknownDriverId",
             start: new Date(start).toISOString(), stop: new Date(stop).toISOString(), distance: pkm,
-            drivingDuration: dur(dh), idlingDuration: dur(ih), stopPoint: { x: end[0], y: end[1] } });
+            drivingDuration: dur(dh), idlingDuration: dur(ih), stopPoint: { x: end[0], y: end[1] },
+            _a: p === 0 ? zc[pos] : [(zc[pos][0] + zc[dest][0]) / 2 + 0.3, (zc[pos][1] + zc[dest][1]) / 2] });
           // eventos
           const risk = (drv ? drv.risk : 1.2) * (peak ? 1.8 : 1);
           const nEv = Math.floor((pkm / 100) * risk * (rnd() * 1.2));
@@ -123,7 +124,7 @@
             // 12% de los eventos en una "curva peligrosa" fija (para probar puntos calientes).
             const curve = rnd() < 0.12;
             logs.set(d.id + "|" + Math.round(et / 1000), curve
-              ? { latitude: -34.3 + (rnd() - 0.5) * 0.002, longitude: -59.3 + (rnd() - 0.5) * 0.002, dateTime: new Date(et).toISOString() }
+              ? { latitude: (zc[pos][1] + end[1]) / 2 + (rnd() - 0.5) * 0.002, longitude: (zc[pos][0] + end[0]) / 2 + (rnd() - 0.5) * 0.002, dateTime: new Date(et).toISOString() }
               : { latitude: zc[pos][1] + (end[1] - zc[pos][1]) * fr, longitude: zc[pos][0] + (end[0] - zc[pos][0]) * fr, dateTime: new Date(et).toISOString() });
           }
           if (ih > 0.2) exceptions.push({ id: "e" + (++eid), rule: { id: "RuleIdlingId" }, device: { id: d.id }, driver: drv ? { id: drv.id } : "UnknownDriverId",
@@ -195,6 +196,24 @@
           out = status.filter(r => inRange(r.dateTime, s) && inGroups(r.device, s) && (!s.diagnosticSearch || r.diagnostic.id === s.diagnosticSearch.id)); break;
         case "AddInData": out = addInData.filter(a => a.addInId === s.addInId); break;
         case "LogRecord": {
+          // Sin deviceSearch (muestreo de corredores): un punto cada 10 s de
+          // cada viaje que pase por la ventana, con velocidad.
+          if (!s.deviceSearch) {
+            const a0 = new Date(s.fromDate).getTime(), a1 = new Date(s.toDate).getTime();
+            out = [];
+            for (const t of trips) {
+              const t0 = new Date(t.start).getTime(), t1 = new Date(t.stop).getTime();
+              if (t1 < a0 || t0 > a1) continue;
+              const A = t._a, Z = [t.stopPoint.x, t.stopPoint.y];
+              const kmh = t.distance / ((t1 - t0) / 3600000);
+              for (let k = Math.max(t0, Math.ceil(a0 / 10000) * 10000); k <= Math.min(t1, a1); k += 10000) {
+                const f = (k - t0) / Math.max(1, t1 - t0);
+                const wob = Math.sin(k / 7e5) * 0.15;
+                out.push({ device: { id: t.device.id }, dateTime: new Date(k).toISOString(), latitude: A[1] + (Z[1] - A[1]) * f, longitude: A[0] + (Z[0] - A[0]) * f, speed: Math.max(0, kmh * (1 + wob)) });
+              }
+            }
+            break;
+          }
           const from = new Date(s.fromDate).getTime() / 1000, to = new Date(s.toDate).getTime() / 1000;
           out = [];
           for (let ts = Math.floor(from); ts <= to; ts++) { const l = logs.get(s.deviceSearch.id + "|" + ts); if (l) out.push(l); }

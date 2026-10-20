@@ -67,5 +67,6 @@ ${pm}
     setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
   }
 
+  GI.catLabel = GI.catLabel || (k => { const c = (GI.CATEGORIES || []).find(x => x.key === k); return c ? c.label : k; });
   Object.assign(GI, { hotspots, hotspotsKml, downloadText: download });
 })(window.GI);

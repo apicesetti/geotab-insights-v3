@@ -988,3 +988,11 @@
 #gi3-root .diag { margin: 6px 0 0; padding-left: 18px; }
 #gi3-root .diag li { margin: 3px 0; }
 #gi3-root .legend-line { display: inline-block; width: 22px; height: 4px; background: #1c5cab; border-radius: 2px; vertical-align: 3px; margin-right: 4px; }
+
+/* Corredores */
+#gi3-root .hour-slider { display: flex; align-items: center; gap: 10px; margin: 0 0 10px; }
+#gi3-root .hour-slider input[type=range] { flex: 1 1 auto; max-width: 420px; }
+#gi3-root .hgrid-legend.row { flex-direction: row; flex-wrap: wrap; gap: 6px 16px; margin-top: 8px; }
+#gi3-root .hgrid.band .hgrid-c { height: 14px; border-radius: 2px; }
+#gi3-root .hgrid.band .hgrid-row { gap: 1px; }
+#gi3-root .hgrid.band { gap: 1px; max-height: 560px; overflow-y: auto; }
