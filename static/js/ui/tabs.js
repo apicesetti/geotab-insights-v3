@@ -527,6 +527,7 @@
     const minKm = view.settings.drivers.min_km_ranking;
     const drivers = view.dRows.filter(r => !r.unknown && r.km >= minKm).map(r => ({ ...r, tr: (driverTrends.get(r.id) || {}).tr }));
     const risingDrivers = drivers.filter(d => d.tr && d.tr.slopePct > 15 && d.tr.current > 0);
+    const lastValue = r => { const t = driverTrends.get(r.id); const x = t && [...t.ser].reverse().find(p => p.km >= 50); return x ? x.rate : null; };
     if (!GI.riskRuleIds(view.settings.rule_mapping).length) return html`<${Info} tone="warn">Todavía no hay reglas asignadas a categorías de riesgo, así que no hay infracciones para analizar. Un administrador las asigna en Configuración → Reglas y objetivos.<//>`;
     return html`<div>
       <${EventsEvolution} view=${view} riskCats=${riskCats} />
@@ -556,8 +557,12 @@
         <${Panel} title="Conductores con riesgo en aumento" hint="Alerta temprana: conductores cuyo índice de riesgo viene subiendo más de 15% por período. Conviene intervenir antes de que lleguen al tope del ranking.">
           <${DataTable} rowKey=${r => r.id} rows=${risingDrivers} limit=${10} onRowClick=${r => onDriver(r.id)} defaultSort=${{ key: "proj", dir: "desc" }} columns=${[
             { key: "name", label: "Conductor" },
-            { key: "now", label: "Hoy", align: "num", value: r => r.tr.current, fmt: r => n2(r.tr.current) },
-            { key: "proj", label: "Proyectado", align: "num", value: r => r.tr.at(view.gran === "day" ? 14 : view.gran === "week" ? 4 : 2), fmt: r => n2(r.tr.at(view.gran === "day" ? 14 : view.gran === "week" ? 4 : 2)) },
+            { key: "avg", label: "Período", align: "num", value: r => r.risk, fmt: r => n2(r.risk),
+              help: "Índice de riesgo promedio del conductor en todo el período cargado (el mismo que muestra su ficha)." },
+            { key: "last", label: (unit === "semana" ? "Última " : "Último ") + unit, align: "num", value: r => lastValue(r), fmt: r => n2(lastValue(r)),
+              help: "Índice de riesgo real del conductor en " + (unit === "semana" ? "la última semana completa" : "el último " + unit + " completo") + " con al menos 50 km (sin contar " + (unit === "semana" ? "la semana" : "el " + unit) + " en curso)." },
+            { key: "proj", label: "Proyectado", align: "num", value: r => r.tr.at(view.gran === "day" ? 14 : view.gran === "week" ? 4 : 2), fmt: r => n2(r.tr.at(view.gran === "day" ? 14 : view.gran === "week" ? 4 : 2)),
+              help: "Valor estimado en " + (view.gran === "day" ? "14 días" : view.gran === "week" ? "4 semanas" : "2 meses") + " si sigue la tendencia actual (recta ajustada a sus últimos períodos completos)." },
             { key: "trend", label: "Tendencia", value: r => r.tr.slopePct, fmt: r => html`<${TrendCell} tr=${r.tr} unit=${unit} />` },
           ]} empty="Ningún conductor muestra una tendencia de aumento clara." />
         <//>
@@ -876,6 +881,8 @@
       return out.sort((a, b) => b.km - a.km);
     }, [id]);
     if (!r) return null;
+    // Último período completo con km suficientes (el valor real, no la tendencia).
+    const lastFull = [...s].reverse().find(b => !b.partial && b.km >= 50);
     const evRows = Object.entries(r.evByCat).filter(([k]) => (GI.CATEGORY_BY_KEY[k] || {}).kind === "riesgo").map(([k, n]) => ({ k, n }));
     return html`<${Modal} title=${r.name} onClose=${onClose} wide>
       <p className="muted" style=${{ marginBottom: "12px" }}>${GI.profileLabel(view.settings, r.profile)}. Servicio ${r.serviceSource === "grupo" ? "asignado por grupo" : r.serviceSource}. Referencia de consumo: ${r.refSource}.</p>
@@ -902,7 +909,7 @@
     const r = view.dRows.find(x => x.id === id);
     const s = useMemo(() => {
       const m = view.model.drvCells.get(id) || new Map();
-      const buckets = new Map(view.series.map(x => [x.key, { label: x.label, km: 0, n: 0, w: 0, ih: 0, dh: 0 }]));
+      const buckets = new Map(view.series.map(x => [x.key, { label: x.label, partial: x.partial, km: 0, n: 0, w: 0, ih: 0, dh: 0 }]));
       for (const [ck, c] of m) {
         const [dev, dk] = ck.split("|");
         if (!view.ids.has(dev)) continue;
@@ -923,11 +930,14 @@
       return [...out.values()];
     }, [id, view]);
     if (!r) return null;
+    const lastFull = [...s].reverse().find(b => !b.partial && b.km >= 50);
     const evRows = Object.entries(r.evByCat).filter(([k]) => (GI.CATEGORY_BY_KEY[k] || {}).kind === "riesgo").map(([k, n]) => ({ k, n }));
     return html`<${Modal} title=${r.name} onClose=${onClose} wide>
       <div className="readouts compact">
         <${Kpi} label="Km" value=${n0(r.km)} />
-        <${Kpi} label="Riesgo" value=${n2(r.risk)} unit="pts/100 km" />
+        <${Kpi} label="Riesgo del período" value=${n2(r.risk)} unit="pts/100 km"
+          sub=${lastFull ? html`<span>${lastFull.label}: <b>${n2(lastFull.risk)}</b></span>` : null}
+          hint="Índice de riesgo promedio de todo el período cargado (infracciones ponderadas ÷ km × 100). Abajo, el valor real del último período completo." />
         <${Kpi} label="Infracciones" value=${n0(r.events)} />
         <${Kpi} label="Ralentí" value=${n1(r.idleH)} unit="h" sub=${GI.fmtPct(r.idlePct) + " del tiempo"} />
         <${Kpi} label="Litros en ralentí" value=${n0(r.idleL)} unit="L" />

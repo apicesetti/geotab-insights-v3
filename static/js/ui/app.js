@@ -235,6 +235,7 @@
 
     function applyPreset(v) {
       if (v === "custom") { setCustomDraft({ from: period.from, to: period.to }); return; }
+      if (v === "range") return; // el rango personalizado ya aplicado
       const p = { preset: +v, ...rangeFor(+v) };
       setPeriod(p); setCustomDraft(null);
       load(settings, p, catalogs);
@@ -254,8 +255,9 @@
         <div className="brand"><h1>Geotab Insights</h1><span className="sub">Base ${database}${isAdmin ? ", con permisos de administrador" : ""}</span></div>
         <div className="controls">
           <label className="ctl">Período
-            <select value=${customDraft ? "custom" : period.preset || "custom"} onChange=${e => applyPreset(e.target.value)}>
+            <select value=${customDraft ? "custom" : period.preset || "range"} onChange=${e => applyPreset(e.target.value)}>
               ${[30, 60, 90, 180, 365].map(d => html`<option key=${d} value=${d}>Últimos ${d} días</option>`)}
+              ${!period.preset ? html`<option value="range">Del ${period.from} al ${period.to}</option>` : null}
               <option value="custom">Personalizado…</option>
             </select></label>
           ${customDraft ? html`<span className="ctl dates">
@@ -263,6 +265,7 @@
             <input type="date" value=${customDraft.to} max=${GI.dayKey(new Date())} onChange=${e => setCustomDraft(c => ({ ...c, to: e.target.value }))} />
             <button className="btn primary" disabled=${!customDraft.from || !customDraft.to || customDraft.from > customDraft.to}
               onClick=${() => { const p = { preset: null, ...customDraft }; setPeriod(p); setCustomDraft(null); load(settings, p, catalogs); }}>Aplicar</button>
+            <button className="btn" onClick=${() => setCustomDraft(null)}>Cancelar</button>
           </span>` : null}
           <label className="ctl">Agrupar
             <${Segmented} value=${gran} onChange=${setGran} options=${[{ value: "day", label: "Día" }, { value: "week", label: "Semana" }, { value: "month", label: "Mes" }]} /></label>
