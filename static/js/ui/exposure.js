@@ -345,9 +345,17 @@
           <${Kpi} label=${"Días con más de " + L.max_drive_day + " h de manejo"} value=${n0(GI.sum(rows, d => d.longDays))} sub=${html`<span>en ${n0(rows.filter(d => d.longDays).length)} conductores</span>`} />
           <${Kpi} label=${"Descansos de menos de " + L.min_rest + " h"} value=${n0(GI.sum(rows, d => d.shortRests))} sub=${html`<span>en ${n0(rows.filter(d => d.shortRests).length)} conductores</span>`} />
         </div>
-        ${f.longVsNormal != null || f.shortRestVsRested != null ? html`<div className=${"verdict-line " + ((f.longVsNormal || 0) >= 1.2 || (f.shortRestVsRested || 0) >= 1.2 ? "bad" : "")}><span className="vtag">Horas y riesgo</span><span>
-          ${f.longVsNormal != null ? html`En los días de más de ${L.max_drive_day} h de manejo, el riesgo de la flota es <b>${factorTxt(f.longVsNormal)}</b> el de los días normales. ` : null}
-          ${f.shortRestVsRested != null ? html`Después de un descanso de menos de ${L.min_rest} h, es <b>${factorTxt(f.shortRestVsRested)}</b> el de los días con descanso completo.` : null}</span></div>` : null}
+        ${(() => {
+          const G = f.dayGroups;
+          if (!G) return null;
+          const rate = g => (g.km > 0 ? n2((g.w / g.km) * 100) : "–");
+          const cmp = (v, what) => (v == null ? null : v >= 1.15 ? html`<b>${factorTxt(v)}</b> (más riesgo ${what})` : v <= 0.87 ? html`<b>${factorTxt(v)}</b> (menos riesgo ${what})` : html`<b>parecido</b> (${factorTxt(v)})`);
+          const bad = (f.longVsNormal || 0) >= 1.2 || (f.shortRestVsRested || 0) >= 1.2;
+          return html`<div className=${"verdict-line " + (bad ? "bad" : "")}><span className="vtag">Horas y riesgo</span><span>
+            ${G.long.days ? html`Días de más de ${L.max_drive_day} h de manejo: <b>${n0(G.long.days)}</b>, con ${rate(G.long)} pts/100 km, contra ${rate(G.normal)} en los ${n0(G.normal.days)} días normales${f.longVsNormal != null ? html`: ${cmp(f.longVsNormal, "en los días largos")}` : html` — son pocos para sacar conclusiones`}. ` : html`No hubo días de más de ${L.max_drive_day} h de manejo. `}
+            ${G.shortRest.days ? html`Días después de un descanso de menos de ${L.min_rest} h: <b>${n0(G.shortRest.days)}</b>, con ${rate(G.shortRest)} pts/100 km, contra ${rate(G.rested)} con descanso completo${f.shortRestVsRested != null ? html`: ${cmp(f.shortRestVsRested, "después de descansar poco")}` : html` — son pocos para sacar conclusiones`}.` : null}
+          </span></div>`;
+        })()}
         <${DataTable} rowKey=${r => r.id} rows=${rows} limit=${20} defaultSort=${{ key: "flags", dir: "desc" }} onRowClick=${r => setSel(r)} columns=${[
           { key: "name", label: "Conductor" },
           { key: "flags", label: "Fatiga", value: r => r.flags * 1000 + r.longDays + r.shortRests, fmt: r => levelTag(r.level) },

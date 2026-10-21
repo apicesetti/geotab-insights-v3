@@ -79,7 +79,7 @@
       return sxx > 0 && syy > 0 ? sxy / Math.sqrt(sxx * syy) : null;
     };
     // Flota: riesgo en días largos / después de descanso corto vs el resto.
-    const fleetDays = { long: { km: 0, w: 0 }, normal: { km: 0, w: 0 }, shortRest: { km: 0, w: 0 }, rested: { km: 0, w: 0 } };
+    const fleetDays = { long: { km: 0, w: 0, days: 0 }, normal: { km: 0, w: 0, days: 0 }, shortRest: { km: 0, w: 0, days: 0 }, rested: { km: 0, w: 0, days: 0 } };
     const drivers = [];
     for (const [id, raw] of byDrv) {
       raw.sort((a, b) => a.s - b.s);
@@ -149,8 +149,8 @@
         d.span = (d.e - d.s) / H;
         d.rate = d.km >= 30 ? (d.w / d.km) * 100 : null;
         const L = d.dh > fz.max_drive_day ? fleetDays.long : fleetDays.normal;
-        L.km += d.km; L.w += d.w;
-        if (d.restBefore != null) { const R = d.restBefore < fz.min_rest ? fleetDays.shortRest : fleetDays.rested; R.km += d.km; R.w += d.w; }
+        L.km += d.km; L.w += d.w; L.days++;
+        if (d.restBefore != null) { const R = d.restBefore < fz.min_rest ? fleetDays.shortRest : fleetDays.rested; R.km += d.km; R.w += d.w; R.days++; }
       }
       // ¿Más horas en el día = más infracciones por km? (correlación de Pearson)
       const corrPts = list.filter(d => d.rate != null).map(d => [d.dh, d.rate]);
@@ -223,11 +223,21 @@
       prolonged.set(e.drv, x);
     }
 
+    function cmpGroups(g, base) {
+      if (!(g.km > 0) || !(base.km > 0) || !(base.w > 0)) return null;
+      const baseRate = base.w / base.km;
+      if (g.days < 5 || g.km * baseRate < 5) return null;
+      return (g.w / g.km) / baseRate;
+    }
     return {
       fatigue: {
         buckets: fb, drivers, limits: fz,
-        longVsNormal: fleetDays.long.km >= 200 && fleetDays.normal.km >= 200 ? (fleetDays.long.w / fleetDays.long.km) / (fleetDays.normal.w / fleetDays.normal.km || Infinity) : null,
-        shortRestVsRested: fleetDays.shortRest.km >= 200 && fleetDays.rested.km >= 200 ? (fleetDays.shortRest.w / fleetDays.shortRest.km) / (fleetDays.rested.w / fleetDays.rested.km || Infinity) : null,
+        // Comparación días largos vs normales (y descanso corto vs completo):
+        // solo si el grupo chico tiene datos suficientes para que la tasa signifique
+        // algo (al menos 5 días y 5 puntos de infracción esperables con la tasa del grupo grande).
+        longVsNormal: cmpGroups(fleetDays.long, fleetDays.normal),
+        shortRestVsRested: cmpGroups(fleetDays.shortRest, fleetDays.rested),
+        dayGroups: fleetDays,
       },
       familiarity: { buckets: famB, newcomers },
       prolonged: {
