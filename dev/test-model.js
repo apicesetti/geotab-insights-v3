@@ -3,7 +3,7 @@ const fs = require("fs");
 const vm = require("vm");
 const ctx = { window: {}, console, Date, Math, Map, Set, Number, JSON, Object, Array, String, Promise, setTimeout };
 vm.createContext(ctx);
-for (const f of ["util", "catalog", "model", "exposure", "riskfactors", "hotspots", "corridor"]) {
+for (const f of ["util", "catalog", "model", "exposure", "riskfactors", "hotspots", "corridor", "corridorzones"]) {
   vm.runInContext(fs.readFileSync(require("path").join(__dirname, "../static/js/core", f + ".js"), "utf8"), ctx);
 }
 const GI = ctx.window.GI;
@@ -269,6 +269,24 @@ assert.strictEqual(GI.durationToHours("00:11:42.0300000").toFixed(4), (11 / 60 +
     assert.ok(types.filter(t => t === "tramo").length >= 3, types.join(","));
     const totCells = sg4.list.reduce((a, x) => a + x.cellKeys.length, 0);
     assert.strictEqual(totCells, cm4.cells.filter(c => c.km > 0).length);
+    // Geocerca del tramo norte-sur dibujada con su GPS: fija esas celdas.
+    const CZ = GI._cz;
+    const ns = sg.list[0];
+    const trace = recs.filter(r => r.device.id === "d1").map(r => [r.latitude, r.longitude]);
+    const poly = CZ.tramoPolygon(ns, trace);
+    assert.strictEqual(poly.source, "gps");
+    const zc = CZ.zoneCells(poly.pts);
+    for (const k of ns.cellKeys) assert.ok(zc.has(k), "celda " + k);
+    // ancho ~400 m: no toma celdas a más de 1 km del camino
+    for (const k of zc) assert.ok(ns.cellKeys.some(c => Math.abs(+k.split(":")[1] - +c.split(":")[1]) <= 1 && Math.abs(+k.split(":")[0] - +c.split(":")[0]) <= 1));
+    const anchor = { id: "zA", name: "COR · RP7 · A → B", kind: "tramo", cells: zc, perimeterKm: 12.8 };
+    const sg5 = GI.corridorSegments(cm4, cm4, { anchors: [anchor] });
+    const fx = sg5.list.find(x => x.fixed);
+    assert.ok(fx && fx.name === "COR · RP7 · A → B" && Math.abs(fx.length - 6.4) < 0.01);
+    assert.ok(sg5.list.filter(x => !x.fixed).every(x => x.unassigned));
+    assert.ok(ns.cellKeys.every(k => sg5.segOf.get(k) === fx));
+    const hull = CZ.nudoPolygon(["-3889:-5291", "-3889:-5290"]);
+    assert.ok(hull.length === 4);
   }
   // Flota grande: filas agregadas pesados/livianos del alcance, escala 12.
   const acc2 = new Map(), seen = new Map();

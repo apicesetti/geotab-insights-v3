@@ -141,7 +141,7 @@
       hint="Cada fila es un tramo de ruta (de un cruce a otro, hasta 20 km) o un cruce / zona urbana. Riesgo: infracciones por km respecto del promedio, descontada la casualidad. Exceso: infracciones con peso por encima de lo esperable para sus km (lo que se ganaría si el tramo fuera promedio)."
       actions=${html`<label className="inline"><input type="checkbox" checked=${showLow} onChange=${e => setShowLow(e.target.checked)} /> Incluir tramos con pocos datos</label>`}>
       <${DataTable} rowKey=${r => r.id} rows=${rows} limit=${15} defaultSort=${{ key: "excess", dir: "desc" }} onRowClick=${r => onPick(r.id)} columns=${[
-        { key: "name", label: "Tramo", fmt: r => html`<span>${r.name}${r.type === "nudo" ? html` <span className="muted small">cruce/zona</span>` : ""}</span>` },
+        { key: "name", label: "Tramo", fmt: r => html`<span>${r.name}${r.type === "nudo" ? html` <span className="muted small">cruce/zona</span>` : ""}${r.unassigned ? html` <span className="conf" title="Tramo detectado automáticamente: todavía no tiene geocerca de corredor (ver 'Geocercas de corredores' abajo).">sin geocerca</span>` : ""}</span>` },
         { key: "length", label: "Largo", align: "num", fmt: r => (r.length ? n0(r.length) + " km" : "–") },
         { key: "kmDay", label: "Km/día", align: "num", fmt: r => n0(r.kmDay), help: "Km por día que la flota recorre en el tramo (estimado con la muestra de GPS)." },
         { key: "share", label: "% km flota", align: "num", fmt: r => GI.fmtPct(r.share * 100, r.share < 0.01 ? 1 : 0), help: "Qué parte de todos los km de la flota pasa por este tramo." },
@@ -185,7 +185,7 @@
     <//>`;
   }
 
-  function CorridorTab({ view, api, database }) {
+  function CorridorTab({ view, api, database, isAdmin }) {
     const lastDay = view.model.dayKeys[view.model.dayKeys.length - 1];
     const [nDays, setNDays] = useState(7);
     const [hours, setHours] = useState("all");
@@ -227,28 +227,35 @@
     // Geometría de los tramos: todas las horas (no cambia al mover el horario).
     const cmAll = useMemo(() => (data ? GI.corridorModel(view.model, data.days, view.ids, data.evs, data.locs, { evScale: data.evScale }) : null), [data, view.ids]);
     const cm = useMemo(() => (data ? (hSel.h ? GI.corridorModel(view.model, data.days, view.ids, data.evs, data.locs, { hours: hSel.h, evScale: data.evScale }) : cmAll) : null), [cmAll, hours]);
-    const sg = useMemo(() => (cm ? GI.corridorSegments(cmAll, cm) : null), [cm]);
+    // Geocercas de corredores ya creadas en la base ("COR · …" / "NUDO · …").
+    const [anchors, setAnchors] = useState(null);
+    const reloadAnchors = () => GI.loadCorridorZones(api).then(setAnchors).catch(() => setAnchors([]));
+    useEffect(() => { reloadAnchors(); }, []);
+    const segOpts = { anchors: anchors || [] };
+    const sg = useMemo(() => (cm ? GI.corridorSegments(cmAll, cm, segOpts) : null), [cm, anchors]);
+    const geoAll = useMemo(() => (cmAll ? GI.corridorSegments(cmAll, cmAll, segOpts) : null), [cmAll, anchors]);
     const points = data ? [...data.days.values()].reduce((s, v) => s + (v.points || 0), 0) : 0;
-    // Nombres (zonas de MyGeotab y direcciones de Geotab): se buscan para los
-    // tramos que importan (los que requieren acción y los de más tránsito).
+    // Nombres de los tramos sin geocerca (zonas chicas de MyGeotab y
+    // direcciones de Geotab).
     const [names, setNames] = useState(null);
     useEffect(() => {
-      if (!cmAll) return;
+      if (!geoAll) return;
       let alive = true;
       setNames(null);
-      const geo = GI.corridorSegments(cmAll, cmAll);
-      const ranked = [...geo.action, ...[...geo.list].sort((a, b) => b.km - a.km)];
-      const uniq = [...new Map(ranked.map(x => [x.id, x])).values()];
-      GI.nameSegments(api, uniq, view.model.cat.zones || [], 120)
+      GI.nameSegments(api, geoAll.list, view.model.cat.zones || [], 400)
         .then(list => { if (alive) setNames(new Map(list.map(x => [x.id, { name: x.name, road: x.road }]))); })
         .catch(() => { if (alive) setNames(new Map()); });
       return () => { alive = false; };
-    }, [cmAll]);
+    }, [geoAll]);
     if (sg) {
-      for (const x of sg.list) { const nm = names && names.get(x.id); x.name = nm ? nm.name : x.type === "nudo" ? "Cruce o zona urbana" : "Tramo de " + n0(x.length) + " km"; x.named = !!nm; }
+      for (const x of sg.list) {
+        if (x.fixed) { x.name = x.zoneName.replace(/^(COR|NUDO)\s*·\s*/i, ""); x.named = true; continue; }
+        const nm = names && names.get(x.id); x.name = nm ? nm.name : x.type === "nudo" ? "Cruce o zona urbana" : "Tramo de " + n0(x.length) + " km"; x.named = !!nm;
+      }
+      if (geoAll && names) for (const x of geoAll.list) if (!x.fixed && names.get(x.id)) x.name = names.get(x.id).name;
       // Nombres repetidos (varios tramos de la misma ruta junto a la misma
       // localidad): se numeran de norte a sur.
-      const byName = GI.groupBy(sg.list.filter(x => x.named), x => x.name);
+      const byName = GI.groupBy(sg.list.filter(x => x.named && !x.fixed), x => x.name);
       for (const [, xs] of byName) if (xs.length > 1) xs.sort((a, b) => b.mid[0] - a.mid[0]).forEach((x, i) => { x.name += " (" + (i + 1) + ")"; });
     }
     const selSeg = sg && sel ? sg.list.find(x => x.id === sel) : null;
@@ -277,6 +284,7 @@
       ${selSeg ? html`<${SegmentDetail} seg=${selSeg} cm=${cm} model=${view.model} onClose=${() => setSel(null)} />` : null}
       ${cm ? html`<${SegmentTable} sg=${sg} cm=${cm} onPick=${setSel} />` : null}
       ${cm ? html`<${BlackSpots} cm=${cm} sg=${sg} onFocus=${k => { const x = sg.segOf.get(k); if (x) setSel(x.id); }} hoursLabel=${hSel.label} />` : null}
+      ${cm && geoAll ? html`<${GI.CorridorZonesPanel} api=${api} database=${database} isAdmin=${isAdmin} geo=${geoAll} cm=${cmAll} days=${data.days} anchors=${anchors || []} named=${!!names} onCreated=${reloadAnchors} />` : null}
       ${cm ? html`<${CorridorBandPanel} cm=${cm} view=${view} api=${api} />` : null}
     </div>`;
   }

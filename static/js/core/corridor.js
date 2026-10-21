@@ -336,8 +336,17 @@
     const o = Object.assign({ minEdge: 1, maxKm: MAX_SEG_KM }, opts || {});
     const byKey = new Map(geom.cells.filter(c => c.km > 0).map(c => [c.key, c]));
     const statOf = new Map(cm.cells.map(c => [c.key, c]));
+    // Geocercas de corredores ya creadas: sus celdas quedan fijas en ese
+    // tramo (los nudos primero). El resto se arma automáticamente.
+    const fixed = [];
+    const fixedOf = new Map();
+    for (const z of [...(o.anchors || [])].sort((a, b) => (a.kind === "nudo" ? 0 : 1) - (b.kind === "nudo" ? 0 : 1))) {
+      const f = { type: z.kind, cells: [], zone: z, id: "z:" + z.id };
+      for (const k of z.cells) if (!fixedOf.has(k) && (byKey.has(k) || statOf.has(k))) { fixedOf.set(k, f); f.cells.push(k); }
+      fixed.push(f);
+    }
     const adj = new Map();
-    for (const k of byKey.keys()) adj.set(k, new Set());
+    for (const k of byKey.keys()) if (!fixedOf.has(k)) adj.set(k, new Set());
     for (const [ek, n] of geom.edges || []) {
       if (n < o.minEdge) continue;
       const [a, b] = ek.split("~");
@@ -431,11 +440,13 @@
         const c = byKey.get(ch.cells[i]);
         if (cur.length) len += haversineKm(byKey.get(cur[cur.length - 1]).center[0], byKey.get(cur[cur.length - 1]).center[1], c.center[0], c.center[1]);
         cur.push(ch.cells[i]);
-        if (len >= o.maxKm && i < ch.cells.length - 2) { segs.push({ type: "tramo", cells: cur }); cur = [ch.cells[i]]; len = 0; }
+        if (len >= o.maxKm && i < ch.cells.length - 2) { segs.push({ type: "tramo", cells: cur, a: cur[0] === ch.cells[0] ? ch.a : null }); cur = [ch.cells[i]]; len = 0; }
       }
-      if (cur.length) segs.push({ type: "tramo", cells: cur });
+      if (cur.length) segs.push({ type: "tramo", cells: cur, a: cur[0] === ch.cells[0] ? ch.a : null, b: ch.b });
     }
     for (const g of groups) segs.push(g);
+    for (const sg of segs) sg.id = sg.cells[0] + "/" + sg.cells.length;
+    for (const f of fixed) segs.push(f);
     // Infracciones ubicadas en celdas sin km en la muestra (caminos poco
     // usados, o el GPS cayó al costado): se suman al tramo vecino.
     const sgOf = new Map();
@@ -458,7 +469,8 @@
     const out = segs.map((sg, i) => {
       const cs = sg.cells.map(k => byKey.get(k)).filter(Boolean);
       const css = sg.cells.map(k => statOf.get(k)).filter(Boolean);
-      const x = { id: sg.cells[0] + "/" + sg.cells.length, type: sg.type, cellKeys: sg.cells, km: 0, w: 0, n: 0, sec: 0, sv: 0, sv2: 0, heavyKm: 0,
+      sg.out = null;
+      const x = { id: sg.id, type: sg.type, fixed: !!sg.zone, zoneId: sg.zone ? sg.zone.id : null, zoneName: sg.zone ? sg.zone.name : null, cellKeys: sg.cells, km: 0, w: 0, n: 0, sec: 0, sv: 0, sv2: 0, heavyKm: 0,
         byHour: new Array(24).fill(0), evByHour: new Array(24).fill(0), drv: new Map(), catCount: {}, vehicles: 0 };
       let lat0 = 90, lng0 = 180, lat1 = -90, lng1 = -180, len = 0;
       for (const c of css) {
@@ -495,6 +507,18 @@
       x.franja = criticalWindow(x, st);
       return x;
     });
+    segs.forEach((sg, i) => { sg.out = out[i]; });
+    segs.forEach((sg, i) => { out[i].ends = [sg.a && sg.a.out ? sg.a.out.id : null, sg.b && sg.b.out ? sg.b.out.id : null]; });
+    // Tramos fijos: largo aproximado por el perímetro de la geocerca.
+    for (const x of out) if (x.fixed && x.type === "tramo" && x.zoneId) {
+      const z = (o.anchors || []).find(a => a.id === x.zoneId);
+      if (z && z.perimeterKm) x.length = z.perimeterKm / 2;
+    }
+    for (const x of out) if (x.fixed) x.name = x.zoneName;
+    const anchored = (o.anchors || []).length > 0;
+    for (const x of out) x.unassigned = anchored && !x.fixed;
+    const out2 = out.filter(x => x.cellKeys.length);
+    out.length = 0; out.push(...out2);
     const segOf = new Map();
     for (const x of out) for (const k of x.cellKeys) segOf.set(k, x);
     const action = out.filter(x => x.conf !== "baja" && x.factorS >= 1.3 && x.excess > 0).sort((a, b) => b.excess - a.excess);
@@ -551,32 +575,56 @@
     if (m2) return m2[1].toUpperCase() + m2[2];
     return s.replace(/\s+\d+$/, "").trim();
   }
+  // Nomenclatura (la misma que se usa al crear las geocercas, sin prefijo):
+  //   tramo: "RP7 · Añelo → Cruce RP7 / RP17"
+  //   nudo:  "Añelo" (zona urbana, 6+ celdas) o "Cruce RP7 / RP17 (Añelo)"
+  // Para los lugares se usan solo zonas chicas (≤ 3 km², p. ej. una base o
+  // un acceso); las zonas grandes o genéricas ("IMSEG", un yacimiento
+  // entero) no describen un punto y se ignoran. Nunca se usan las propias
+  // geocercas de corredores.
+  const PLACE_ZONE_MAX_KM2 = 3;
+  function zoneAreaKm2(z) {
+    const b = z.bbox; if (!b) return Infinity;
+    const lat = (b[1] + b[3]) / 2;
+    return Math.abs(b[2] - b[0]) * 111.32 * Math.cos(lat * rad) * Math.abs(b[3] - b[1]) * 110.57;
+  }
+  const isCorridorZoneName = n => /^(COR|NUDO)\s*·/i.test(n || "");
   async function nameSegments(api, segs, zones, limit) {
-    const zoneAt = GI.makeZoneLocator(zones || []);
-    const pick = segs.slice(0, limit || 80);
+    const small = (zones || []).filter(z => !isCorridorZoneName(z.name) && zoneAreaKm2(z) <= PLACE_ZONE_MAX_KM2);
+    const zoneAt = GI.makeZoneLocator(small);
+    const pick = segs.filter(x => !x.fixed).slice(0, limit || 400);
     const pts = [];
     for (const x of pick) { for (const p of [x.start, x.mid, x.end]) if (p) pts.push(p); }
     const addr = await reverseGeocode(api, pts);
-    const place = p => {
-      if (!p) return "";
-      const z = zoneAt(p[1], p[0]);
-      if (z) return z.name;
-      const a = addr(p);
-      return a ? a.city : "";
-    };
-    for (const x of pick) {
-      const roads = [x.start, x.mid, x.end].map(p => (p && addr(p) ? shortRoad(addr(p).street) : "")).filter(Boolean);
+    const city = p => { const a = p && addr(p); return a ? a.city : ""; };
+    const place = p => { if (!p) return ""; const z = zoneAt(p[1], p[0]); return z ? z.name : city(p); };
+    const roadOf = x => {
       const cnt = {};
-      for (const r of roads) cnt[r] = (cnt[r] || 0) + 1;
-      const road = Object.keys(cnt).sort((a, b) => cnt[b] - cnt[a])[0] || "";
-      if (x.type === "nudo") {
-        const zp = place(x.mid);
-        x.name = (zp ? zp : "Cruce") + (road && !zp.includes(road) ? " · " + road : "");
-      } else {
-        const a = place(x.start), b = place(x.end);
-        x.name = (road ? road + " · " : "Tramo · ") + (a && b && a !== b ? a + " → " + b : a || b || "sin localidad");
-      }
-      x.road = road;
+      for (const p of [x.start, x.mid, x.end]) { const a = p && addr(p); const r = a ? shortRoad(a.street) : ""; if (r) cnt[r] = (cnt[r] || 0) + 1; }
+      return Object.keys(cnt).sort((a, b) => cnt[b] - cnt[a])[0] || "";
+    };
+    const byId = new Map(segs.map(x => [x.id, x]));
+    for (const x of pick) x.road = x.type === "tramo" ? roadOf(x) : "";
+    // Nudos: rutas de los tramos que llegan.
+    const roadsAt = new Map();
+    for (const x of segs) if (x.type === "tramo" && x.road) for (const e of x.ends || []) if (e) { if (!roadsAt.has(e)) roadsAt.set(e, new Set()); roadsAt.get(e).add(x.road); }
+    for (const x of pick) if (x.type === "nudo") {
+      const pl = place(x.mid);
+      const roads = [...(roadsAt.get(x.id) || [])].sort();
+      if (x.cellKeys.length >= 6 && pl) x.name = pl;
+      else if (roads.length >= 2) x.name = "Cruce " + roads.slice(0, 2).join(" / ") + (pl ? " (" + pl + ")" : "");
+      else x.name = pl ? (roads[0] ? pl + " · " + roads[0] : pl) : roads[0] ? "Cruce " + roads[0] : "";
+      x.shortName = x.cellKeys.length >= 6 && pl ? pl : roads.length >= 2 ? "Cruce " + roads.slice(0, 2).join(" / ") : pl;
+    }
+    const endName = (x, i) => {
+      const e = x.ends && x.ends[i] ? byId.get(x.ends[i]) : null;
+      if (e) return e.shortName || e.name || e.zoneName || "";
+      return place(i ? x.end : x.start);
+    };
+    for (const x of pick) if (x.type === "tramo") {
+      const a = endName(x, 0), b = endName(x, 1);
+      const where = a && b && a !== b ? a + " → " + b : a || b ? "en " + (a || b) : "";
+      x.name = (x.road || "Camino") + (where ? " · " + where : "");
     }
     for (const x of segs) if (!x.name) x.name = (x.type === "nudo" ? "Cruce " : "Tramo ") + x.mid[0].toFixed(3) + ", " + x.mid[1].toFixed(3);
     return segs;

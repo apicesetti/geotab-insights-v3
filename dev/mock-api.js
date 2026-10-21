@@ -34,6 +34,12 @@
     { id: "zRos", name: "Terminal Rosario", c: [-60.64, -32.95] },
   ].map(z => ({ id: z.id, name: z.name, c: z.c, zoneTypes: [{ id: z.id === "zCam" ? "ZoneTypeOfficeId" : "ZoneTypeCustomerId" }], points: [[-.02, -.02], [.02, -.02], [.02, .02], [-.02, .02]].map(([dx, dy]) => ({ x: z.c[0] + dx, y: z.c[1] + dy })) }));
   const zc = Object.fromEntries(zones.map(z => [z.id, z.c]));
+  const zoneTypes = [{ id: "ztPuerto", name: "Puerto" }];
+  // Zona grande y genérica (como "IMSEG"): no debe usarse para nombrar tramos.
+  zones.push({ id: "zBig", name: "IMSEG", zoneTypes: [{ id: "ZoneTypeCustomerId" }], points: [[-62, -35.5], [-57.5, -35.5], [-57.5, -31], [-62, -31]].map(([x, y]) => ({ x, y })) });
+  // Geocercas creadas por el add-in en esta sesión (sessionStorage).
+  try { for (const z of JSON.parse(sessionStorage.getItem("mockZones") || "[]")) zones.push(z); for (const t of JSON.parse(sessionStorage.getItem("mockZoneTypes") || "[]")) zoneTypes.push(t); } catch (e) {}
+  const persistZones = () => { try { sessionStorage.setItem("mockZones", JSON.stringify(zones.filter(z => z._created))); sessionStorage.setItem("mockZoneTypes", JSON.stringify(zoneTypes.filter(t => t._created))); } catch (e) {} };
 
   const rules = [
     ["RuleSeatbeltId", "Seat belt", "Stock"], ["RuleIdlingId", "Idling", "Stock"], ["RulePostedSpeedingId", "Speeding", "Stock"],
@@ -191,8 +197,12 @@
             : s.name ? [{ id: "admin", name: s.name, securityGroups: [{ id: "GroupEverythingSecurityId" }] }] : drivers;
           break;
         }
-        case "Zone": out = zones; break;
-        case "ZoneType": out = [{ id: "ztPuerto", name: "Puerto" }]; break;
+        case "Zone": {
+          out = zones;
+          if (s.name) { const re = new RegExp("^" + s.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/%/g, ".*") + "$", "i"); out = out.filter(z => re.test(z.name)); }
+          break;
+        }
+        case "ZoneType": out = zoneTypes; break;
         // Como el servidor real: Trip ignora deviceSearch.groups; solo filtra por id.
         case "Trip": out = trips.filter(t => inRange(t.start, s) && (!s.deviceSearch || !s.deviceSearch.id || t.device.id === s.deviceSearch.id)); break;
         case "ExceptionEvent": out = exceptions.filter(e => inRange(e.activeFrom, s) && inGroups(e.device, s) && (!s.ruleSearch || e.rule.id === s.ruleSearch.id)); break;
@@ -228,15 +238,17 @@
           const from = new Date(s.fromDate).getTime() / 1000, to = new Date(s.toDate).getTime() / 1000;
           out = [];
           for (let ts = Math.floor(from); ts <= to; ts++) { const l = logs.get(s.deviceSearch.id + "|" + ts); if (l) out.push(l); }
-          // Rangos largos (trazado de un recorrido): puntos cada 5 min entre el inicio y el fin de cada viaje.
+          // Rangos largos (trazado de un recorrido): un punto cada 10 s de cada viaje, sobre la misma línea que usa el muestreo de corredores.
           if (to - from > 1200) {
-            const ts = trips.filter(t => t.device.id === s.deviceSearch.id && t.start >= s.fromDate && t.start < s.toDate).sort((a, b) => (a.start < b.start ? -1 : 1));
-            let prev = null;
-            for (const t of ts) {
-              const a = prev || [t.stopPoint.x - 0.4, t.stopPoint.y + 0.2], z = [t.stopPoint.x, t.stopPoint.y];
+            for (const t of trips) {
+              if (t.device.id !== s.deviceSearch.id) continue;
               const t0 = new Date(t.start).getTime(), t1 = new Date(t.stop).getTime();
-              for (let k = t0; k <= t1; k += 300000) { const f = (k - t0) / Math.max(1, t1 - t0); out.push({ latitude: a[1] + (z[1] - a[1]) * f + Math.sin(f * 9) * 0.02, longitude: a[0] + (z[0] - a[0]) * f, dateTime: new Date(k).toISOString() }); }
-              prev = z;
+              if (t1 < from * 1000 || t0 > to * 1000) continue;
+              const A = t._a, Z = [t.stopPoint.x, t.stopPoint.y];
+              for (let k = Math.max(t0, Math.ceil(from / 10) * 10000); k <= Math.min(t1, to * 1000); k += 10000) {
+                const f = (k - t0) / Math.max(1, t1 - t0);
+                out.push({ latitude: A[1] + (Z[1] - A[1]) * f, longitude: A[0] + (Z[0] - A[0]) * f, dateTime: new Date(k).toISOString() });
+              }
             }
           }
           break;
@@ -258,6 +270,11 @@
       const gs = ((p.entity && p.entity.groups) || []).map(g => g.id);
       const desc = id => { const out = new Set(); const q = [id]; while (q.length) { const g = groups.find(x => x.id === q.shift()); for (const c of (g && g.children) || []) if (!out.has(c.id)) { out.add(c.id); q.push(c.id); } } return out; };
       for (const a of gs) { const d = desc(a); if (gs.some(b => b !== a && d.has(b))) throw new Error("Cannot add an entity with groups that have a parent-child relationship."); }
+    }
+    if (method === "Add" && p.typeName === "ZoneType") { const id = "zt" + (++aid); zoneTypes.push({ ...p.entity, id, _created: true }); persistZones(); return id; }
+    if (method === "Add" && p.typeName === "Zone") {
+      if (!p.entity.name || !(p.entity.points || []).length) throw new Error("Zone: name y points son obligatorios");
+      const id = "zn" + (++aid); zones.push({ ...JSON.parse(JSON.stringify(p.entity)), id, _created: true }); persistZones(); return id;
     }
     if (method === "Add") { const id = "ad" + Date.now().toString(36) + (++aid); addInData.push({ ...JSON.parse(JSON.stringify(p.entity)), id }); persist(); return id; }
     if (method === "Set") { const i = addInData.findIndex(a => a.id === p.entity.id); addInData[i] = JSON.parse(JSON.stringify(p.entity)); persist(); return null; }
