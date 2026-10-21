@@ -316,7 +316,7 @@
           : driverMode || tab === "mi" ? html`<${GI.MyPerformanceTab} view=${view} />`
           : tab === "resumen" ? html`<${GI.SummaryTab} view=${view} onGo=${setTab} onDriver=${(id, mode) => setDetail({ type: "d", id, mode: mode || "safety" })} />`
           : tab === "combustible" ? html`<${GI.FuelTab} view=${view} onVehicle=${id => setDetail({ type: "v", id })} />`
-          : tab === "seguridad" ? html`<${GI.SafetyTab} view=${view} onVehicle=${id => setDetail({ type: "v", id })} onDriver=${(id, mode) => setDetail({ type: "d", id, mode })} />`
+          : tab === "seguridad" ? html`<${GI.SafetyTab} view=${view} onVehicle=${id => setDetail({ type: "v", id })} onDriver=${(id, mode) => setDetail({ type: "d", id, mode: mode || "safety" })} />`
           : tab === "conductores" ? html`<${GI.DriversTab} view=${view} onDriver=${id => setDetail({ type: "d", id })} />`
           : tab === "recorridos" ? html`<${GI.RoutesTab} view=${view} api=${api} />`
           : tab === "exposicion" ? html`<${GI.ExposureTab} view=${view} onDriver=${id => setDetail({ type: "d", id })} />`
