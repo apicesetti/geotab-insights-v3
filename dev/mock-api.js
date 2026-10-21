@@ -174,15 +174,45 @@
   // Geocodificación inversa de prueba: ruta según el corredor y la localidad más cercana.
   const towns = [["Campana", -59.05, -34.14], ["Zárate", -59.03, -34.1], ["Escobar", -58.79, -34.35], ["Pilar", -58.91, -34.46], ["Buenos Aires", -58.37, -34.58],
     ["San Pedro", -59.67, -33.68], ["Rosario", -60.64, -32.95], ["Villa María", -63.24, -32.41], ["Marcos Juárez", -62.1, -32.7], ["Córdoba", -64.18, -31.42], ["Baradero", -59.5, -33.8]];
+  // Rutas de prueba (líneas entre depósitos) con sus localidades en orden.
+  const mockRoads = [["RN9", "zCam", "zPto"], ["RN9", "zCam", "zRos"], ["RN8", "zCam", "zCba"]].map(([code, a, b], li) => {
+    const A = zc[a], B = zc[b], dx = B[0] - A[0], dy = B[1] - A[1], L2 = dx * dx + dy * dy;
+    const proj = (x, y) => { const t = ((x - A[0]) * dx + (y - A[1]) * dy) / L2; const px = A[0] + dx * t, py = A[1] + dy * t; return { t, d: Math.hypot(x - px, y - py) }; };
+    const ts = towns.map(([n, x, y]) => ({ n, ...proj(x, y) })).filter(q => q.d < 0.35 && q.t > -0.05 && q.t < 1.05).sort((p1, p2) => p1.t - p2.t);
+    return { code, li, proj, towns: ts };
+  });
   function fakeAddress(x, y) {
     let best = null;
-    for (const [n, tx, ty] of towns) { const d = (tx - x) ** 2 + (ty - y) ** 2; if (!best || d < best.d) best = { n, d }; }
-    const street = y > -34.2 ? (x < -60.7 ? "Ruta Nacional 9" : "Autopista Rosario - Buenos Aires") : "Ruta Nacional 9 Panamericana";
-    return { street, city: best.n, region: "Buenos Aires", formattedAddress: street + ", " + best.n };
+    for (const [n, tx, ty] of towns) { const d = Math.hypot(tx - x, ty - y); if (!best || d < best.d) best = { n, d }; }
+    let road = null;
+    for (const r of mockRoads) { const q = r.proj(x, y); if (!road || q.d < road.q.d) road = { r, q }; }
+    const code = road.r.code;
+    const zonesHit = [{ id: "zBig" }];
+    if (best.d < 0.05) return { street: "250 " + code, streetName: code, streetNumber: "250", city: best.n, region: "Buenos Aires", country: "Argentina", formattedAddress: code + " 250, " + best.n, zones: zonesHit };
+    const ts = road.r.towns;
+    let i = 0;
+    while (i < ts.length - 1 && ts[i + 1].t < road.q.t) i++;
+    const A = ts[i] ? ts[i].n : "origen", B = ts[i + 1] ? ts[i + 1].n : "destino";
+    const id = "zc_" + road.r.li + "_" + i;
+    if (!zones.some(z => z.id === id)) zones.push({ id, name: code + " - " + A + " a " + B + " - " + (A === "Buenos Aires" || B === "Buenos Aires" ? 80 : 110) + "kmh", zoneTypes: [{ id: "ztControl" }], points: [[-.01, -.01], [.01, -.01], [.01, .01]].map(([ddx, ddy]) => ({ x: x + ddx, y: y + ddy })) });
+    zonesHit.push({ id });
+    return { street: code, streetName: code, streetNumber: "", city: "", region: "Buenos Aires", country: "Argentina", formattedAddress: code + ", Buenos Aires, Argentina", zones: zonesHit };
   }
 
   function handle(method, p) {
     const s = (p && p.search) || {};
+    if (method === "GetPostedRoadSpeedsForDevice") {
+      calls.posted = (calls.posted || 0) + 1;
+      const f0 = new Date(p.fromDate).getTime(), f1 = new Date(p.toDate).getTime(), out = [];
+      for (const t of trips) {
+        if (t.device.id !== p.deviceSearch.id) continue;
+        const t0 = new Date(t.start).getTime(), t1 = new Date(t.stop).getTime();
+        if (t1 < f0 || t0 > f1) continue;
+        out.push({ date: new Date(t0).toISOString(), maxSpeed: 110, truckMaxSpeed: 90, lcvMaxSpeed: 110, isEstimate: false });
+        out.push({ date: new Date(t0 + (t1 - t0) * 0.93).toISOString(), maxSpeed: 60, truckMaxSpeed: 60, lcvMaxSpeed: 60, isEstimate: false });
+      }
+      return out;
+    }
     if (method === "GetAddresses") { calls.addr = (calls.addr || 0) + 1; return (p.coordinates || []).map(c => fakeAddress(c.x, c.y)); }
     if (method === "Get" || method === "GetCountOf") {
       calls[method]++;
@@ -230,7 +260,7 @@
               for (let k = Math.max(t0, Math.ceil(a0 / 10000) * 10000); k <= Math.min(t1, a1); k += 10000) {
                 const f = (k - t0) / Math.max(1, t1 - t0);
                 const wob = Math.sin(k / 7e5) * 0.15;
-                out.push({ device: { id: t.device.id }, dateTime: new Date(k).toISOString(), latitude: A[1] + (Z[1] - A[1]) * f, longitude: A[0] + (Z[0] - A[0]) * f, speed: Math.max(0, kmh * (1 + wob)) });
+                out.push({ device: { id: t.device.id }, dateTime: new Date(k).toISOString(), latitude: A[1] + (Z[1] - A[1]) * f, longitude: A[0] + (Z[0] - A[0]) * f, speed: Math.max(0, kmh * (1 + wob) - (new Date(k).getHours() >= 17 && new Date(k).getHours() < 20 && (k / 1000) % 180 < 20 ? 35 : 0)) });
               }
             }
             break;

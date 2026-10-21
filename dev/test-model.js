@@ -3,7 +3,7 @@ const fs = require("fs");
 const vm = require("vm");
 const ctx = { window: {}, console, Date, Math, Map, Set, Number, JSON, Object, Array, String, Promise, setTimeout };
 vm.createContext(ctx);
-for (const f of ["util", "catalog", "model", "exposure", "riskfactors", "hotspots", "corridor", "corridorzones"]) {
+for (const f of ["util", "catalog", "model", "exposure", "riskfactors", "hotspots", "roads"]) {
   vm.runInContext(fs.readFileSync(require("path").join(__dirname, "../static/js/core", f + ".js"), "utf8"), ctx);
 }
 const GI = ctx.window.GI;
@@ -209,94 +209,75 @@ assert.strictEqual(GI.durationToHours("00:11:42.0300000").toFixed(4), (11 / 60 +
   const fDic = GI._darkFraction(c, d, -38.95, -68.06);
   assert.ok(fDic > 0.15 && fDic < 0.4, "diciembre " + fDic);
 }
-// Corredores: segmentos de una ventana -> celdas; modelo y banda.
+// Corredores v2: riesgo del camino ajustado por conductor.
 {
-  const C = GI._corr;
-  const t0 = new Date(2026, 9, 10, 8, 0, 0).getTime();
-  // d1 a 72 km/h hacia el norte: 20 m por segundo -> 10 s = 0,2 km.
+  const RD = GI._road;
+  // aggregateWindow: histograma, anda y para y tiempo sobre el límite
+  const t0 = new Date(2026, 9, 10, 17, 0, 0).getTime();
   const recs = [];
-  for (let i = 0; i <= 30; i++) recs.push({ device: { id: "d1" }, dateTime: new Date(t0 + i * 10000).toISOString(), latitude: -38.9 + i * 0.2 / 111.2, longitude: -68.0, speed: 72 });
-  // salto de GPS y punto aislado: no deben sumar
-  recs.push({ device: { id: "d2" }, dateTime: new Date(t0).toISOString(), latitude: -38.9, longitude: -68 , speed: 0 });
-  recs.push({ device: { id: "d2" }, dateTime: new Date(t0 + 10000).toISOString(), latitude: -37.9, longitude: -68 , speed: 0 });
-  const acc = new Map();
-  C.aggregateWindow(recs, acc);
-  let km = 0, sec = 0;
-  for (const r of acc.values()) { assert.strictEqual(r[0], "d1"); assert.strictEqual(r[2], 8); km += r[3]; sec += r[4]; }
-  assert.ok(Math.abs(km - 6) < 0.05, "km " + km);
-  assert.strictEqual(sec, 300);
-  assert.strictEqual(C.dayWindows("2026-10-10").length, 48);
-  const rows = [...acc.values()].map(r => [0, r[1], r[2], r[3], r[4], r[5], r[6]]);
-  const fake = { vtypeOf: new Map([["d1", "camion"]]) };
-  const days = new Map([["2026-10-10", { devs: ["d1"], rows }]]);
-  const ev = { i: "e1", d: "d1", t: t0 + 60000, w: 1.5, cat: "velocidad", drv: "u1" };
-  const locs = new Map([["e1", [-38.9 + 1.2 / 111.2, -68.0]]]);
-  const cm = GI.corridorModel(fake, days, new Set(["d1"]), [ev], locs, { minKm: 1 });
-  assert.ok(Math.abs(cm.totKm - 36) < 0.3, "totKm " + cm.totKm); // muestra × 6
-  const hit = cm.cells.find(c => c.n === 1);
-  assert.ok(hit && hit.heavyPct === 100 && Math.abs(hit.speed - 72) < 0.01 && hit.sd < 0.01);
-  assert.strictEqual(cm.cells.filter(c => c.km > 0).length >= 6, true);
-  const none = GI.corridorModel(fake, days, new Set(["d1"]), [ev], locs, { hours: [10, 12] });
-  assert.strictEqual(none.totKm, 0);
-  const trace = [[-38.9, -68.0], [-38.9 + 6 / 111.2, -68.0]];
-  const band = GI.corridorBand(cm, trace);
-  assert.ok(Math.abs(band.total - 6) < 0.05);
-  assert.ok(band.bins.reduce((s, b) => s + b.km[8], 0) > 30);
-  // Tramos: una recta de 6 km (dos pasadas para que los pasos cuenten) = 1 tramo.
-  {
-    const acc3 = new Map(), edges = new Map();
-    C.aggregateWindow(recs, acc3, null, null, edges);
-    C.aggregateWindow(recs.map(r => ({ ...r, dateTime: new Date(new Date(r.dateTime).getTime() + 3600000).toISOString() })), acc3, null, null, edges);
-    const rows3 = [...acc3.values()].map(r => [0, r[1], r[2], r[3], r[4], r[5], r[6]]);
-    const cm3 = GI.corridorModel(fake, new Map([["2026-10-10", { devs: ["d1"], rows: rows3, edges: [...edges] }]]), new Set(["d1"]), [ev], locs, { minKm: 1 });
-    const sg = GI.corridorSegments(cm3);
-    const tramos = sg.list.filter(x => x.type === "tramo");
-    assert.strictEqual(sg.list.length, 1, "segs " + sg.list.map(x => x.type + x.cellKeys.length).join(","));
-    assert.ok(Math.abs(tramos[0].length - 6) < 1.5, "largo " + tramos[0].length);
-    assert.strictEqual(tramos[0].n, 1);
-    // con 1 sola infracción la confianza es baja y el factor suavizado queda cerca de 1
-    assert.strictEqual(tramos[0].conf, "baja");
-    // Cruce: una segunda ruta este-oeste corta la primera a mitad de camino.
-    const recs2 = [];
-    const kmLng = 111.32 * Math.cos(-38.87 * Math.PI / 180);
-    for (let i = 0; i <= 40; i++) recs2.push({ device: { id: "d2" }, dateTime: new Date(t0 + i * 10000).toISOString(), latitude: -38.9 + 3 / 111.2, longitude: -68.04 + i * 0.2 / kmLng, speed: 72 });
-    for (let pass = 0; pass < 2; pass++) C.aggregateWindow(recs2.map(r => ({ ...r, dateTime: new Date(new Date(r.dateTime).getTime() + pass * 7200000).toISOString() })), acc3, null, null, edges);
-    const rows4 = [...acc3.values()].map(r => [r[0] === "d1" ? 0 : 1, r[1], r[2], r[3], r[4], r[5], r[6]]);
-    const cm4 = GI.corridorModel(fake, new Map([["2026-10-10", { devs: ["d1", "d2"], rows: rows4, edges: [...edges] }]]), new Set(["d1", "d2"]), [ev], locs, { minKm: 1 });
-    const sg4 = GI.corridorSegments(cm4, cm4);
-    const types = sg4.list.map(x => x.type);
-    assert.strictEqual(types.filter(t => t === "nudo").length, 1, types.join(","));
-    assert.ok(types.filter(t => t === "tramo").length >= 3, types.join(","));
-    const totCells = sg4.list.reduce((a, x) => a + x.cellKeys.length, 0);
-    assert.strictEqual(totCells, cm4.cells.filter(c => c.km > 0).length);
-    // Geocerca del tramo norte-sur dibujada con su GPS: fija esas celdas.
-    const CZ = GI._cz;
-    const ns = sg.list[0];
-    const trace = recs.filter(r => r.device.id === "d1").map(r => [r.latitude, r.longitude]);
-    const poly = CZ.tramoPolygon(ns, trace);
-    assert.strictEqual(poly.source, "gps");
-    const zc = CZ.zoneCells(poly.pts);
-    for (const k of ns.cellKeys) assert.ok(zc.has(k), "celda " + k);
-    // ancho ~400 m: no toma celdas a más de 1 km del camino
-    for (const k of zc) assert.ok(ns.cellKeys.some(c => Math.abs(+k.split(":")[1] - +c.split(":")[1]) <= 1 && Math.abs(+k.split(":")[0] - +c.split(":")[0]) <= 1));
-    const anchor = { id: "zA", name: "COR · RP7 · A → B", kind: "tramo", cells: zc, perimeterKm: 12.8 };
-    const sg5 = GI.corridorSegments(cm4, cm4, { anchors: [anchor] });
-    const fx = sg5.list.find(x => x.fixed);
-    assert.ok(fx && fx.name === "COR · RP7 · A → B" && Math.abs(fx.length - 6.4) < 0.01);
-    assert.ok(sg5.list.filter(x => !x.fixed).every(x => x.unassigned));
-    assert.ok(ns.cellKeys.every(k => sg5.segOf.get(k) === fx));
-    const hull = CZ.nudoPolygon(["-3889:-5291", "-3889:-5290"]);
-    assert.ok(hull.length === 4);
-  }
-  // Flota grande: filas agregadas pesados/livianos del alcance, escala 12.
-  const acc2 = new Map(), seen = new Map();
-  C.aggregateWindow(recs, acc2, id => (id === "d1" ? "@p" : null), seen);
-  const rows2 = [...acc2.values()].map(r => [0, r[1], r[2], r[3], r[4], r[5], r[6]]);
-  const vd = {}; for (const [c, st] of seen) vd[c] = st.size;
-  const days2 = new Map([["2026-10-10", { devs: ["@p"], rows: rows2, vd, scale: 12, bucketed: true }]]);
-  const cm2 = GI.corridorModel(fake, days2, new Set(["d1"]), [ev], locs, { minKm: 1, evScale: 2 });
-  assert.ok(Math.abs(cm2.totKm - 72) < 0.6, "big totKm " + cm2.totKm);
-  const hit2 = cm2.cells.find(c => c.n === 1);
-  assert.ok(hit2.heavyPct === 100 && hit2.vehicles === 1 && hit2.w === 3);
+  for (let i = 0; i <= 30; i++) recs.push({ device: { id: "dA" }, dateTime: new Date(t0 + i * 10000).toISOString(), latitude: -38.9 + i * 0.2 / 111.2, longitude: -68.0, speed: i === 15 ? 40 : 72 });
+  const acc = new Map(), rep = new Map();
+  RD.aggregateWindow(recs, acc, { limitAt: () => 60, rep });
+  let sg = 0, over = 0, limSec = 0, hsum = 0;
+  for (const r of acc.values()) { sg += r[8]; over += r[9]; limSec += r[10]; hsum += r[7].reduce((a, b) => a + b, 0); }
+  assert.strictEqual(sg, 1, "anda y para " + sg);
+  assert.ok(limSec === 300 && over > 250, "sobre el límite " + over);
+  assert.ok(Math.abs(hsum - 300) < 1e-6);
+  assert.ok(rep.size >= 6);
+  assert.strictEqual(RD.normRoad("Tramo 3 Ruta 7 110kmh"), "RP7");
+  assert.strictEqual(RD.normRoad("RN 22"), "RN22");
+  assert.ok(RD.isControlName("RP7 - Chañar a Picada 11 - 110kmh") && !RD.isControlName("#IMSEGZONE"));
+  // Tramos con GetAddresses: urbano (número), geocerca de control, ruta sin geocerca
+  const cells = new Map([["c1", 10], ["c2", 10], ["c3", 5], ["c4", 1]]);
+  const addr = new Map([
+    ["c1", { city: "", street: "RP7", num: "", zones: ["zIm", "zA"] }],
+    ["c2", { city: "", street: "RP7", num: "", zones: ["zA", "zRad"] }],
+    ["c3", { city: "Añelo", street: "RP7", num: "120", zones: [] }],
+    ["c4", { city: "", street: "RP17", num: "", zones: [] }],
+  ]);
+  const names = new Map([["zIm", "#IMSEGZONE"], ["zA", "RP7 - Chañar a Picada 11 - 110kmh"], ["zRad", "Ruta 7: Zona Radar El Cruce 60kmh"]]);
+  // celdas reales para los centros
+  const real = ["-3890:-5292", "-3889:-5292", "-3888:-5292", "-3887:-5292"];
+  const cells2 = new Map(real.map((k, i) => [k, [...cells.values()][i]]));
+  const addr2 = new Map(real.map((k, i) => [k, addr.get("c" + (i + 1))]));
+  const built = GI.buildTramos(cells2, addr2, names);
+  const tr = [...built.tramos.values()];
+  const zA = tr.find(t => t.zoneId === "zA");
+  assert.ok(zA && zA.cells.length === 2 && zA.limit === 110 && zA.route === "RP7", JSON.stringify(tr));
+  assert.ok(tr.find(t => t.kind === "urbano" && t.name === "RP7 (Añelo)"));
+  assert.ok(tr.find(t => t.kind === "ruta" && t.route === "RP17"));
+  // Modelo: el conductor A (infractor) siempre maneja a las 17 h; B a las 10 h.
+  const d0 = GI.parseDayKey("2026-10-10").getTime();
+  const fakeModel = {
+    vtypeOf: new Map([["dA", "liviano"], ["dB", "liviano"]]),
+    tripsByDevice: new Map([["dA", [{ s: d0 + 17 * 3600000, e: d0 + 18 * 3600000, r: "A" }]], ["dB", [{ s: d0 + 10 * 3600000, e: d0 + 11 * 3600000, r: "B" }]]]),
+  };
+  const hist = new Array(16).fill(0); hist[7] = 600;
+  const days = new Map([["2026-10-10", { devs: ["dA", "dB"], scale: 6, rows: [
+    [0, real[0], 17, 10, 600, 72 * 600, 72 * 72 * 600, hist, 0, 0, 0, 0],
+    [1, real[0], 10, 10, 600, 72 * 600, 72 * 72 * 600, hist, 0, 0, 0, 0],
+  ] }]]);
+  const evs = [], locs = new Map();
+  for (let i = 0; i < 12; i++) { evs.push({ i: "a" + i, d: "dA", drv: "A", t: d0 + 17 * 3600000 + i * 60000, cat: "frenado_brusco", w: 1.3 }); locs.set("a" + i, GI._road.cellCenter(real[0])); }
+  evs.push({ i: "b0", d: "dB", drv: "B", t: d0 + 10 * 3600000 + 60000, cat: "frenado_brusco", w: 1.3 }); locs.set("b0", GI._road.cellCenter(real[0]));
+  const rm = GI.roadModel(fakeModel, days, new Set(["dA", "dB"]), built, evs, locs, {});
+  const x = rm.tramos.find(t => t.zoneId === "zA");
+  const f17 = x.franjas.find(f => f.key === "17-21"), f10 = x.franjas.find(f => f.key === "10-17");
+  // Sin ajustar sería 12 contra 1 (×12). Ajustado por conductor, las dos franjas quedan parecidas.
+  assert.ok(f17.envIdx / f10.envIdx < 1.6, "17h " + f17.envIdx + " vs 10h " + f10.envIdx);
+  // Si B (prudente) también frena mucho a las 17 h, ahí sí la franja es riesgosa.
+  const days2 = new Map([["2026-10-10", { devs: ["dA", "dB"], scale: 6, rows: [
+    [1, real[0], 17, 10, 600, 72 * 600, 72 * 72 * 600, hist, 0, 0, 0, 0],
+    [1, real[0], 10, 10, 600, 72 * 600, 72 * 72 * 600, hist, 0, 0, 0, 0],
+  ] }]]);
+  const fm2 = { vtypeOf: fakeModel.vtypeOf, tripsByDevice: new Map([["dB", [{ s: d0 + 10 * 3600000, e: d0 + 11 * 3600000, r: "B" }, { s: d0 + 17 * 3600000, e: d0 + 18 * 3600000, r: "B" }]]]) };
+  const evs2 = [], locs2 = new Map();
+  for (let i = 0; i < 8; i++) { evs2.push({ i: "c" + i, d: "dB", drv: "B", t: d0 + 17 * 3600000 + i * 60000, cat: "frenado_brusco", w: 1.3 }); locs2.set("c" + i, GI._road.cellCenter(real[0])); }
+  evs2.push({ i: "c9", d: "dB", drv: "B", t: d0 + 10 * 3600000, cat: "frenado_brusco", w: 1.3 }); locs2.set("c9", GI._road.cellCenter(real[0]));
+  const rm2 = GI.roadModel(fm2, days2, new Set(["dB"]), built, evs2, locs2, {});
+  const y = rm2.tramos.find(t => t.zoneId === "zA");
+  const g17 = y.franjas.find(f => f.key === "17-21"), g10 = y.franjas.find(f => f.key === "10-17");
+  assert.ok(g17.envIdx / g10.envIdx > 2, "mismo conductor: 17h " + g17.envIdx + " vs 10h " + g10.envIdx);
+  assert.ok(rm.routes.find(r => r.name === "RP7"));
 }
 console.log("OK");
