@@ -209,6 +209,43 @@ assert.strictEqual(GI.durationToHours("00:11:42.0300000").toFixed(4), (11 / 60 +
   const fDic = GI._darkFraction(c, d, -38.95, -68.06);
   assert.ok(fDic > 0.15 && fDic < 0.4, "diciembre " + fDic);
 }
+// Por qué cambió el riesgo, antes/después de un hito: regla nueva y cambio de flota.
+{
+  const days = GI.dayRange("2026-03-01", "2026-04-30");
+  const dd = new Map();
+  const put = (dev, dk, km, ev) => {
+    if (!dd.has(dev)) dd.set(dev, new Map());
+    const er = {}, evc = {};
+    let w = 0, n = 0;
+    for (const [rule, cat, k] of ev) { er[rule] = (er[rule] || 0) + k; evc[cat] = (evc[cat] || 0) + k; w += k * (cat === "giro_brusco" ? 1.2 : 1.5); n += k; }
+    dd.get(dev).set(dk, { km, w, n, ev: evc, er });
+  };
+  for (const dk of days) {
+    const after = dk >= "2026-04-01";
+    // vA sigue igual todo el período: 100 km/día y 1 exceso
+    put("vA", dk, 100, [["rVel", "velocidad", 1]]);
+    // vB (ruta, pocos eventos) sale de la flota en abril
+    if (!after) put("vB", dk, 400, [["rVel", "velocidad", 1]]);
+    // regla nueva de giros desde abril
+    if (after) put("vA", dk, 100, [["rVel", "velocidad", 1], ["rGiro", "giro_brusco", 1]]);
+  }
+  const fm = {
+    dayKeys: days, dd, drvCells: new Map(), devices: [{ id: "vA", name: "A" }, { id: "vB", name: "B" }],
+    profileOf: id => (id === "vB" ? "camion|larga" : "liviano|corta"), driverName: new Map(),
+    settings: { category_weights: { velocidad: 1.5, giro_brusco: 1.2 }, rule_mapping: { rVel: "velocidad", rGiro: "giro_brusco" } },
+    cat: { rules: [{ id: "rVel", name: "SPEED" }, { id: "rGiro", name: "Harsh cornering" }] },
+  };
+  const rc = GI.riskChange(fm, new Set(["vA", "vB"]), "week", null, { date: "2026-04-01", title: "Bus" });
+  assert.ok(rc.b > rc.a * 3, "sube mucho: " + rc.a + " → " + rc.b);
+  assert.strictEqual(rc.newRules.length, 1);
+  assert.strictEqual(rc.newRules[0].name, "Harsh cornering");
+  // con las mismas reglas y sin el cambio de flota, vA no cambió
+  assert.ok(Math.abs(rc.fleet.kept.rate[0] - 1.5) < 1e-9);
+  assert.strictEqual(rc.fleet.left.n, 1);
+  assert.ok(rc.sameRules.b > rc.sameRules.a, "sin regla nueva igual sube por flota");
+  assert.ok(rc.fleet.effect > 0);
+  assert.ok(Math.abs(rc.mix + rc.within - (rc.b - rc.a)) < 1e-9, "mezcla + conducta = cambio total");
+}
 // Corredores v2: riesgo del camino ajustado por conductor.
 {
   const RD = GI._road;

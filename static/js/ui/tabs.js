@@ -15,6 +15,7 @@
   const { useState, useMemo, useEffect } = React;
   const html = GI.html;
   const { Kpi, Delta, Panel, Info, DataTable, ChartView, Segmented, Modal } = GI;
+  const fmtDay = dk => GI.parseDayKey(dk).toLocaleDateString("es-AR");
   const n0 = v => GI.fmtNum(v, 0), n1 = v => GI.fmtNum(v, 1), n2 = v => GI.fmtNum(v, 2);
   const GRAN_WORD = { day: "día", week: "semana", month: "mes" };
   const GRAN_PLURAL = { day: "días", week: "semanas", month: "meses" };
@@ -103,18 +104,20 @@
       <span className=${"contrib-v " + (v > 0 ? "bad" : v < 0 ? "good" : "")}>${signed(v)}</span></span>`;
   }
 
-  function WhyTable({ title, rows, kind, up }) {
+  function WhyTable({ title, rows, kind, up, L }) {
+    L = L || ["1.ª", "2.ª"];
     const top = rows.filter(r => Math.abs(r.contrib) >= 0.005).slice(0, 8);
     const max = Math.max(0, ...top.map(r => Math.abs(r.contrib)));
-    const cols = [{ key: "name", label: kind === "cat" ? "Categoría" : kind === "drv" ? "Conductor" : "Vehículo",
-      fmt: r => kind === "cat" ? html`<span className="dot" style=${{ background: GI.catColor(r.key) }}></span>${r.name}` : r.name }];
-    if (kind === "cat") cols.push(
-      { key: "n0", label: "Eventos 1.ª", align: "num", value: r => r.n[0], fmt: r => n0(r.n[0]) },
-      { key: "n1", label: "Eventos 2.ª", align: "num", value: r => r.n[1], fmt: r => n0(r.n[1]) });
+    const evCols = kind === "cat" || kind === "rule";
+    const cols = [{ key: "name", label: kind === "cat" ? "Categoría" : kind === "rule" ? "Regla" : kind === "drv" ? "Conductor" : "Vehículo",
+      fmt: r => kind === "cat" || kind === "rule" ? html`<span className="dot" style=${{ background: GI.catColor(kind === "rule" ? r.cat : r.key) }}></span>${r.name}${kind === "rule" && r.n[0] === 0 && r.n[1] >= 3 ? html` <span className="tag-warn">sin eventos antes</span>` : ""}` : r.name }];
+    if (evCols) cols.push(
+      { key: "n0", label: "Eventos " + L[0].toLowerCase(), align: "num", value: r => r.n[0], fmt: r => n0(r.n[0]) },
+      { key: "n1", label: "Eventos " + L[1].toLowerCase(), align: "num", value: r => r.n[1], fmt: r => n0(r.n[1]) });
     else cols.push(
-      { key: "km", label: "Km 1.ª → 2.ª", align: "num", value: r => r.km[1], fmt: r => html`${n0(r.km[0])} → ${n0(r.km[1])}` },
-      { key: "ev", label: "Infracciones 1.ª → 2.ª", align: "num", value: r => r.n[1], fmt: r => html`${n0(r.n[0])} → ${n0(r.n[1])}` },
-      { key: "rate", label: "Riesgo propio", align: "num", value: r => r.rate[1], title: "pts/100 km de ese " + (kind === "drv" ? "conductor" : "vehículo") + " en cada mitad",
+      { key: "km", label: "Km " + L[0].toLowerCase() + " → " + L[1].toLowerCase(), align: "num", value: r => r.km[1], fmt: r => html`${n0(r.km[0])} → ${n0(r.km[1])}` },
+      { key: "ev", label: "Infracciones", align: "num", value: r => r.n[1], fmt: r => html`${n0(r.n[0])} → ${n0(r.n[1])}` },
+      { key: "rate", label: "Riesgo propio", align: "num", value: r => r.rate[1], title: "pts/100 km de ese " + (kind === "drv" ? "conductor" : "vehículo") + " en cada parte",
         fmt: r => html`${r.rate[0] == null ? "–" : n2(r.rate[0])} → ${r.rate[1] == null ? "–" : n2(r.rate[1])}` });
     cols.push({ key: "contrib", label: "Aporte al cambio", align: "num", value: r => r.contrib, title: "Cuántos pts/100 km del cambio total explica. Rojo empuja hacia arriba, verde hacia abajo.",
       fmt: r => html`<${ContribCell} v=${r.contrib} max=${max} />` });
@@ -123,40 +126,66 @@
   }
 
   function RiskWhy({ view, onClose }) {
-    const rc = useMemo(() => GI.riskChange(view.model, view.ids, view.gran, view.driverOk), [view]);
-    if (!rc) return html`<${Modal} title="¿Por qué cambió el riesgo?" onClose=${onClose}><p>No hay suficientes ${GRAN_PLURAL[view.gran]} completos para comparar.</p><//>`;
+    // Hitos dentro del período: por defecto se compara antes/después del último.
+    const first = view.model.dayKeys[0], last = view.model.dayKeys[view.model.dayKeys.length - 1];
+    const ms = (view.milestones || []).filter(m => m.date > first && m.date <= last).sort((x, y) => (x.date < y.date ? 1 : -1));
+    const [cmp, setCmp] = useState(ms.length ? "m:" + ms[0].id : "half");
+    const mSel = cmp.startsWith("m:") ? ms.find(m => "m:" + m.id === cmp) : null;
+    const rc = useMemo(() => GI.riskChange(view.model, view.ids, view.gran, view.driverOk, mSel ? { date: mSel.date, title: mSel.title } : null), [view, cmp]);
+    const picker = html`<label className="inline why-cmp">Comparar
+      <select value=${cmp} onChange=${e => setCmp(e.target.value)} aria-label="Qué comparar">
+        <option value="half">1.ª mitad vs 2.ª mitad del período</option>
+        ${ms.map(m => html`<option key=${m.id} value=${"m:" + m.id}>Antes y después de: ${m.title} (${fmtDay(m.date)})</option>`)}
+      </select></label>`;
+    if (!rc) return html`<${Modal} title="¿Por qué cambió el riesgo?" onClose=${onClose}>${picker}<p>No hay suficientes datos de los dos lados para comparar.</p><//>`;
     const d = rc.b - rc.a;
     const ptsCh = GI.pctChange(rc.pts[0], rc.pts[1]);
     const kmCh = GI.pctChange(rc.km[0], rc.km[1]);
     const up = d > 0;
+    const L = mSel ? ["Antes", "Después"] : ["1.ª mitad", "2.ª mitad"];
     const pushers = list => list.filter(x => (up ? x.contrib > 0 : x.contrib < 0)).slice(0, 2);
     const words = (ch, plural) => ch == null ? "–" : Math.abs(ch) < 3 ? (plural ? "se mantuvieron" : "se mantuvo") : (ch < 0 ? (plural ? "bajaron " : "bajó ") : (plural ? "subieron " : "subió ")) + GI.fmtNum(Math.abs(ch), 0) + "%";
-    // Lectura de km vs infracciones: el índice es infracciones / km.
-    let kmNote = null;
+    const sg2 = v => (v > 0 ? "+" : v < 0 ? "−" : "") + n2(Math.abs(v));
+    const pctOf = v => GI.fmtNum(Math.abs(rc.b - rc.a) > 1e-9 ? (Math.abs(v) / Math.abs(rc.b - rc.a)) * 100 : 0, 0) + "%";
+    // Lectura: qué parte del cambio no es conducta.
+    const reads = [];
     if (kmCh != null && ptsCh != null) {
-      if (up && kmCh < -3 && ptsCh < kmCh * 0.5) kmNote = "El índice subió sobre todo porque se recorrieron menos km, no porque haya más infracciones: las infracciones bajaron menos que los km.";
-      else if (up && ptsCh > 3) kmNote = "Hubo más infracciones en términos absolutos" + (kmCh > 3 ? ", y crecieron más rápido que los km." : ".");
-      else if (!up && kmCh > 3 && ptsCh > -3) kmNote = "El índice bajó sobre todo porque se recorrieron más km con una cantidad parecida de infracciones.";
-      else if (!up && ptsCh < -3) kmNote = "Hubo menos infracciones en términos absolutos.";
+      reads.push(html`<li><b>Exposición:</b> los km ${words(kmCh, true)} y las infracciones ponderadas ${words(ptsCh, true)}. ${up && kmCh < -3 && ptsCh < -3 ? "Hubo menos infracciones en total, pero bajaron menos que los km: por eso el índice (infracciones cada 100 km) sube." : up && ptsCh > 3 ? "Hubo más infracciones en términos absolutos." : !up && ptsCh < -3 ? "Hubo menos infracciones en términos absolutos." : ""}</li>`);
+    }
+    if (rc.newRules.length || rc.goneRules.length) {
+      reads.push(html`<li><b>Reglas que cambiaron:</b> ${rc.newRules.length ? html`${rc.newRules.map((r, i) => html`${i ? ", " : ""}<b>${r.name}</b>`)} no ${rc.newRules.length > 1 ? "tienen" : "tiene"} eventos ${mSel ? "antes" : "en la 1.ª mitad"} (regla nueva o activada después; ${n0(rc.newRules.reduce((s2, r) => s2 + r.n[1], 0))} eventos ${mSel ? "después" : "en la 2.ª"}). ` : null}${rc.goneRules.length ? html`${rc.goneRules.map((r, i) => html`${i ? ", " : ""}<b>${r.name}</b>`)} dejó de registrar eventos. ` : null}
+        Con las mismas reglas de los dos lados el índice va de <b>${n2(rc.sameRules.a)}</b> a <b>${n2(rc.sameRules.b)}</b> (${GI.fmtNum(GI.pctChange(rc.sameRules.a, rc.sameRules.b) || 0, 0)}%).</li>`);
+    }
+    const F = rc.fleet;
+    if (F.left.n || F.joined.n) {
+      reads.push(html`<li><b>Cambio de flota:</b> ${F.left.n ? html`${n0(F.left.n)} vehículos dejaron de circular (hacían el ${GI.fmtPct(F.left.share[0] * 100, 0)} de los km, con un índice de ${n2(F.left.rate[0])})` : null}${F.left.n && F.joined.n ? "; " : ""}${F.joined.n ? html`${n0(F.joined.n)} empezaron a circular (${GI.fmtPct(F.joined.share[1] * 100, 0)} de los km, índice ${n2(F.joined.rate[1])})` : null}.
+        Los ${n0(F.kept.n)} vehículos que siguieron pasaron de <b>${n2(F.kept.rate[0])}</b> a <b>${n2(F.kept.rate[1])}</b>${F.effect != null && Math.abs(F.effect) >= 0.01 ? html`: el cambio de flota explica <b>${sg2(F.effect)}</b> pts/100 km (${pctOf(F.effect)} del cambio)` : ""}.</li>`);
+    }
+    if (rc.profiles.length > 1 && Math.abs(rc.mix) >= 0.01) {
+      const pm = rc.profiles.filter(p => Math.abs(p.share[1] - p.share[0]) >= 0.05).slice(0, 3);
+      reads.push(html`<li><b>Mezcla de vehículos:</b> cambió qué tipo de vehículo hace los km${pm.length ? html` (${pm.map((p, i) => html`${i ? ", " : ""}${p.name}: ${GI.fmtPct(p.share[0] * 100, 0)} → ${GI.fmtPct(p.share[1] * 100, 0)} de los km`)})` : ""}. Eso explica <b>${sg2(rc.mix)}</b> pts/100 km; el cambio de conducta dentro de cada tipo, <b>${sg2(rc.within)}</b>.</li>`);
     }
     const pc = pushers(rc.cats), pd = pushers(rc.drivers.filter(x => x.key !== "_unknown")), pv = pushers(rc.vehicles);
     const list = arr => arr.map((x, i) => html`${i ? ", " : ""}<b>${x.name}</b> (${signed(x.contrib)})`);
     return html`<${Modal} title="¿Por qué cambió el riesgo?" onClose=${onClose} wide>
+      ${picker}
       <div className="readouts compact">
-        <${Kpi} label="Índice 1.ª mitad" value=${n2(rc.a)} unit="pts/100 km" sub=${html`<span>${rc.from[0]} a ${rc.to[0]}</span>`} />
-        <${Kpi} label="Índice 2.ª mitad" value=${n2(rc.b)} unit="pts/100 km" sub=${html`<span>${rc.from[1]} a ${rc.to[1]}</span>`} />
-        <${Kpi} label="Infracciones (ponderadas)" value=${n0(rc.pts[1])} sub=${html`<span>${words(ptsCh, true)} (antes ${n0(rc.pts[0])})</span>`} />
+        <${Kpi} label=${"Índice " + L[0].toLowerCase()} value=${n2(rc.a)} unit="pts/100 km" sub=${html`<span>${mSel ? fmtDay(rc.from[0]) + " a " + fmtDay(rc.to[0]) : rc.from[0] + " a " + rc.to[0]}</span>`} />
+        <${Kpi} label=${"Índice " + L[1].toLowerCase()} value=${n2(rc.b)} unit="pts/100 km" sub=${html`<span>${mSel ? fmtDay(rc.from[1]) + " a " + fmtDay(rc.to[1]) : rc.from[1] + " a " + rc.to[1]}</span>`} />
+        <${Kpi} label="Infracciones (ponderadas)" value=${n0(rc.pts[1])} sub=${html`<span>${words(ptsCh, true)} (antes ${n0(rc.pts[0])})</span>`} hint=${mSel ? "Los dos lados del hito pueden tener distinta duración; el índice (por km) es comparable, los totales no." : null} />
         <${Kpi} label="Kilómetros" value=${n0(rc.km[1])} sub=${html`<span>${words(kmCh, true)} (antes ${n0(rc.km[0])})</span>`} />
       </div>
       <div className="why-text">
-        <p>El índice ${up ? "subió" : "bajó"} <b>${GI.fmtNum(Math.abs(d), 2)} pts/100 km</b> (${GI.fmtNum(Math.abs(GI.pctChange(rc.a, rc.b) || 0), 0)}%). ${kmNote}</p>
+        <p>El índice ${up ? "subió" : "bajó"} <b>${GI.fmtNum(Math.abs(d), 2)} pts/100 km</b> (${GI.fmtNum(Math.abs(GI.pctChange(rc.a, rc.b) || 0), 0)}%)${mSel ? html` entre antes y después de <b>${mSel.title}</b>` : ""}. Qué lo explica:</p>
+        <ul className="why-list">${reads}</ul>
         ${pc.length || pd.length || pv.length ? html`<p>Lo que más ${up ? "empujó la suba" : "ayudó a la baja"}:
           ${pc.length ? html` categorías ${list(pc)};` : null}${pd.length ? html` conductores ${list(pd)};` : null}${pv.length ? html` vehículos ${list(pv)}.` : null}</p>` : null}
-        <p className="muted small">"Aporte al cambio" reparte la diferencia del índice: en cada tabla los aportes suman el cambio total. Se comparan las mismas dos mitades que el aviso, sin períodos incompletos.</p>
+        <p className="muted small">"Aporte al cambio" reparte la diferencia del índice: en cada tabla los aportes suman el cambio total.${mSel ? "" : " Se comparan las mismas dos mitades que el aviso, sin períodos incompletos."}</p>
       </div>
-      <${WhyTable} title="Por categoría" rows=${rc.cats} kind="cat" up=${up} />
-      <${WhyTable} title="Por conductor" rows=${rc.drivers} kind="drv" up=${up} />
-      <${WhyTable} title="Por vehículo" rows=${rc.vehicles} kind="veh" up=${up} />
+      <${WhyTable} title="Por categoría" rows=${rc.cats} kind="cat" up=${up} L=${L} />
+      <${WhyTable} title="Por regla" rows=${rc.rules} kind="rule" up=${up} L=${L} />
+      <${WhyTable} title="Por conductor" rows=${rc.drivers} kind="drv" up=${up} L=${L} />
+      <${WhyTable} title="Por vehículo" rows=${rc.vehicles} kind="veh" up=${up} L=${L} />
     <//>`;
   }
 

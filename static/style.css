@@ -1052,3 +1052,7 @@
 #gi3-root .rd-nd { font-weight: 400; font-size: 12px; color: var(--text-2); }
 #gi3-root .rd-matrix tr.rd-total th { font-weight: 700; }
 #gi3-root .rd-matrix tr.rd-total td, #gi3-root .rd-matrix tr.rd-total th { border-bottom: 2px solid var(--rule); padding-bottom: 6px; }
+#gi3-root .why-cmp { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 12px; font-size: 14px; }
+#gi3-root .why-cmp select { font: inherit; padding: 6px 8px; min-height: 36px; border: 1px solid var(--rule); border-radius: 6px; }
+#gi3-root .why-list { margin: 6px 0 10px; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; line-height: 1.5; }
+#gi3-root .tag-warn { display: inline-block; font-size: 11px; font-weight: 600; padding: 1px 6px; border-radius: 8px; background: #fbefd7; color: #6e4a05; margin-left: 4px; }
