@@ -250,10 +250,22 @@
       priceOf.set(d.id, ft && ft.price > 0 ? ft.price : fuelCfg.price_per_liter || 0);
     }
 
+    // Conductores desconocidos: si la configuración los deja afuera, sus
+    // viajes no cuentan (y las infracciones que caen en ellos tampoco). Se
+    // guarda el total del día para repartir el combustible por km.
+    const exclUnknown = !!(settings.drivers && settings.drivers.exclude_unknown);
+    const dayAll = new Map(); // dev|día -> { km, ih } de todos los viajes
+    if (exclUnknown) for (const t of raw.trips) {
+      const k = t.d + "|" + GI.dayKey(t.s);
+      const x = dayAll.get(k) || { km: 0, ih: 0 };
+      x.km += t.km; x.ih += t.ih; dayAll.set(k, x);
+    }
+    let excludedUnknown = { trips: 0, km: 0, events: 0 };
     // Viajes por vehículo
     const tripsByDevice = new Map();
     for (const t of raw.trips) {
       if (!devById.has(t.d)) continue;
+      if (exclUnknown && !t.r) { excludedUnknown.trips++; excludedUnknown.km += t.km; continue; }
       if (!tripsByDevice.has(t.d)) tripsByDevice.set(t.d, []);
       tripsByDevice.get(t.d).push(t);
     }
@@ -326,8 +338,12 @@
       const fd = fuelDeltas.get(dev);
       const idd = idleDeltas.get(dev);
       for (const [dk, c] of m) {
-        if (fd && fd.has(dk)) { c.fuel = fd.get(dk); c.kmFuel = c.km; }
-        if (idd && idd.has(dk)) { c.idleL = idd.get(dk); c.idleMeasured = c.idleL; }
+        // con conductores desconocidos afuera, el combustible del día se reparte por km (y el de ralentí por horas)
+        const all = exclUnknown ? dayAll.get(dev + "|" + dk) : null;
+        const fKm = all ? (all.km > 0 ? c.km / all.km : c.km > 0 ? 1 : 0) : 1;
+        const fIh = all ? (all.ih > 0 ? c.ih / all.ih : c.ih > 0 ? 1 : 0) : 1;
+        if (fd && fd.has(dk)) { c.fuel = fd.get(dk) * fKm; c.kmFuel = c.km; }
+        if (idd && idd.has(dk)) { c.idleL = idd.get(dk) * fIh; c.idleMeasured = c.idleL; }
         else c.idleL = c.ih * (idleRate.get(vtypeOf.get(dev)) || 1.5);
         const pr = priceOf.get(dev) || 0;
         c.idleCost = c.idleL * pr;
@@ -352,6 +368,7 @@
         const trip = findContaining(tripsByDevice.get(ev.d) || [], ev.t);
         if (trip) drv = trip.r;
       }
+      if (exclUnknown && !drv) { excludedUnknown.events++; continue; }
       const j = findContaining(journeysByDevice.get(ev.d) || [], ev.t);
       let w = riskCats.has(catKey) ? (weights[catKey] != null ? weights[catKey] : 1) : 0;
       // Gravedad por duración: cada minuto suma un % del peso, con tope.
@@ -392,7 +409,7 @@
 
     return {
       raw, cat, settings, gr, devices, devById, driverName, tripsByDevice, vtypeOf, serviceOf, serviceSource, profileOf, fuelTypeOf, priceOf,
-      exclusionImpact, excludedCount, fleetCount: withSerial.length,
+      exclusionImpact, excludedCount, fleetCount: withSerial.length, excludedUnknown: exclUnknown ? excludedUnknown : null,
       hasPrice: [...priceOf.values()].some(p => p > 0),
       dd, drvCells, events, journeys, dayKeys, hasFuel: fuelDeltas.size > 0,
       fuelDevices: new Set(fuelDeltas.keys()), idleMeasuredDevices: new Set(idleDeltas.keys()),

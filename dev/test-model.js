@@ -92,6 +92,17 @@ trips.push({ i: "x", d: "d4", r: null, s: GI.parseDayKey(fromKey).getTime() + 9 
 
 const raw = { fromKey, toKey, dayKeys, trips, exceptions, fuelDaily, idleFuelDaily: idleDaily, fuelDays };
 const model = GI.buildModel(raw, cat, settings);
+// Dejar afuera conductores desconocidos: d3 (sin conductor) no suma km; d1/d2 igual
+{
+  const s2 = JSON.parse(JSON.stringify(settings)); s2.drivers.exclude_unknown = true;
+  const m2 = GI.buildModel(raw, cat, s2);
+  const kmOf = (m, id) => GI.aggregate(m, [id]).km;
+  assert.strictEqual(kmOf(m2, "d3"), 0);
+  assert.strictEqual(kmOf(m2, "d1"), kmOf(model, "d1"));
+  assert.ok(Math.abs(GI.aggregate(m2, ["d1"]).fuel - GI.aggregate(model, ["d1"]).fuel) < 1e-6);
+  assert.ok(m2.excludedUnknown.trips > 0 && !m2.drvCells.has("_unknown"));
+  assert.strictEqual(model.excludedUnknown, null);
+}
 
 assert.ok(!model.devById.has("d4"), "excluded group");
 assert.strictEqual(model.vtypeOf.get("d1"), "bitren");

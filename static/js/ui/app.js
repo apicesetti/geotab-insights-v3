@@ -314,9 +314,9 @@
             benchmark=${benchmark} onPublishBenchmark=${publishBenchmark} mgGroups=${mgGroups} />`
           : !view ? html`<div className="splash small"><div className="spinner"></div>Preparando el tablero…</div>`
           : driverMode || tab === "mi" ? html`<${GI.MyPerformanceTab} view=${view} />`
-          : tab === "resumen" ? html`<${GI.SummaryTab} view=${view} onGo=${setTab} />`
+          : tab === "resumen" ? html`<${GI.SummaryTab} view=${view} onGo=${setTab} onDriver=${(id, mode) => setDetail({ type: "d", id, mode: mode || "safety" })} />`
           : tab === "combustible" ? html`<${GI.FuelTab} view=${view} onVehicle=${id => setDetail({ type: "v", id })} />`
-          : tab === "seguridad" ? html`<${GI.SafetyTab} view=${view} onVehicle=${id => setDetail({ type: "v", id })} onDriver=${id => setDetail({ type: "d", id })} />`
+          : tab === "seguridad" ? html`<${GI.SafetyTab} view=${view} onVehicle=${id => setDetail({ type: "v", id })} onDriver=${(id, mode) => setDetail({ type: "d", id, mode })} />`
           : tab === "conductores" ? html`<${GI.DriversTab} view=${view} onDriver=${id => setDetail({ type: "d", id })} />`
           : tab === "recorridos" ? html`<${GI.RoutesTab} view=${view} api=${api} />`
           : tab === "exposicion" ? html`<${GI.ExposureTab} view=${view} onDriver=${id => setDetail({ type: "d", id })} />`
@@ -327,10 +327,10 @@
               onDelete=${async id => { await GI.removeMilestone(api, id); setMilestones(ms => ms.filter(x => x.id !== id)); }} />`
           : null}
         <//>
-        ${raw ? html`<footer className="foot">Datos del ${raw.fromKey} al ${raw.toKey}${raw.complete ? "" : " (completando el resto del período)"}: ${GI.fmtNum(raw.trips.length)} viajes y ${GI.fmtNum(raw.exceptions.length)} eventos, cargados en ${GI.fmtNum(raw.loadedMs / 1000, 1)} s.</footer>` : null}
+        ${raw ? html`<footer className="foot">Datos del ${raw.fromKey} al ${raw.toKey}${raw.complete ? "" : " (completando el resto del período)"}: ${GI.fmtNum(raw.trips.length)} viajes y ${GI.fmtNum(raw.exceptions.length)} eventos, cargados en ${GI.fmtNum(raw.loadedMs / 1000, 1)} s.${model && model.excludedUnknown ? " Sin conductor identificado (excluidos por configuración): " + GI.fmtNum(model.excludedUnknown.trips) + " viajes, " + GI.fmtNum(model.excludedUnknown.km, 0) + " km y " + GI.fmtNum(model.excludedUnknown.events) + " eventos." : ""}</footer>` : null}
       </div>
       ${detail && view && detail.type === "v" ? html`<${GI.VehicleDetail} view=${view} id=${detail.id} onClose=${() => setDetail(null)} />` : null}
-      ${detail && view && detail.type === "d" ? html`<${GI.DriverDetail} view=${view} id=${detail.id} onClose=${() => setDetail(null)} />` : null}
+      ${detail && view && detail.type === "d" ? html`<${GI.DriverDetail} view=${view} id=${detail.id} mode=${detail.mode} onClose=${() => setDetail(null)} />` : null}
     </div>`;
   }
 

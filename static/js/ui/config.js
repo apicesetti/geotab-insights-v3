@@ -448,6 +448,9 @@
           <option value="day">Día</option><option value="week">Semana</option><option value="month">Mes</option></select></label>
         <label>Ventana de impacto de hitos (días)<input type="number" disabled=${ro} value=${draft.ui.milestone_window_days} onChange=${e => set(["ui", "milestone_window_days"], +e.target.value)} /></label>
         <label>Ranking de conductores: km mínimos<input type="number" disabled=${ro} value=${draft.drivers.min_km_ranking} onChange=${e => set(["drivers", "min_km_ranking"], +e.target.value)} /></label>
+        <label className="inline span-2"><input type="checkbox" disabled=${ro} checked=${!!draft.drivers.exclude_unknown} onChange=${e => set(["drivers", "exclude_unknown"], e.target.checked)} />
+          Dejar afuera los viajes y las infracciones sin conductor identificado
+          <${GI.Hint}>Si se marca, los viajes sin conductor (y las infracciones que ocurren en ellos) no cuentan en ningún indicador: km, riesgo, ralentí ni consumo (el combustible del día se reparte según los km que quedan). Sirve cuando muchos viajes no tienen la llave o el conductor asignado y distorsionan los índices.<//></label>
         <label>Editores adicionales (usuarios MyGeotab, separados por coma)<input disabled=${ro} value=${editors}
           onInput=${e => setEditors(e.target.value)} onBlur=${() => set(["editors"], editors.split(",").map(s => s.trim()).filter(Boolean))} /></label>
       </div>

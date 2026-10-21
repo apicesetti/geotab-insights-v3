@@ -104,7 +104,7 @@
       <span className=${"contrib-v " + (v > 0 ? "bad" : v < 0 ? "good" : "")}>${signed(v)}</span></span>`;
   }
 
-  function WhyTable({ title, rows, kind, up, L }) {
+  function WhyTable({ title, rows, kind, up, L, onPick, hint }) {
     L = L || ["1.ª", "2.ª"];
     const top = rows.filter(r => Math.abs(r.contrib) >= 0.005).slice(0, 8);
     const max = Math.max(0, ...top.map(r => Math.abs(r.contrib)));
@@ -121,11 +121,11 @@
         fmt: r => html`${r.rate[0] == null ? "–" : n2(r.rate[0])} → ${r.rate[1] == null ? "–" : n2(r.rate[1])}` });
     cols.push({ key: "contrib", label: "Aporte al cambio", align: "num", value: r => r.contrib, title: "Cuántos pts/100 km del cambio total explica. Rojo empuja hacia arriba, verde hacia abajo.",
       fmt: r => html`<${ContribCell} v=${r.contrib} max=${max} />` });
-    return html`<div className="why-block"><h3>${title}</h3><${DataTable} rows=${top} rowKey=${r => r.key} defaultSort=${{ key: "contrib", dir: up ? "desc" : "asc" }} columns=${cols}
+    return html`<div className="why-block"><h3>${title}</h3>${hint ? html`<p className="muted small" style=${{ margin: "0 0 6px" }}>${hint}</p>` : null}<${DataTable} rows=${top} rowKey=${r => r.key} defaultSort=${{ key: "contrib", dir: up ? "desc" : "asc" }} columns=${cols} onRowClick=${onPick || undefined}
       empty="Sin cambios relevantes." /></div>`;
   }
 
-  function RiskWhy({ view, onClose }) {
+  function RiskWhy({ view, onClose, onDriver }) {
     // Hitos dentro del período: por defecto se compara antes/después del último.
     const first = view.model.dayKeys[0], last = view.model.dayKeys[view.model.dayKeys.length - 1];
     const ms = (view.milestones || []).filter(m => m.date > first && m.date <= last).sort((x, y) => (x.date < y.date ? 1 : -1));
@@ -184,7 +184,7 @@
       </div>
       <${WhyTable} title="Por categoría" rows=${rc.cats} kind="cat" up=${up} L=${L} />
       <${WhyTable} title="Por regla" rows=${rc.rules} kind="rule" up=${up} L=${L} />
-      <${WhyTable} title="Por conductor" rows=${rc.drivers} kind="drv" up=${up} L=${L} />
+      <${WhyTable} title="Por conductor" rows=${rc.drivers} kind="drv" up=${up} L=${L} onPick=${onDriver ? r => onDriver(r.key, "safety") : null} hint=${onDriver ? "Click en un conductor para ver su ficha de seguridad." : null} />
       <${WhyTable} title="Por vehículo" rows=${rc.vehicles} kind="veh" up=${up} L=${L} />
     <//>`;
   }
@@ -202,7 +202,7 @@
       ${r.tone !== "flat" && onWhy ? html` <button className="btn link why-btn" onClick=${onWhy}>¿Por qué?</button>` : null}<//>`;
   }
 
-  function SummaryTab({ view, onGo }) {
+  function SummaryTab({ view, onGo, onDriver }) {
     const [metric, setMetric] = useState("risk");
     const [why, setWhy] = useState(false);
     const k = view.total;
@@ -221,7 +221,7 @@
           hint="Litros por encima del ralentí máximo y del consumo de referencia (más la tolerancia) de cada perfil." />
       </div>
       ${summarySentence(view, () => setWhy(true))}
-      ${why ? html`<${RiskWhy} view=${view} onClose=${() => setWhy(false)} />` : null}
+      ${why ? html`<${RiskWhy} view=${view} onClose=${() => setWhy(false)} onDriver=${onDriver} />` : null}
       <div className="grid-2-1">
         <${Panel} title="Evolución" hint=${"Agrupado por " + GRAN_WORD[view.gran] + ". Las líneas amarillas punteadas son hitos. El asterisco marca " + GRAN_PLURAL[view.gran] + " incompletos (inicio o fin del período)."}
           actions=${html`<${Segmented} value=${metric} onChange=${setMetric} options=${[
@@ -414,7 +414,7 @@
           cada 100 km hay <b>${rw.tone === "flat" ? "la misma cantidad" : GI.fmtNum(Math.abs(rate.ch), 0) + "% " + (rate.ch < 0 ? "menos" : "más")}</b> infracciones.
           <span className="muted"> Comparación de la 2.ª mitad del período contra la 1.ª, sin ${GRAN_PLURAL[view.gran]} incompletos.</span>
           ${rw.tone !== "flat" ? html` <button className="btn link why-btn" onClick=${() => setWhy(true)}>¿Por qué?</button>` : null}<//>` : null}
-        ${why ? html`<${RiskWhy} view=${view} onClose=${() => setWhy(false)} />` : null}
+        ${why ? html`<${RiskWhy} view=${view} onClose=${() => setWhy(false)} onDriver=${onDriver} />` : null}
         <${ChartView} height=${320} config=${config} />`
       : html`<div className="empty">Elegí al menos una categoría para ver su evolución.</div>`}
     <//>`;
@@ -878,6 +878,10 @@
   }
 
   // ======================= DETALLES =======================
+  function smallBars(s, key, label, unit) {
+    return { type: "bar", data: { labels: s.map(x => x.label), datasets: [{ label, data: s.map(x => GI.round(x[key] || 0, 0)), backgroundColor: s.map(x => (x.partial ? "#9ec5f4" : "#2a78d6")), borderRadius: 3 }] },
+      options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, title: { display: true, text: unit } } } } };
+  }
   function smallLine(s, key, label, unit, dec) {
     return { type: "line", data: { labels: s.map(x => x.label), datasets: [{ label, data: s.map(x => (x[key] == null ? null : GI.round(x[key], dec))),
       borderColor: "#2a78d6", backgroundColor: "#2a78d61f", fill: true, tension: 0.3, spanGaps: true }] },
@@ -934,7 +938,8 @@
     <//>`;
   }
 
-  function DriverDetail({ view, id, onClose }) {
+  function DriverDetail({ view, id, onClose, mode }) {
+    const safety = mode === "safety";
     const r = view.dRows.find(x => x.id === id);
     const s = useMemo(() => {
       const m = view.model.drvCells.get(id) || new Map();
@@ -960,6 +965,10 @@
     }, [id, view]);
     if (!r) return null;
     const lastFull = [...s].reverse().find(b => !b.partial && b.km >= 50);
+    const driven = s.filter(b => !b.partial && b.km > 0);
+    const kmAvg = driven.length ? driven.reduce((a, b) => a + b.km, 0) / driven.length : 0;
+    // en la ficha de seguridad se marcan los hitos en los gráficos
+    const withMarks = cfg => (safety ? { ...cfg, options: { ...cfg.options, plugins: { ...cfg.options.plugins, milestones: { items: GI.milestoneMarks(view.milestones, view.series, view.gran) } } } } : cfg);
     const evRows = Object.entries(r.evByCat).filter(([k]) => (GI.CATEGORY_BY_KEY[k] || {}).kind === "riesgo").map(([k, n]) => ({ k, n }));
     return html`<${Modal} title=${r.name} onClose=${onClose} wide>
       <div className="readouts compact">
@@ -968,12 +977,17 @@
           sub=${lastFull ? html`<span>${lastFull.label}: <b>${n2(lastFull.risk)}</b></span>` : null}
           hint="Índice de riesgo promedio de todo el período cargado (infracciones ponderadas ÷ km × 100). Abajo, el valor real del último período completo." />
         <${Kpi} label="Infracciones" value=${n0(r.events)} />
-        <${Kpi} label="Ralentí" value=${n1(r.idleH)} unit="h" sub=${GI.fmtPct(r.idlePct) + " del tiempo"} />
-        <${Kpi} label="Litros en ralentí" value=${n0(r.idleL)} unit="L" />
+        ${safety
+          ? html`<${Kpi} label=${"Km por " + GRAN_WORD[view.gran]} value=${n0(kmAvg)} sub=${html`<span>promedio ${{ day: "de los días", week: "de las semanas", month: "de los meses" }[view.gran]} con manejo</span>`} />
+            <${Kpi} label=${{ day: "Último día completo", week: "Última semana completa", month: "Último mes completo" }[view.gran]} value=${lastFull ? n0(lastFull.km) : "–"} unit="km" sub=${lastFull ? html`<span>${lastFull.label}</span>` : null} />`
+          : html`<${Kpi} label="Ralentí" value=${n1(r.idleH)} unit="h" sub=${GI.fmtPct(r.idlePct) + " del tiempo"} />
+            <${Kpi} label="Litros en ralentí" value=${n0(r.idleL)} unit="L" />`}
       </div>
       <div className="grid-2">
-        <div><h3>Infracciones cada 100 km</h3><${ChartView} height=${200} config=${smallLine(s, "risk", "Riesgo", "pts/100 km", 2)} /></div>
-        <div><h3>Ralentí</h3><${ChartView} height=${200} config=${smallLine(s, "idlePct", "Ralentí", "% del tiempo", 1)} /></div>
+        <div><h3>Infracciones cada 100 km</h3><${ChartView} height=${200} config=${withMarks(smallLine(s, "risk", "Riesgo", "pts/100 km", 2))} /></div>
+        ${safety
+          ? html`<div><h3>Km recorridos</h3><${ChartView} height=${200} config=${withMarks(smallBars(s, "km", "Km", "km"))} /></div>`
+          : html`<div><h3>Ralentí</h3><${ChartView} height=${200} config=${smallLine(s, "idlePct", "Ralentí", "% del tiempo", 1)} /></div>`}
         <div><h3>Por categoría</h3><${CatEventsTable} view=${view} rows=${evRows} filter=${id === "_unknown" ? { deviceIds: [...view.ids] } : { driverIds: [id] }} /></div>
         <div><h3>Vehículos que manejó</h3><${DataTable} rows=${vehicles} rowKey=${x => x.name} defaultSort=${{ key: "km", dir: "desc" }} columns=${[
           { key: "name", label: "Vehículo" }, { key: "km", label: "Km", align: "num", fmt: x => n0(x.km) }, { key: "n", label: "Infracciones", align: "num" }]} /></div>

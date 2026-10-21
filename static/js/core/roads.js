@@ -440,6 +440,7 @@
       return x;
     };
     // conductor de cada vehículo en cada hora (viaje que la cubre)
+    const exclUnknown = !!(model.settings && model.settings.drivers && model.settings.drivers.exclude_unknown);
     const drvCache = new Map();
     const driverAt = (dev, t0) => {
       const k = dev + "|" + t0;
@@ -461,6 +462,7 @@
         const bucket = dev === "@p" || dev === "@l";
         if (!bucket && !ids.has(dev)) continue;
         const drv = bucket ? dev : driverAt(dev, d0 + row[2] * 3600000);
+        if (exclUnknown && drv === "_unknown") continue;
         const km = row[3] * S;
         drvKmAll.set(drv, (drvKmAll.get(drv) || 0) + km);
         totKm += km;
@@ -483,6 +485,8 @@
         if (!bucket && !ids.has(dev)) continue;
         const tid = built.byCell.get(cell);
         if (!tid) continue;
+        const drv = bucket ? dev : driverAt(dev, d0 + h * 3600000);
+        if (exclUnknown && drv === "_unknown") continue;
         const x = get(tid);
         const km = km0 * S, sec = sec0 * S;
         x.km[h] += km; x.sec[h] += sec; x.sv[h] += sv0 * S; x.sv2[h] += sv20 * S; x.sg[h] += sg * S;
@@ -490,7 +494,6 @@
         const heavy = bucket ? dev === "@p" : isHeavy(model, dev);
         const hh = x.hist[heavy ? "p" : "l"][h];
         for (let i = 0; i < HBINS; i++) hh[i] += (hist[i] || 0) * S;
-        const drv = bucket ? dev : driverAt(dev, d0 + h * 3600000);
         x.exp[h] += km * rateOf(drv);
         if (inSel(h)) x.drvKm.set(drv, (x.drvKm.get(drv) || 0) + km);
       }
