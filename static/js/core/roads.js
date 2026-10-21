@@ -53,8 +53,9 @@
   function cellCenter(key) { const [[a, b], [c, d]] = cellBounds(key); return [(a + c) / 2, (b + d) / 2]; }
 
   // ---------- Muestreo ----------
-  function dayWindows(dk, every) {
+  function dayWindows(dk, every, win) {
     every = every || EVERY_MIN;
+    const WIN_MIN = win || 5;
     const d0 = GI.parseDayKey(dk).getTime();
     const off = (GI.parseDayKey(dk).getDate() * 7) % (every - WIN_MIN);
     const out = [];
@@ -87,6 +88,8 @@
         const km = haversineKm(p[1], p[2], q[1], q[2]);
         if ((km / dt) * 3600 > MAX_KMH) { recent = []; continue; }
         const sp = (p[3] + q[3]) / 2;
+        // punto GPS real de cada celda (para GetAddresses: uno interpolado puede caer fuera del camino)
+        if (ctx.rep) { const cq = cellOf(q[1], q[2]); if (!ctx.rep.has(cq) && q[3] > 3) ctx.rep.set(cq, [GI.round(q[1], 5), GI.round(q[2], 5)]); }
         // anda y para: la velocidad cae ≥ 25 km/h respecto del máximo de los últimos 30 s
         recent.push([p[0], p[3]]);
         while (recent.length && q[0] - recent[0][0] > 30000) recent.shift();
@@ -102,7 +105,6 @@
           const f = (st + 0.5) / steps;
           const la = p[1] + (q[1] - p[1]) * f, ln = p[2] + (q[2] - p[2]) * f;
           const cell = cellOf(la, ln);
-          if (ctx.rep && !ctx.rep.has(cell)) ctx.rep.set(cell, [GI.round(la, 5), GI.round(ln, 5)]);
           const k = bk + "|" + cell + "|" + h;
           let row = acc.get(k);
           if (!row) acc.set(k, (row = [bk, cell, h, 0, 0, 0, 0, new Array(HBINS).fill(0), 0, 0, 0, 0]));
@@ -158,7 +160,7 @@
   }
 
   async function fetchDay(api, dk, o, onWindow) {
-    const wins = dayWindows(dk, o.every).filter(w => w[0] < Date.now());
+    const wins = dayWindows(dk, o.every, o.win).filter(w => w[0] < Date.now());
     const d0 = GI.parseDayKey(dk).getTime(), d1 = d0 + 24 * 3600000;
     let limitAt = null;
     if (o.activeDevs && o.posted !== false) {
@@ -193,7 +195,7 @@
       if (di == null) { di = devs.length; devs.push(r[0]); devIdx.set(r[0], di); }
       rows.push([di, r[1], r[2], GI.round(r[3], 3), Math.round(r[4]), Math.round(r[5]), Math.round(r[6]), r[7].map(Math.round), r[8], Math.round(r[9]), Math.round(r[10]), Math.round(r[11])]);
     }
-    return { devs, rows, rep: [...rep], points, windows: wins.length, scale: (o.every || EVERY_MIN) / WIN_MIN, bucketed: !!o.scopeKey, posted: !!limitAt };
+    return { devs, rows, rep: [...rep], points, windows: wins.length, scale: (o.every || EVERY_MIN) / (o.win || WIN_MIN), bucketed: !!o.scopeKey, posted: !!limitAt };
   }
 
   function validEntry(e, dk) {
@@ -215,16 +217,19 @@
       for (const id of ids) { const ts = model.tripsByDevice.get(id) || []; if (ts.some(t => t.e >= d0 && t.s < d1)) out.push(id); }
       return out;
     };
-    if (model.devices.length <= BIG_FLEET()) return { every: EVERY_MIN, scopeKey: null, bucketOf: null, heavyOf, activeDevs };
+    // Flotas chicas (≤ 150 vehículos): 15 min de cada media hora (la mitad del
+    // GPS), así hay datos suficientes por tramo; medianas: 5 de cada 30.
+    if (model.devices.length <= 150) return { every: EVERY_MIN, win: 15, scopeKey: null, bucketOf: null, heavyOf, activeDevs };
+    if (model.devices.length <= BIG_FLEET()) return { every: EVERY_MIN, win: 5, scopeKey: null, bucketOf: null, heavyOf, activeDevs };
     const sorted = [...ids].sort();
     let hsh = 0;
     for (const id of sorted) for (let i = 0; i < id.length; i++) hsh = (hsh * 31 + id.charCodeAt(i)) | 0;
-    return { every: 60, scopeKey: sorted.length + "." + (hsh >>> 0).toString(36), bucketOf: id => (ids.has(id) ? (heavyOf(id) ? "@p" : "@l") : null), heavyOf, activeDevs, posted: false };
+    return { every: 60, win: 5, scopeKey: sorted.length + "." + (hsh >>> 0).toString(36), bucketOf: id => (ids.has(id) ? (heavyOf(id) ? "@p" : "@l") : null), heavyOf, activeDevs, posted: false };
   }
 
   async function loadRoadDays(api, database, dayKeys, onProgress, plan) {
     const o = plan || { every: EVERY_MIN };
-    const key = dk => database + "|" + CACHE_VER + "|" + (o.scopeKey ? "s" + o.scopeKey + "|" + o.every : "all") + "|" + dk;
+    const key = dk => database + "|" + CACHE_VER + "|" + (o.scopeKey ? "s" + o.scopeKey + "|" + o.every : "all") + "|w" + (o.win || WIN_MIN) + "|" + dk;
     const cached = await GI._idbGetMany("days", dayKeys.map(key));
     const out = new Map(), missing = [];
     for (const dk of dayKeys) { const e = cached.get(key(dk)); if (validEntry(e, dk)) out.set(dk, e.v); else missing.push(dk); }
@@ -243,7 +248,7 @@
   // GetAddresses sobre un punto GPS real de cada celda (no el centro, que
   // puede caer fuera del camino). Se guarda por celda 30 días.
   async function loadCellAddresses(api, database, reps, onProgress) {
-    const key = c => "cad|" + database + "|" + c;
+    const key = c => "cad2|" + database + "|" + c;
     const cells = [...reps.keys()];
     const cached = await GI._idbGetMany("locs", cells.map(key));
     const out = new Map(), missing = [];
@@ -298,7 +303,40 @@
 
   // cellsKm: Map(celda → km de todas las horas); addr: Map(celda → dirección);
   // zoneNames: Map(id → nombre). Devuelve { tramos: Map(id → tramo), byCell }.
-  function buildTramos(cellsKm, addr, zoneNames) {
+  // opts.zones: geocercas con puntos (las del catálogo) para ubicar por
+  // polígono las celdas cuya dirección no trajo zonas de control;
+  // opts.reps: punto GPS real de cada celda.
+  function buildTramos(cellsKm, addr, zoneNames, opts) {
+    const o = opts || {};
+    zoneNames = new Map(zoneNames);
+    const ctrlZones = (o.zones || []).filter(z => isControlName(z.name) && z.pts && z.pts.length >= 3);
+    for (const z of ctrlZones) if (!zoneNames.has(z.id)) zoneNames.set(z.id, z.name);
+    if (ctrlZones.length && o.reps) {
+      // zonas por polígono (todas las que contienen el punto, no solo la más chica)
+      // dentro del polígono o a menos de 150 m del borde (las geocercas de ruta son angostas)
+      const TOL = 0.15, pad = 0.002;
+      const nearEdge = (lng, lat, pts) => {
+        const kx = 111.32 * Math.cos(lat * rad), ky = 110.57;
+        for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+          const ax = (pts[j][0] - lng) * kx, ay = (pts[j][1] - lat) * ky, bx = (pts[i][0] - lng) * kx, by = (pts[i][1] - lat) * ky;
+          const dx = bx - ax, dy = by - ay, L2 = dx * dx + dy * dy;
+          const t = L2 > 0 ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / L2)) : 0;
+          if (Math.hypot(ax + t * dx, ay + t * dy) <= TOL) return true;
+        }
+        return false;
+      };
+      const inZones = (lng, lat) => ctrlZones.filter(z => lng >= z.bbox[0] - pad && lng <= z.bbox[2] + pad && lat >= z.bbox[1] - pad && lat <= z.bbox[3] + pad && (GI.pointInPolygon(lng, lat, z.pts) || nearEdge(lng, lat, z.pts))).map(z => z.id);
+      const out = new Map(addr);
+      for (const c of cellsKm.keys()) {
+        const p = o.reps.get(c), a = out.get(c);
+        if (!p) continue;
+        const has = a && a.zones.some(z => isControlName(zoneNames.get(z)));
+        if (has) continue;
+        const zs = inZones(p[1], p[0]);
+        if (zs.length) out.set(c, Object.assign({ city: "", street: "", num: "", zones: [] }, a || {}, { zones: [...((a && a.zones) || []), ...zs] }));
+      }
+      addr = out;
+    }
     // frecuencia de cada geocerca de control (la más específica gana)
     const freq = new Map();
     for (const c of cellsKm.keys()) { const a = addr.get(c); if (a) for (const z of a.zones) if (isControlName(zoneNames.get(z))) freq.set(z, (freq.get(z) || 0) + 1); }
@@ -349,6 +387,29 @@
       for (const c of t.cells) { const [a, b] = cellCenter(c); la += a; ln += b; }
       t.center = [la / t.cells.length, ln / t.cells.length];
       delete t.streets;
+    }
+    // Rutas sin geocerca de control: un único tramo por ruta y localidad
+    // puede tener decenas de km. Se parte en sectores de ~10 km a lo largo.
+    for (const t of [...tramos.values()]) {
+      if (t.kind !== "ruta" || t.cells.length <= 12) continue;
+      const pts = t.cells.map(c => [c, cellCenter(c)]);
+      let mx = 0, my = 0;
+      for (const [, p] of pts) { mx += p[1]; my += p[0]; }
+      mx /= pts.length; my /= pts.length;
+      let sxx = 0, syy = 0, sxy = 0;
+      for (const [, p] of pts) { const dx = p[1] - mx, dy = p[0] - my; sxx += dx * dx; syy += dy * dy; sxy += dx * dy; }
+      const ang = 0.5 * Math.atan2(2 * sxy, sxx - syy);
+      pts.sort((a, b) => ((a[1][1] - mx) * Math.cos(ang) + (a[1][0] - my) * Math.sin(ang)) - ((b[1][1] - mx) * Math.cos(ang) + (b[1][0] - my) * Math.sin(ang)));
+      if (pts[0][1][0] > pts[pts.length - 1][1][0]) pts.reverse();
+      const n = Math.ceil(pts.length / 10);
+      tramos.delete(t.id);
+      for (let k = 0; k < n; k++) {
+        const part = pts.slice(Math.floor((k * pts.length) / n), Math.floor(((k + 1) * pts.length) / n)).map(x => x[0]);
+        const id = t.id + "#" + (k + 1);
+        let la = 0, ln = 0;
+        for (const c of part) { const [a, b] = cellCenter(c); la += a; ln += b; byCell.set(c, id); }
+        tramos.set(id, Object.assign({}, t, { id, cells: part, name: t.name + " · sector " + (k + 1) + " de " + n, center: [la / part.length, ln / part.length] }));
+      }
     }
     return { tramos, byCell };
   }

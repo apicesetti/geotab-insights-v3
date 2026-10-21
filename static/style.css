@@ -1049,3 +1049,6 @@
 #gi3-root .rd-matrix tr.on th { box-shadow: inset 3px 0 0 #18212b; }
 #gi3-root .rd-matrix tbody tr { cursor: pointer; }
 #gi3-root .rd-cell { display: block; padding: 6px 4px; border-radius: 4px; font-weight: 600; font-variant-numeric: tabular-nums; }
+#gi3-root .rd-nd { font-weight: 400; font-size: 12px; color: var(--text-2); }
+#gi3-root .rd-matrix tr.rd-total th { font-weight: 700; }
+#gi3-root .rd-matrix tr.rd-total td, #gi3-root .rd-matrix tr.rd-total th { border-bottom: 2px solid var(--rule); padding-bottom: 6px; }

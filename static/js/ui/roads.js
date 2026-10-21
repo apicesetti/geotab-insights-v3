@@ -68,7 +68,7 @@
   }
 
   function RoadsTab({ view, api, database }) {
-    const [nDays, setNDays] = useState(7);
+    const [nDays, setNDays] = useState(14);
     const [franja, setFranja] = useState("all");
     const [lens, setLens] = useState("camino");
     const [route, setRoute] = useState("");
@@ -102,7 +102,7 @@
         let names = zoneNames;
         const missingZone = [...addr.values()].some(a => a.zones.some(z => !names.has(z)));
         if (missingZone) names = await GI.loadZoneNames(api, database, true);
-        const built = GI.buildTramos(cellsKm, addr, names);
+        const built = GI.buildTramos(cellsKm, addr, names, { zones: view.model.cat.zones || [], reps });
         const dset = new Set(dayKeys);
         const all = view.events.filter(e => e.w > 0 && view.ids.has(e.d) && dset.has(GI.dayKey(e.t))).sort((a, b) => a.t - b.t);
         const step = all.length / EV_CAP;
@@ -130,9 +130,9 @@
 
     return html`<div className="rd">
       <${Panel} title="Corredores"
-        hint="Separa dos cosas: el RIESGO DEL CAMINO (lo que pasa alrededor: tránsito, frenadas y maniobras de otros, noche), medido comparando a cada conductor contra sí mismo; y la CONDUCTA DE LA FLOTA (excesos, celular, cinturón…) en cada tramo. Los tramos salen de la dirección de Geotab (GetAddresses): en ruta, la geocerca de control que los contiene; en zona urbana, la calle y la ciudad. Se muestrea el GPS de toda la flota (5 minutos de cada media hora) y se guarda por día en este navegador."
+        hint="Separa dos cosas: el RIESGO DEL CAMINO (lo que pasa alrededor: tránsito, frenadas y maniobras de otros, noche), medido comparando a cada conductor contra sí mismo; y la CONDUCTA DE LA FLOTA (excesos, celular, cinturón…) en cada tramo. Los tramos salen de la dirección de Geotab (GetAddresses): en ruta, la geocerca de control que los contiene; en zona urbana, la calle y la ciudad. Se muestrea el GPS de toda la flota (en flotas chicas, la mitad del tiempo; en grandes, 5 minutos de cada media hora u hora) y se guarda por día en este navegador."
         actions=${html`<select value=${nDays} onChange=${e => setNDays(+e.target.value)} aria-label="Días a analizar">
-            ${[7, 14].map(n => html`<option key=${n} value=${n}>Últimos ${n} días</option>`)}
+            ${[7, 14, 30].map(n => html`<option key=${n} value=${n}>Últimos ${n} días</option>`)}
           </select>
           <button className="btn primary" disabled=${progress != null || !dayKeys.length} onClick=${load}>${data ? "Actualizar" : "Analizar corredores"}</button>`}>
         ${progress ? html`<${GI.Progress} value=${progress.p} label=${progress.label} />` : null}
@@ -179,7 +179,7 @@
       </div>` : null}
 
       ${selT ? html`<${TramoDetail} x=${selT} rm=${rm} lens=${lens} model=${view.model} onClose=${() => setSel(null)} />` : null}
-      ${rm && shownRoute ? html`<${RouteView} r=${shownRoute} lens=${lens} sel=${sel} onPick=${setSel} explicit=${!!curRoute} />` : null}
+      ${rm && shownRoute ? html`<${RouteView} r=${shownRoute} lens=${lens} sel=${sel} onPick=${setSel} explicit=${!!curRoute} nDays=${rm.nDays} />` : null}
       ${rm ? html`<p className="muted small">${n0(data.points)} puntos GPS de muestra · ${n0(rm.envEvents)} eventos de interacción y ${n0(data.all.length)} infracciones en el período${data.evScale > 1 ? " (se ubicó una muestra pareja de " + n0(data.evs.length) + ")" : ""} · velocidad libre = p85 del tramo · ${rm.posted ? "límites de la vía: GetPostedRoadSpeedsForDevice" : "límites: geocercas"}.</p>` : null}
     </div>`;
   }
@@ -228,7 +228,7 @@
     </section>`;
   }
 
-  function RouteView({ r, lens, sel, onPick, explicit }) {
+  function RouteView({ r, lens, sel, onPick, explicit, nDays }) {
     const total = r.tramos.reduce((s, x) => s + x.cells.length, 0) || 1;
     return html`<${Panel} title=${(explicit ? "" : "Ruta con más tránsito: ") + r.name}
       sub=${n0(r.tramos.length) + " tramos en el orden de la ruta · " + n0(r.kmDay) + " km por día de la flota"}
@@ -236,14 +236,16 @@
       <div className="rd-strip" role="list">
         ${r.tramos.map(x => { const lv = levelOf(x, lens); return html`<button key=${x.id} role="listitem" className=${"rd-seg" + (sel === x.id ? " on" : "")} style=${{ flexGrow: x.cells.length, background: LV[lv].color }} title=${x.name + " · " + LV[lv].label} aria-label=${x.name + ": " + LV[lv].label} onClick=${() => onPick(x.id)}>${x.limit && x.cells.length / total > 0.04 ? x.limit : ""}</button>`; })}
       </div>
+      ${!r.franjas.some(f => f.idx != null) ? html`<${Info} tone="warn">Con ${n0(nDays)} días todavía no hay suficientes frenadas, maniobras y eventos de distancia en ${r.name} para comparar franjas (hacen falta al menos 3 esperables por tramo y franja). Probá con 30 días; mientras tanto, cada celda muestra cuánto se circula.<//>` : null}
       ${r.best && r.worst && r.best.key !== r.worst.key ? html`<div className="verdict-line"><span className="vtag">Horario</span><span>En ${r.name} el riesgo del camino es menor de <b>${r.best.label}</b> (${fx(r.best.idx)}) y mayor de <b>${r.worst.label}</b> (${fx(r.worst.idx)}).</span></div>` : null}
       <div className="rd-matrix-wrap">
         <table className="rd-matrix">
           <thead><tr><th scope="col">Tramo</th><th scope="col">Límite</th>${GI.ROAD_FRANJAS.map(f => html`<th key=${f.key} scope="col">${f.label}</th>`)}<th scope="col">Conducta</th></tr></thead>
-          <tbody>${r.tramos.map(x => html`<tr key=${x.id} className=${sel === x.id ? "on" : ""} onClick=${() => onPick(x.id)}>
+          <tbody><tr className="rd-total"><th scope="row">Toda la ruta</th><td></td>${r.franjas.map(f => { const lv = f.idx == null ? "nd" : f.idx >= 1.5 ? "cr" : f.idx >= 1.2 ? "at" : "ok"; return html`<td key=${f.key}><span className="rd-cell" title=${n0(f.km / nDays) + " km por día de la flota"} style=${{ background: LV[lv].bg, color: LV[lv].fg }}>${f.idx == null ? html`<span className="rd-nd">${f.km > 0 ? n0(f.km / nDays) + " km/día" : "sin tránsito"}</span>` : fx(f.idx)}</span></td>`; })}<td></td></tr>
+          ${r.tramos.map(x => html`<tr key=${x.id} className=${sel === x.id ? "on" : ""} onClick=${() => onPick(x.id)}>
             <th scope="row"><a href="#" onClick=${e => { e.preventDefault(); onPick(x.id); }}>${x.name}</a></th>
             <td>${x.limit ? x.limit + " km/h" : "–"}</td>
-            ${x.franjas.map(f => html`<td key=${f.key}><span className="rd-cell" style=${{ background: LV[f.envLevel].bg, color: LV[f.envLevel].fg }}>${f.envConf === "baja" ? "–" : fx(f.envIdx)}</span></td>`)}
+            ${x.franjas.map(f => html`<td key=${f.key}><span className="rd-cell" title=${n0(f.km / nDays) + " km por día de la flota · " + n1(f.obs) + " eventos de interacción (esperables " + n1(f.exp) + ")"} style=${{ background: LV[f.envLevel].bg, color: LV[f.envLevel].fg }}>${f.envConf === "baja" ? html`<span className="rd-nd">${f.km > 0 ? n0(f.km / nDays) + " km/día" : "sin tránsito"}</span>` : fx(f.envIdx)}</span></td>`)}
             <td>${pill(x.condLevel)}</td>
           </tr>`)}</tbody>
         </table>
