@@ -1124,3 +1124,16 @@
   #gi3-root .ft-now-row { grid-template-columns: 1fr; }
   #gi3-root .ft-now-meters { grid-template-columns: 1fr; }
 }
+#gi3-root .ft-fi { display: inline-block; min-width: 30px; text-align: center; font-weight: 700; font-size: 12.5px; padding: 0 6px; border-radius: 9px; font-variant-numeric: tabular-nums; }
+#gi3-root .ft-fi-bajo { background: var(--sunken); color: var(--text); }
+#gi3-root .ft-fi-moderado { background: var(--marking-soft); color: var(--marking-ink); }
+#gi3-root .ft-fi-alto { background: #fbe1d4; color: #a83a0c; }
+#gi3-root .ft-fi-muy-alto { background: #a3200f; color: #fff; }
+#gi3-root .ft-name { padding: 0; font-weight: 600; text-align: left; }
+#gi3-root .ft-story { font-size: 14px; line-height: 1.5; margin: 4px 0 10px; }
+#gi3-root .ft-tl-lane { font-size: 12px; fill: #4f5866; font-weight: 600; }
+#gi3-root .ft-tl-legend i.hatch { background: repeating-linear-gradient(45deg, #b8c0cc 0 2px, #f2f4f6 2px 5px); }
+#gi3-root .ft-sub-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 12px; }
+#gi3-root .ft-sub-head h3 { margin: 0; }
+#gi3-root .ft-now-meters { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+@media (max-width: 900px) { #gi3-root .ft-now-meters { grid-template-columns: 1fr 1fr; } }

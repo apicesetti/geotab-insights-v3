@@ -309,6 +309,16 @@ assert.strictEqual(GI.durationToHours("00:11:42.0300000").toFixed(4), (11 / 60 +
   assert.ok(Math.abs(drive.v - 6.6) < 0.01 && drive.level === "ok");
   assert.ok(stint.v > 3.1 && stint.level === "amarillo", "continuo " + stint.v + " " + stint.level);
   assert.ok(drive.at > now && drive.at < now + 4 * 3600000);
+  // índice de fatiga: el turno noche tras descansar de día termina alto; el diurno, bajo
+  assert.ok(night.fiPeak >= 100 && night.signals.some(x => x.key === "indice"), "índice noche " + night.fiPeak);
+  assert.ok(day.fiPeak < 80, "índice día " + day.fiPeak);
+  const oi = GI.openShiftIndex(open[0], shifts.filter(j => j.drv === "L").reverse(), open[0].sim, limits, now);
+  assert.ok(oi.Fnow > 30 && oi.peak >= oi.Fnow);
+  // próximo turno: después de un turno noche, descanso recomendado razonable
+  const fm3 = { settings: { fatigue: {} }, tripsByDevice: new Map([["v1", trips.filter(t => t.s < T(22, 0))]]), events: [] };
+  const r3 = GI.buildShifts(fm3, new Set(["v1"]), null, { now: T(21, 14) });
+  const nx = r3.sims.get("L").next;
+  assert.ok(nx && nx.start > T(21, 14) && nx.needRest >= 8 && nx.needRest <= 30, JSON.stringify(nx && { s: new Date(nx.start).toString(), r: nx.needRest, p: nx.peak }));
   // en vivo: el vehículo está manejando hace 4 min (todavía no hay viaje registrado)
   const lt = GI.liveTrips(fm, trips, [{ d: "v1", r: null, driving: true, since: now - 4 * 60000 }], 36, now);
   const live = GI.buildShifts(fm, new Set(["v1"]), null, { now, tripsByDevice: lt }).shifts.find(j => j.open);

@@ -253,7 +253,13 @@
     return { tone: r > 0 ? "bad" : "good", text: (a >= 0.4 ? "relación marcada: " : "relación débil: ") + dir };
   }
   const fmtDay = dk => GI.parseDayKey(dk).toLocaleDateString("es-AR", { weekday: "short", day: "2-digit", month: "2-digit" });
-  const fmtHour = ms => new Date(ms).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
+  const fmtHour = ms => new Date(ms).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit", hour12: false });
+  // Fecha y hora; si termina otro día, se marca cuántos días después.
+  const fmtWhen = ms => fmtDay(GI.dayKey(ms)) + " " + fmtHour(ms);
+  function fmtEnd(s, e) {
+    const days = Math.round((GI.parseDayKey(GI.dayKey(e)) - GI.parseDayKey(GI.dayKey(s))) / 86400000);
+    return html`${fmtWhen(e)}${days > 0 ? html` <span className="tag-warn" title=${"Termina " + days + (days === 1 ? " día" : " días") + " después de empezar"}>+${days} ${days === 1 ? "día" : "días"}</span>` : ""}`;
+  }
 
   // Detalle de jornada, descanso y fatiga de un conductor.
   function FatigueDetail({ view, d, limits: L, onClose, inline }) {
@@ -304,9 +310,8 @@
       }} />
       <h3 style=${{ marginTop: "14px" }}>Jornadas</h3>
       <${DataTable} rowKey=${r => r.key || r.dk} rows=${worst} limit=${15} defaultSort=${{ key: "flags", dir: "desc" }} columns=${[
-        { key: "dk", label: "Día", value: r => r.s, fmt: r => fmtDay(r.dk) },
-        { key: "s", label: "Inicio", align: "num", fmt: r => fmtHour(r.s) },
-        { key: "e", label: "Fin", align: "num", fmt: r => fmtHour(r.e) },
+        { key: "s", label: "Inicio", fmt: r => fmtWhen(r.s) },
+        { key: "e", label: "Fin", fmt: r => fmtEnd(r.s, r.e) },
         { key: "span", label: "Jornada", align: "num", fmt: r => html`<span className=${r.span > L.max_span ? "delta bad" : ""}>${n1(r.span)} h</span>` },
         { key: "dh", label: "Manejo", align: "num", fmt: r => html`<span className=${r.dh > L.max_drive_day ? "delta bad" : ""}>${n1(r.dh)} h</span>` },
         { key: "restBefore", label: "Descanso previo", align: "num", fmt: r => (r.restBefore == null ? "–" : html`<span className=${r.restBefore < L.min_rest ? "delta bad" : ""}>${n1(r.restBefore)} h</span>`) },
@@ -319,7 +324,7 @@
     return inline ? content : html`<${GI.Modal} title=${d.name + " · jornada y descanso"} onClose=${onClose} wide>${content}<//>`;
   }
 
-  function FatiguePanel({ view, rf, onDriver }) {
+  function FatiguePanel({ view, rf, onDriver, onRow }) {
     const f = rf.fatigue, L = f.limits;
     const [sel, setSel] = useState(null);
     const late = f.buckets.filter(b => b.factor != null && b.from >= 2).sort((a, b) => b.factor - a.factor)[0];
@@ -360,7 +365,7 @@
             ${G.shortRest.days ? html`Días después de un descanso de menos de ${L.min_rest} h: <b>${n0(G.shortRest.days)}</b>, con ${rate(G.shortRest)} pts/100 km, contra ${rate(G.rested)} con descanso completo${f.shortRestVsRested != null ? html`: ${cmp(f.shortRestVsRested, "después de descansar poco")}` : html` — son pocos para sacar conclusiones`}.` : null}
           </span></div>`;
         })()}
-        <${DataTable} rowKey=${r => r.id} rows=${rows} limit=${20} defaultSort=${{ key: "flags", dir: "desc" }} onRowClick=${r => setSel(r)} columns=${[
+        <${DataTable} rowKey=${r => r.id} rows=${rows} limit=${20} defaultSort=${{ key: "flags", dir: "desc" }} onRowClick=${r => (onRow ? onRow(r.id) : setSel(r))} columns=${[
           { key: "name", label: "Conductor" },
           { key: "flags", label: "Fatiga", value: r => r.flags * 1000 + r.longDays + r.shortRests, fmt: r => levelTag(r.level) },
           { key: "days", label: "Días trabajados", align: "num" },
