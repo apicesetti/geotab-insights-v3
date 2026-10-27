@@ -328,7 +328,7 @@
 
   // ======================= SEGURIDAD =======================
   // Evolución de eventos: selector de categorías + 3 vistas.
-  function EventsEvolution({ view, riskCats }) {
+  function EventsEvolution({ view, riskCats, onDriver }) {
     const allKeys = riskCats.map(c => c.key);
     const [sel, setSel] = useState(allKeys);
     const [mode, setMode] = useState("count");
@@ -559,7 +559,7 @@
     const lastValue = r => { const t = driverTrends.get(r.id); const x = t && [...t.ser].reverse().find(p => p.km >= 50); return x ? x.rate : null; };
     if (!GI.riskRuleIds(view.settings.rule_mapping).length) return html`<${Info} tone="warn">Todavía no hay reglas asignadas a categorías de riesgo, así que no hay infracciones para analizar. Un administrador las asigna en Configuración → Reglas y objetivos.<//>`;
     return html`<div>
-      <${EventsEvolution} view=${view} riskCats=${riskCats} />
+      <${EventsEvolution} view=${view} riskCats=${riskCats} onDriver=${onDriver} />
       <${ForecastPanel} view=${view} driverTrends=${driverTrends} />
       <div className="grid-2">
         <${Panel} title="Qué infracciones pesan más" hint="'% del riesgo' es cuánto aporta cada categoría al índice (cantidad × peso). Click en una categoría para ver qué conductores la generan; click en el número de eventos para verlos en MyGeotab.">
