@@ -122,6 +122,28 @@
     <//>`;
   }
 
+  // Tipos de corte entre viajes: parada breve, pausa, pausa larga (espera) y
+  // el descanso entre jornadas (suficiente o corto).
+  const GAP = {
+    breve: { color: "#cfd4db", label: "Parada breve (menos de 15 min, no corta el manejo continuo)", word: "parada" },
+    pausa: { color: "#8dbbee", label: "Pausa (15 min a 1 h)", word: "pausa" },
+    larga: { color: "#b9a3e3", label: "Pausa larga o espera (1 h o más, sigue en jornada)", word: "espera" },
+    ok: { color: "#6cc08f", label: "Descanso entre jornadas", word: "descanso" },
+    dia: { color: "#f2c27a", label: "Descanso casi todo de día antes de un turno noche (se recupera menos)", word: "descanso de día" },
+    corto: { color: "#ec7a6f", label: "Descanso más corto que el mínimo", word: "descanso corto" },
+  };
+  const restKind = (j, fz) => (j.restBefore < fz.min_rest ? "corto" : j.type === "noche" && j.restDayFrac >= 0.7 ? "dia" : "ok");
+  function shiftGaps(j) {
+    const out = [];
+    for (let i = 1; i < j.trips.length; i++) {
+      const a = j.trips[i - 1].e, b = j.trips[i].s;
+      if (b - a < 60000) continue;
+      const k = b - a < 15 * MIN ? "breve" : b - a < H ? "pausa" : "larga";
+      out.push({ a, b, k });
+    }
+    return out;
+  }
+
   // ---------- Línea de tiempo de una jornada ----------
   // Relato en palabras de la jornada (para leer antes del gráfico).
   function shiftStory(j, fz) {
@@ -155,7 +177,9 @@
     const vis = ([a, b]) => b > t0 && a < t1;
     const clipX = (a, b) => [x(Math.max(a, t0)), x(Math.min(b, t1))];
     const cam = j.cam || [], other = (j.events || []).filter(e => !GI.FATIGUE_CAM_CATS.has(e.cat));
-    const pauses = (j.pauses || []);
+    const gaps = shiftGaps(j);
+    const gapKinds = new Set(gaps.map(g => g.k));
+    if (j.prevE != null) gapKinds.add(restKind(j, fz));
     // curva del índice
     let fiPath = "";
     if (j.sim) {
@@ -177,9 +201,10 @@
         <line x1=${L} x2=${R} y1=${Y.ev - 14} y2=${Y.ev - 14} stroke="#e3e7ec" />
         <line x1=${L} x2=${R} y1=${Y.fi0 - 10} y2=${Y.fi0 - 10} stroke="#e3e7ec" />
 
-        ${restFrom != null && restFrom < j.s ? html`<g>
-          <line x1=${x(restFrom)} x2=${x(j.s)} y1=${Y.jor} y2=${Y.jor} stroke="#7b8492" strokeDasharray="4 3" />
-          <text x=${(x(restFrom) + x(j.s)) / 2} y=${Y.jor - 5} textAnchor="middle" className="ft-tl-lab">${(j.prevE < t0 ? "← " : "") + "descanso previo " + dur(j.restBefore)}</text></g>` : null}
+${restFrom != null && restFrom < j.s ? (() => { const g = GAP[restKind(j, fz)]; const w = x(j.s) - x(restFrom); return html`<g>
+          <rect x=${x(restFrom)} y=${Y.drv} width=${Math.max(1, w)} height=${Y.drvH} fill=${g.color} opacity="0.85" />
+          ${w > 70 ? html`<text x=${x(restFrom) + w / 2} y=${Y.drv + 15} textAnchor="middle" className="ft-tl-gap">${(j.prevE < t0 ? "← " : "") + g.word + " " + dur(j.restBefore)}</text>` : null}
+          <title>${"Descanso previo de " + dur(j.restBefore) + " (" + when(j.prevE) + " a " + when(j.s) + ")" + (restKind(j, fz) === "corto" ? " — menos que el mínimo de " + fz.min_rest + " h" : restKind(j, fz) === "dia" ? " — casi todo de día, antes de un turno noche" : "")}</title></g>`; })() : null}
         <g>
           <line x1=${x(j.s)} x2=${x(j.e)} y1=${Y.jor} y2=${Y.jor} stroke="#1f2a37" strokeWidth="2.5" />
           <line x1=${x(j.s)} x2=${x(j.s)} y1=${Y.jor - 6} y2=${Y.axis} stroke="#1f2a37" strokeDasharray="2 3" />
@@ -188,10 +213,10 @@
         </g>
 
         ${j.prevE != null && j.prevE > t0 ? html`<g><rect x=${L} y=${Y.drv} width=${Math.max(2, x(j.prevE) - L)} height=${Y.drvH} rx="3" fill="#c3c9d2" /><text x=${L + 4} y=${Y.drv + Y.drvH + 12} className="ft-tl-lab">jornada anterior</text></g>` : null}
-        ${pauses.map(([a, b], i) => { const w = x(b) - x(a); return html`<g key=${"p" + i}>
-          <rect x=${x(a)} y=${Y.drv + 6} width=${Math.max(1, w)} height=${Y.drvH - 12} fill="url(#ftHatch)" />
-          ${w > 52 ? html`<text x=${x(a) + w / 2} y=${Y.drv + Y.drvH + 12} textAnchor="middle" className="ft-tl-lab">${"pausa " + dur((b - a) / H)}</text>` : null}
-          <title>${"Pausa de " + dur((b - a) / H) + " (" + hm(a) + "–" + hm(b) + ")"}</title></g>`; })}
+        ${gaps.map((g, i) => { const w = x(g.b) - x(g.a), G = GAP[g.k]; return html`<g key=${"p" + i}>
+          <rect x=${x(g.a)} y=${Y.drv} width=${Math.max(1.5, w)} height=${Y.drvH} fill=${G.color} />
+          ${w > 64 ? html`<text x=${x(g.a) + w / 2} y=${Y.drv + 15} textAnchor="middle" className="ft-tl-gap">${G.word + " " + dur((g.b - g.a) / H)}</text>` : null}
+          <title>${G.label.split(" (")[0] + ": " + dur((g.b - g.a) / H) + " (" + hm(g.a) + "–" + hm(g.b) + ")"}</title></g>`; })}
         ${j.trips.map((t, i) => html`<rect key=${"t" + i} x=${x(t.s)} y=${Y.drv} width=${Math.max(2, x(t.e) - x(t.s))} height=${Y.drvH} rx="3" fill=${t.live ? "#2a78d6" : "#1f2a37"}><title>${"Viaje " + hm(t.s) + "–" + hm(t.e) + " · " + dur(t.dh) + " de manejo · " + n0(t.km) + " km"}</title></rect>`)}
 
         ${other.map((e, i) => html`<line key=${"o" + i} x1=${x(e.t)} x2=${x(e.t)} y1=${Y.ev - 6} y2=${Y.ev + 6} stroke="#7b8492" strokeWidth="2"><title>${hm(e.t) + " " + GI.catLabel(e.cat)}</title></line>`)}
@@ -205,11 +230,10 @@
 
         <line x1=${L} x2=${R} y1=${Y.axis} y2=${Y.axis} stroke="#cdd3db" />
         ${ticks.map(t => html`<g key=${"k" + t}><line x1=${x(t)} x2=${x(t)} y1=${Y.axis} y2=${Y.axis + 5} stroke="#7b8492" /><text x=${x(t)} y=${Y.axis + 20} textAnchor="middle" className="ft-tl-tick">${new Date(t).getHours() === 0 ? dshort(t) : String(new Date(t).getHours()).padStart(2, "0") + " h"}</text></g>`)}
-        <defs><pattern id="ftHatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="#f2f4f6" /><line x1="0" y1="0" x2="0" y2="6" stroke="#b8c0cc" strokeWidth="2" /></pattern></defs>
       </svg>
       <div className="ft-tl-legend small">
         <span><i style=${{ background: "#1f2a37" }}></i>Viaje</span>
-        <span><i className="hatch"></i>Pausa dentro de la jornada</span>
+        ${["breve", "pausa", "larga", "ok", "dia", "corto"].filter(k => gapKinds.has(k)).map(k => html`<span key=${k}><i style=${{ background: GAP[k].color }}></i>${k === "corto" ? "Descanso de menos de " + fz.min_rest + " h" : GAP[k].label}</span>`)}
         <span><i style=${{ background: "#eff1f8" }}></i>Noche (00–06 h)</span>
         <span><i style=${{ background: "#dfe3f3" }}></i>02–05 h, cuando más cuesta mantenerse despierto</span>
         <span><i className="tri" style=${{ borderBottomColor: CAM_COLORS.fatiga }}></i>Fatiga</span>
@@ -302,6 +326,16 @@
         a = b;
       }
     }
+    const gsegs = [];
+    for (const j of list) for (const g of shiftGaps(j)) {
+      if (g.k === "breve") continue;
+      for (let a = g.a; a < g.b;) {
+        const d = new Date(a); d.setHours(0, 0, 0, 0);
+        const b = Math.min(g.b, d.getTime() + 86400000), row = dayList.indexOf(d.getTime());
+        if (row >= 0) gsegs.push({ row, h0: (a - d.getTime()) / H, h1: (b - d.getTime()) / H, k: g.k, g });
+        a = b;
+      }
+    }
     const peaks = new Map();
     for (const j of list) { const d = new Date(j.s); d.setHours(0, 0, 0, 0); const r = dayList.indexOf(d.getTime()); if (r >= 0 && j.fiPeak != null) peaks.set(r, Math.max(peaks.get(r) || 0, j.fiPeak)); }
     const cams = [];
@@ -318,6 +352,7 @@
           <line x1=${L} x2=${R} y1=${H0 + (i + 1) * RH} y2=${H0 + (i + 1) * RH} stroke="#f0f2f5" />
           ${peaks.has(i) ? html`<text x=${R + 30} y=${H0 + i * RH + 14} textAnchor="middle" className="ft-tl-lab b" fill=${FI_COLORS[GI.fiLevel(peaks.get(i), fz)]}>${Math.round(peaks.get(i))}</text>` : null}
         </g>`)}
+        ${gsegs.map((s, i) => html`<rect key=${"g" + i} x=${x(s.h0)} y=${H0 + s.row * RH + 7} width=${Math.max(1.5, x(s.h1) - x(s.h0))} height=${RH - 14} fill=${GAP[s.k].color}><title>${GAP[s.k].label.split(" (")[0] + ": " + dur((s.g.b - s.g.a) / H) + " (" + hm(s.g.a) + "–" + hm(s.g.b) + ")"}</title></rect>`)}
         ${segs.map((s, i) => html`<rect key=${"s" + i} x=${x(s.h0)} y=${H0 + s.row * RH + 4} width=${Math.max(1.5, x(s.h1) - x(s.h0))} height=${RH - 8} rx="2" fill=${s.color} style=${{ cursor: "pointer" }} onClick=${() => onCase(s.j)}>
           <title>${"Jornada del " + dshort(s.j.s) + (s.v != null ? " · índice " + Math.round(s.v) : "") + " (click para ver la jornada)"}</title></rect>`)}
         ${cams.map((c, i) => html`<path key=${"c" + i} d=${"M" + x(c.h) + " " + (H0 + c.row * RH + 3) + " l-4 -7 h8 z"} fill=${CAM_COLORS[c.cat] || "#b93a0f"} />`)}
@@ -329,6 +364,9 @@
         <span><i style=${{ background: FI_COLORS.alto }}></i>alto (${fz.fi_high}+)</span>
         <span><i style=${{ background: FI_COLORS["muy alto"] }}></i>muy alto (${fz.fi_high + 20}+)</span>
         <span><i className="tri" style=${{ borderBottomColor: CAM_COLORS.fatiga }}></i>evento de cámara</span>
+        <span>· Cortes dentro de la jornada:</span>
+        <span><i style=${{ background: GAP.pausa.color }}></i>pausa (15 min a 1 h)</span>
+        <span><i style=${{ background: GAP.larga.color }}></i>pausa larga o espera (1 h o más)</span>
       </div>
     </div>`;
   }
