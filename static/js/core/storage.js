@@ -188,6 +188,8 @@
       const users = await api.call("Get", { typeName: "User", search: { name: userName } });
       const u = users && users[0];
       return u ? { id: u.id, name: [u.firstName, u.lastName].filter(Boolean).join(" ") || u.name, isDriver: !!u.isDriver,
+        // MyGeotab: "Impedir que el conductor acceda a los datos compartidos"
+        ownDataOnly: !!u.viewDriversOwnDataOnly,
         everything: (u.securityGroups || []).some(g => GI.idOf(g) === "GroupEverythingSecurityId") } : null;
     } catch (e) { return null; }
   }

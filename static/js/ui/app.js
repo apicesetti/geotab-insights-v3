@@ -172,7 +172,9 @@
     }, [raw, catalogs, settings]);
     const groupsFlat = useMemo(() => (catalogs ? GI.flattenGroups(catalogs.groups) : []), [catalogs]);
 
-    const driverMode = !!(me && me.isDriver && !isAdmin && settings && settings.driver_view !== false);
+    // Solo los conductores con "Impedir que el conductor acceda a los datos compartidos"
+    // activado en MyGeotab ven únicamente su desempeño; el resto ve lo que abarca su alcance.
+    const driverMode = !!(me && me.isDriver && me.ownDataOnly && !isAdmin && settings && settings.driver_view !== false);
     const view = useMemo(() => {
       if (!model) return null;
       try {

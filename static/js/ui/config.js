@@ -345,9 +345,10 @@
     const age = b && b.published_at ? Math.round((Date.now() - new Date(b.published_at).getTime()) / 86400000) : null;
     return html`<div>
       <${Panel} title="Vista de los conductores"
-        hint="Los usuarios marcados como conductor en MyGeotab (y que no son administradores ni editores) ven solo la pestaña 'Mi desempeño' con sus propios datos, comparados con los valores de referencia de la empresa. Nunca ven a otros conductores. Los supervisores (usuarios que no son conductores) ven el add-in completo con los datos que MyGeotab les permite.">
+        hint="Los conductores que en MyGeotab tienen activada la opción 'Impedir que el conductor acceda a los datos compartidos' (y no son administradores ni editores) ven solo la pestaña 'Mi desempeño' con sus propios datos, comparados con los valores de referencia de la empresa. Los conductores sin esa opción, y los supervisores, ven el add-in completo con todo lo que abarca su alcance en MyGeotab.">
         <label className="inline"><input type="checkbox" disabled=${ro} checked=${draft.driver_view !== false} onChange=${e => set(["driver_view"], e.target.checked)} />
-          Los conductores ven solo "Mi desempeño" (sus datos, sin compañeros)</label>
+          Los conductores con "Impedir que el conductor acceda a los datos compartidos" (MyGeotab) ven solo "Mi desempeño"</label>
+        <p className="muted small">Si se desmarca, todos los conductores ven el add-in completo dentro de su alcance, aunque tengan esa opción activada.</p>
       <//>
       <${Panel} title="Valores de referencia de la empresa"
         hint="Promedios de la flota sin nombres de conductores ni vehículos: índice de riesgo, infracciones por categoría, riesgo por hora y de noche, peligrosidad y velocidad de cada recorrido, riesgo según horas de manejo y valores por perfil. Con ellos un conductor o un supervisor se compara con la empresa sin ver los datos de otros. Se publican a mano y se calculan con los datos cargados en este momento.">
