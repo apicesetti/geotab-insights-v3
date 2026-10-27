@@ -366,7 +366,7 @@
 
   // ---------- Fatiga y gravedad ----------
   function FatigueSection({ draft, set, ro }) {
-    const f = Object.assign({ max_drive_day: 9, max_span: 12, min_rest: 8, max_continuous: 4, max_days_row: 6 }, draft.fatigue || {});
+    const f = Object.assign({ max_drive_day: 9, max_span: 12, min_rest: 8, max_continuous: 4, max_days_row: 6, rest_split: 4 }, draft.fatigue || {});
     const sv = Object.assign({ by_duration: false, per_minute: 0.5, max: 3, long_minutes: 1 }, draft.severity || {});
     const num = (path, v, props) => html`<input type="number" disabled=${ro} value=${v} onChange=${e => set(path, +e.target.value)} ...${props || {}} />`;
     return html`<div>
@@ -378,7 +378,9 @@
           <label>Descanso mínimo entre jornadas (h)${num(["fatigue", "min_rest"], f.min_rest, { min: 1, step: 0.5 })}</label>
           <label>Manejo continuo máximo sin pausa de 15 min (h)${num(["fatigue", "max_continuous"], f.max_continuous, { min: 0.5, step: 0.5 })}</label>
           <label>Días seguidos de trabajo como máximo${num(["fatigue", "max_days_row"], f.max_days_row, { min: 1 })}</label>
+          <label>Pausa que cierra una jornada (h)${num(["fatigue", "rest_split"], f.rest_split, { min: 1, step: 0.5 })}</label>
         </div>
+        <p className="muted small">Las jornadas se arman por pausas, no por día calendario: los viajes separados por menos de ${f.rest_split} h son una sola jornada (un turno noche de 19 a 7 h cuenta como una jornada del día en que empezó). Una pausa más larga cierra la jornada y es el descanso previo de la siguiente; si es menor al descanso mínimo, se marca.</p>
       <//>
       <${Panel} title="Gravedad de las infracciones"
         hint="Una infracción que dura más (por ejemplo un exceso de velocidad de 3 minutos) es más peligrosa que una de segundos. Si activás la ponderación, cada minuto de duración suma un porcentaje del peso de la categoría, con un tope. Las infracciones instantáneas (frenadas, giros) no cambian.">

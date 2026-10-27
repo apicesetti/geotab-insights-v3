@@ -303,7 +303,7 @@
           scales: { y: { beginAtZero: true, title: { display: true, text: "pts/100 km" } } } },
       }} />
       <h3 style=${{ marginTop: "14px" }}>Jornadas</h3>
-      <${DataTable} rowKey=${r => r.dk} rows=${worst} limit=${15} defaultSort=${{ key: "flags", dir: "desc" }} columns=${[
+      <${DataTable} rowKey=${r => r.key || r.dk} rows=${worst} limit=${15} defaultSort=${{ key: "flags", dir: "desc" }} columns=${[
         { key: "dk", label: "Día", value: r => r.s, fmt: r => fmtDay(r.dk) },
         { key: "s", label: "Inicio", align: "num", fmt: r => fmtHour(r.s) },
         { key: "e", label: "Fin", align: "num", fmt: r => fmtHour(r.e) },
@@ -325,9 +325,13 @@
     const late = f.buckets.filter(b => b.factor != null && b.from >= 2).sort((a, b) => b.factor - a.factor)[0];
     const minKm = view.settings.drivers.min_km_ranking;
     const rows = f.drivers.filter(d => d.days > 0);
+    // Reglas de fatiga / distracción / salida de carril (cámaras, ADAS) sin categoría: no cuentan.
+    const mapping = view.settings.rule_mapping || {};
+    const unmapped = ((view.model.cat && view.model.cat.rules) || []).filter(r => !mapping[r.id] && !GI.isNoiseRule(r) && ["fatiga", "distraccion", "salida_carril"].includes(GI.suggestCategory(r)));
     return html`<div>
-      <${Panel} title="Riesgo según horas al volante en el día"
-        hint="Índice de riesgo (pts/100 km) según cuántas horas de manejo llevaba el vehículo ese día al momento de cada viaje o infracción. Si sube con las horas, hay un efecto de cansancio.">
+      ${unmapped.length ? html`<${Info} tone="warn">Hay ${unmapped.length} ${unmapped.length === 1 ? "regla" : "reglas"} de fatiga, distracción o salida de carril sin categoría (${unmapped.slice(0, 4).map(r => r.name).join(", ")}${unmapped.length > 4 ? "…" : ""}), así que sus eventos no cuentan acá. Asignalas en Configuración → Reglas y objetivos.<//>` : null}
+      <${Panel} title="Riesgo según horas al volante en la jornada"
+        hint="Índice de riesgo (pts/100 km) según cuántas horas de manejo llevaba el vehículo en la jornada (viajes sin una pausa larga entre medio) al momento de cada viaje o infracción. Si sube con las horas, hay un efecto de cansancio.">
         ${late && late.factor >= 1.3 ? html`<div className="verdict-line bad"><span className="vtag">Fatiga</span><span>Con <b>${fatigueLabel(late)}</b> de manejo acumulado en el día, el riesgo es <b>${factorTxt(late.factor)}</b> el de las primeras 2 horas.</span></div>`
           : html`<div className="verdict-line"><span className="vtag">Sin efecto claro</span><span>El riesgo no sube de forma marcada con las horas de manejo del día.</span></div>`}
         <${ChartView} height=${220} config=${{

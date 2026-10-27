@@ -19,7 +19,12 @@
 
   function riskFactors(model, ids, driverOk, routeIdxMap, fleetIdx) {
     const s = model.settings;
-    const fz = Object.assign({ max_drive_day: 9, max_span: 12, min_rest: 8, max_continuous: 4, max_days_row: 6 }, s.fatigue || {});
+    const fz = Object.assign({ max_drive_day: 9, max_span: 12, min_rest: 8, max_continuous: 4, max_days_row: 6, rest_split: 4 }, s.fatigue || {});
+    // Jornada = viajes separados por pausas de menos de rest_split horas (no por
+    // día calendario: un turno noche de 19 a 7 h es UNA jornada, asignada al
+    // día en que empezó). Una pausa de rest_split h o más cierra la jornada y es
+    // el "descanso previo" de la siguiente.
+    const SPLIT = Math.max(1, Math.min(fz.rest_split || 4, fz.min_rest || 8)) * H;
     const sev = Object.assign({ long_minutes: 1 }, s.severity || {});
     const ok = drv => drv && drv !== "_unknown" && (!driverOk || driverOk(drv));
 
@@ -30,10 +35,10 @@
     const tripCum = new Map(); // viaje -> horas acumuladas al inicio
     for (const [dev, trips] of model.tripsByDevice) {
       if (!ids.has(dev)) continue;
-      let day = null, cum = 0;
+      let lastE = null, cum = 0;
       for (const t of trips) {
-        const dk = GI.dayKey(new Date(t.s));
-        if (dk !== day) { day = dk; cum = 0; }
+        if (lastE == null || t.s - lastE >= SPLIT) cum = 0;
+        lastE = Math.max(lastE || 0, t.e);
         tripCum.set(t, cum);
         const b = fb[bucketOf(cum)];
         b.km += t.km || 0;
@@ -95,24 +100,33 @@
         trips.push({ s: s0, e: t.e, dh: (t.dh || 0) * f, km: (t.km || 0) * f });
         reach = t.e;
       }
+      // Jornadas por pausas (ver SPLIT). Clave única por inicio; dk = día en que empezó.
       const days = new Map();
+      let cur = null;
       for (const t of trips) {
-        const dk = GI.dayKey(new Date(t.s));
-        const d = days.get(dk) || { dk, s: t.s, e: t.e, dh: 0, km: 0, n: 0, w: 0 };
-        d.e = Math.max(d.e, t.e); d.dh += t.dh || 0; d.km += t.km || 0;
-        days.set(dk, d);
+        if (!cur || t.s - cur.e >= SPLIT) {
+          const dk = GI.dayKey(new Date(t.s));
+          let key = dk, k = 2;
+          while (days.has(key)) key = dk + "#" + k++;
+          cur = { key, dk, s: t.s, e: t.e, dh: 0, km: 0, n: 0, w: 0 };
+          days.set(key, cur);
+        }
+        cur.e = Math.max(cur.e, t.e); cur.dh += t.dh || 0; cur.km += t.km || 0;
+        t.jor = cur;
       }
       // Infracciones del conductor por día y por horas acumuladas al volante.
       const cumB = FATIGUE_BUCKETS.map(([a, b]) => ({ from: a, to: b, km: 0, w: 0, n: 0 }));
       const bOf = h => cumB.findIndex(x => h >= x.from && h < x.to);
-      let cday = null, cum = 0;
+      let cjor = null, cum = 0;
       for (const t of trips) {
-        const dk = GI.dayKey(new Date(t.s));
-        if (dk !== cday) { cday = dk; cum = 0; }
+        if (t.jor !== cjor) { cjor = t.jor; cum = 0; }
         t.cum = cum; cumB[bOf(cum)].km += t.km; cum += t.dh;
       }
+      // infracción → jornada que la contiene (o la última que empezó antes)
+      const jlist = [...days.values()].sort((a, b) => a.s - b.s);
+      const jorOf = tm => { let best = null; for (const d of jlist) { if (d.s <= tm + 60000) best = d; else break; } return best && tm <= best.e + SPLIT ? best : null; };
       for (const e of evByDrv.get(id) || []) {
-        const d = days.get(GI.dayKey(new Date(e.t)));
+        const d = jorOf(e.t);
         if (d) { d.n++; d.w += e.w; }
         const i = findTrip(trips, e.t);
         if (i >= 0) { const t = trips[i]; const b = cumB[bOf(t.cum + Math.max(0, Math.min(t.dh, (e.t - t.s) / H)))]; b.n++; b.w += e.w; }
@@ -127,10 +141,11 @@
         if (span > fz.max_span) longSpans++;
         if (prev) {
           const gapDays = Math.round((GI.parseDayKey(d.dk) - GI.parseDayKey(prev.dk)) / 86400000);
-          row = gapDays === 1 ? row + 1 : 1;
+          row = gapDays === 1 ? row + 1 : gapDays === 0 ? row : 1;
           const rest = (d.s - prev.e) / H;
-          if (gapDays <= 1 && rest >= 0) d.restBefore = rest;
-          if (gapDays <= 1 && rest >= 0) {
+          // descanso previo: la pausa real desde el fin de la jornada anterior (si fue hace menos de 2 días)
+          if (rest >= 0 && rest < 48) d.restBefore = rest;
+          if (rest >= 0 && rest < 48) {
             minRest = minRest == null ? rest : Math.min(minRest, rest);
             if (rest < fz.min_rest) shortRests++;
           }

@@ -257,6 +257,26 @@ assert.strictEqual(GI.durationToHours("00:11:42.0300000").toFixed(4), (11 / 60 +
   assert.ok(rc.fleet.effect > 0);
   assert.ok(Math.abs(rc.mix + rc.within - (rc.b - rc.a)) < 1e-9, "mezcla + conducta = cambio total");
 }
+// Jornadas por pausas: turno noche = una jornada; el descanso real es el previo.
+{
+  const T = (d, h, m) => new Date(2026, 9, d, h, m).getTime();
+  const trips = [];
+  const add = (s, e, km) => trips.push({ d: "v1", r: "L", s, e, dh: (e - s) / 3600000 * 0.7, km });
+  // sáb 24 08:39 → dom 25 06:07 con pausas cortas
+  for (let t = T(24, 8, 39); t < T(25, 6, 7); t += 3 * 3600000) add(t, Math.min(t + 2.5 * 3600000, T(25, 6, 7)), 80);
+  // dom 25 19:09 → lun 26 07:52
+  for (let t = T(25, 19, 9); t < T(26, 7, 52); t += 2 * 3600000) add(t, Math.min(t + 1.8 * 3600000, T(26, 7, 52)), 60);
+  // lun 26 19:03 → mar 27 03:45
+  for (let t = T(26, 19, 3); t < T(27, 3, 45); t += 2 * 3600000) add(t, Math.min(t + 1.5 * 3600000, T(27, 3, 45)), 50);
+  const fm = { settings: { fatigue: {}, severity: {} }, tripsByDevice: new Map([["v1", trips]]), events: [], journeys: [], dayKeys: GI.dayRange("2026-10-20", "2026-10-27"), driverName: new Map([["L", "Leandro"]]) };
+  const rf = GI.riskFactors(fm, new Set(["v1"]), null, new Map(), 1);
+  const d = rf.fatigue.drivers.find(x => x.id === "L");
+  const days = d.dayList.map(j => [j.dk, GI.round(j.span, 1), j.restBefore == null ? null : GI.round(j.restBefore, 1)]);
+  assert.strictEqual(days.length, 3, JSON.stringify(days));
+  assert.strictEqual(days[0][0], "2026-10-24"); assert.ok(days[0][1] > 21, "sábado " + days[0][1]);
+  assert.strictEqual(days[1][0], "2026-10-25"); assert.ok(Math.abs(days[1][2] - 13) < 0.2, "descanso dom " + days[1][2]);
+  assert.strictEqual(days[2][0], "2026-10-26"); assert.ok(days[2][2] > 10 && days[2][2] < 12, "descanso lun " + days[2][2]);
+}
 // Corredores v2: riesgo del camino ajustado por conductor.
 {
   const RD = GI._road;
