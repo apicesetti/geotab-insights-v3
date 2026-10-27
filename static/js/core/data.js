@@ -688,7 +688,29 @@
     return out;
   }
 
+  // Fatiga "Ahora": viajes de las últimas horas (sin caché, toda la flota
+  // visible) y estado en vivo de cada vehículo (¿está manejando? ¿desde cuándo?).
+  async function loadRecentTrips(api, hours) {
+    const to = new Date(), from = new Date(to.getTime() - hours * 3600000);
+    const res = await getRangeMulti(api, [{ key: "t", typeName: "Trip", search: {},
+      fields: ["id", "device", "driver", "start", "stop", "distance", "drivingDuration", "idlingDuration", "stopPoint"],
+      dateOf: r => new Date(r.start) }], from, to);
+    const seen = new Set();
+    return compactTrips(res.get("t").filter(r => !seen.has(r.id) && seen.add(r.id)));
+  }
+
+  async function loadDriveStatus(api) {
+    const recs = (await api.call("Get", { typeName: "DeviceStatusInfo",
+      propertySelector: { fields: ["device", "driver", "isDriving", "currentStateDuration", "dateTime"], isIncluded: true } })) || [];
+    return recs.map(r => {
+      const drv = GI.idOf(r.driver);
+      return { d: GI.idOf(r.device), r: drv && drv !== "UnknownDriverId" && drv !== "NoDriverId" ? drv : null,
+        driving: !!r.isDriving, since: Date.now() - GI.durationToHours(r.currentStateDuration) * 3600000, at: r.dateTime ? new Date(r.dateTime).getTime() : null };
+    });
+  }
+
   Object.assign(GI, {
+    loadRecentTrips, loadDriveStatus,
     loadCatalogs, loadZones, loadZoneTypes, loadPeriod, loadFuel, loadEventLocations, loadTrace, clearCache,
     _idbGetMany: idbGetMany, _idbPutMany: idbPutMany,
     _compactTrips: compactTrips, _compactExceptions: compactExceptions, _compactCounter: compactCounter, _loadFuelBoundaries: loadFuelBoundaries, _missingRuns: missingRuns,

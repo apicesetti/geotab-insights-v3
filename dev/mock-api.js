@@ -46,7 +46,7 @@
     ["RuleHarshBrakingId", "Harsh Braking", "Stock"], ["RuleJackrabbitStartsId", "Hard Acceleration", "Stock"],
     ["RuleHarshCorneringId", "Harsh Cornering", "Stock"], ["aPhone", "SRF_Uso del teléfono celular", "Custom"],
     ["aDist", "SRF_Conducción distraída", "Custom"], ["aCol", "SRF_Posible colisión", "Custom"],
-    ["aVel", "Exceso de velocidad - General", "Custom"], ["aRuta", "Desvío de Ruta", "Custom"],
+    ["aVel", "Exceso de velocidad - General", "Custom"], ["aYawn", "SRF_Yawn", "Custom"], ["aLane", "SRF_Lane departure", "Custom"], ["aRuta", "Desvío de Ruta", "Custom"],
     ["aDummy", "Dummy Rule 0HNO1QCE7S0R2:00000087", "Custom"], ["aTest", "[TEST]Dentro TIL-TZ-TASA", "Custom"],
     ["RuleApplicationExceptionId", "**Application Exception", "Stock"],
     ...Array.from({ length: 300 }, (_, i) => ["azs" + i, "Zona " + i, "ZoneStop"]),
@@ -151,6 +151,45 @@
     }
   }
 
+  // Fatiga: un conductor que pasa de turno día a turno noche (descansa de día,
+  // maneja de madrugada, eventos de bostezo / salida de carril agrupados) y
+  // una jornada en curso (empezó hace 7 h, sigue manejando).
+  {
+    const nd = { id: "u50", name: "chofer50", firstName: "Ramón", lastName: "Bertoldi", isDriver: true, viewDriversOwnDataOnly: true, risk: 1, idleBias: 1,
+      driverGroups: [{ id: "gBit" }], companyGroups: [{ id: "gBit" }] };
+    const od = { id: "u51", name: "chofer51", firstName: "Elías", lastName: "Montero", isDriver: true, viewDriversOwnDataOnly: true, risk: 1, idleBias: 1,
+      driverGroups: [{ id: "gCond" }], companyGroups: [{ id: "GroupCompanyId" }] };
+    drivers.push(nd, od);
+    const dev = { id: "b300", name: "BIT-NOC", serialNumber: "G9300", groups: [{ id: "gBit" }, { id: "gPes" }, { id: "GroupDieselId" }], _type: "bitren", _svc: "larga", _l100: 48, _fuel: false, _idleL: 2.6, _drivers: [nd] };
+    const dev2 = { id: "b301", name: "CAM-HOY", serialNumber: "G9301", groups: [{ id: "gPes" }, { id: "GroupDieselId" }], _type: "camion", _svc: "larga", _l100: 33, _fuel: false, _idleL: 2.6, _drivers: [od] };
+    devices.push(dev, dev2);
+    const addTrip = (d, drv, s, hours) => {
+      const km = hours * 72;
+      trips.push({ id: "t" + (++tid), device: { id: d.id }, driver: { id: drv.id }, start: new Date(s).toISOString(), stop: new Date(s + hours * H).toISOString(),
+        distance: km, drivingDuration: dur(hours), idlingDuration: dur(hours * 0.05), stopPoint: { x: zc.zRos[0], y: zc.zRos[1] }, _a: zc.zCam });
+      return s + hours * H;
+    };
+    const addEv = (d, drv, t, rule) => exceptions.push({ id: "e" + (++eid), rule: { id: rule }, device: { id: d.id }, driver: { id: drv.id },
+      activeFrom: new Date(t).toISOString(), activeTo: new Date(t + 5000).toISOString(), duration: "00:00:05", state: "ExceptionEventStateValidId" });
+    for (let day = 24; day >= 1; day--) {
+      const base = new Date(today); base.setDate(base.getDate() - day);
+      if (day >= 15) { // turno día 06–16
+        if (base.getDay() === 0) continue;
+        let t = base.getTime() + 6 * H;
+        t = addTrip(dev, nd, t, 3) + 0.5 * H; t = addTrip(dev, nd, t, 3) + 0.75 * H; addTrip(dev, nd, t, 2.5);
+      } else if (day >= 8) { // turno noche 21–08: tirada larga y madrugada
+        let t = base.getTime() + (day === 14 ? -2 : 21) * H; // el primero, 6 h después del último turno día
+        t = addTrip(dev, nd, t, 4.6) + 0.4 * H; t = addTrip(dev, nd, t, 4) + 0.6 * H; addTrip(dev, nd, t, 1.8);
+        if (day % 2 === 0) { const c = base.getTime() + 27.2 * H; ["aYawn", "aLane", "aYawn", "aYawn"].forEach((r, i) => addEv(dev, nd, c + i * 13 * 60000, r)); }
+      }
+    }
+    // jornada en curso
+    const now = Date.now();
+    let t = now - 7 * H;
+    t = addTrip(dev2, od, t, 3.4) + 0.3 * H; addTrip(dev2, od, t, 3.13); // terminó hace 10 min; vuelve a manejar hace 8 min
+    for (let day = 10; day >= 1; day--) { const base = new Date(today); base.setDate(base.getDate() - day); let x = base.getTime() + 7 * H; x = addTrip(dev2, od, x, 4) + H; addTrip(dev2, od, x, 4); }
+  }
+
   // AddInData persiste en sessionStorage para poder probar admin → conductor recargando la página.
   const addInData = (() => { try { return JSON.parse(sessionStorage.getItem("mockAddInData") || "[]"); } catch (e) { return []; } })();
   const persist = () => { try { sessionStorage.setItem("mockAddInData", JSON.stringify(addInData)); } catch (e) { /* sin storage */ } };
@@ -246,6 +285,8 @@
             break;
           }
           out = status.filter(r => inRange(r.dateTime, s) && inGroups(r.device, s) && (!s.diagnosticSearch || r.diagnostic.id === s.diagnosticSearch.id)); break;
+        case "DeviceStatusInfo": out = devices.map(d => ({ device: { id: d.id }, driver: d.id === "b301" ? { id: "u51" } : "UnknownDriverId",
+          isDriving: d.id === "b301", currentStateDuration: d.id === "b301" ? "00:08:00" : "05:00:00", dateTime: new Date().toISOString() })); break;
         case "AddInData": out = addInData.filter(a => a.addInId === s.addInId); break;
         case "LogRecord": {
           // Sin deviceSearch (muestreo de corredores): un punto cada 10 s de

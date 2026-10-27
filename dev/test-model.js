@@ -3,7 +3,7 @@ const fs = require("fs");
 const vm = require("vm");
 const ctx = { window: {}, console, Date, Math, Map, Set, Number, JSON, Object, Array, String, Promise, setTimeout };
 vm.createContext(ctx);
-for (const f of ["util", "catalog", "model", "exposure", "riskfactors", "hotspots", "roads"]) {
+for (const f of ["util", "catalog", "model", "exposure", "riskfactors", "hotspots", "roads", "fatigue"]) {
   vm.runInContext(fs.readFileSync(require("path").join(__dirname, "../static/js/core", f + ".js"), "utf8"), ctx);
 }
 const GI = ctx.window.GI;
@@ -276,6 +276,43 @@ assert.strictEqual(GI.durationToHours("00:11:42.0300000").toFixed(4), (11 / 60 +
   assert.strictEqual(days[0][0], "2026-10-24"); assert.ok(days[0][1] > 21, "sábado " + days[0][1]);
   assert.strictEqual(days[1][0], "2026-10-25"); assert.ok(Math.abs(days[1][2] - 13) < 0.2, "descanso dom " + days[1][2]);
   assert.strictEqual(days[2][0], "2026-10-26"); assert.ok(days[2][2] > 10 && days[2][2] < 12, "descanso lun " + days[2][2]);
+}
+// Fatiga: señales por jornada, nivel y jornada en curso.
+{
+  const T = (d, h, m) => new Date(2026, 9, d, h, m || 0).getTime();
+  const trips = [];
+  const add = (s, hrs) => { trips.push({ d: "v1", r: "L", s, e: s + hrs * 3600000, dh: hrs, km: hrs * 70 }); return s + hrs * 3600000; };
+  // 19 y 20: turno día 06–16
+  for (const d of [19, 20]) { let t = T(d, 6); t = add(t, 3) + 1800000; add(t, 3); }
+  // 20 → 21: turno noche 21–08 tras 5 h de descanso de día; 4,6 h seguidas; madrugada
+  { let t = T(20, 21); t = add(t, 4.6) + 0.4 * 3600000; t = add(t, 4) + 0.6 * 3600000; add(t, 1.8); }
+  const ev = [];
+  [0, 12, 25, 40].forEach((m, i) => ev.push({ d: "v1", drv: "L", t: T(21, 3) + m * 60000, cat: i % 2 ? "salida_carril" : "fatiga", w: 1.5 }));
+  // en curso: empezó hace 7 h
+  const now = T(26, 15);
+  { let t = now - 7 * 3600000; t = add(t, 3.4) + 0.3 * 3600000; add(t, 3.2); }
+  const fm = { settings: { fatigue: {} }, tripsByDevice: new Map([["v1", trips]]), events: ev };
+  const { shifts, limits } = GI.buildShifts(fm, new Set(["v1"]), null, { now });
+  const night = shifts.find(j => j.dk === "2026-10-20" && j.type === "noche");
+  assert.ok(night, JSON.stringify(shifts.map(j => [j.dk, j.type])));
+  const keys = night.signals.map(x => x.key).sort().join(",");
+  for (const k of ["camara", "cambio", "continuo", "descanso", "madrugada", "manejo"]) assert.ok(keys.includes(k), k + " en " + keys);
+  assert.strictEqual(night.level, "alto");
+  assert.strictEqual(night.camCluster, 4);
+  assert.ok(Math.abs(night.low - 3) < 0.01, "02–05 " + night.low);
+  const day = shifts.find(j => j.dk === "2026-10-19");
+  assert.strictEqual(day.level, "bajo", JSON.stringify(day.signals));
+  const open = shifts.filter(j => j.open);
+  assert.strictEqual(open.length, 1);
+  const pr = GI.shiftProgress(open[0], limits, now);
+  const drive = pr.items.find(x => x.key === "drive"), stint = pr.items.find(x => x.key === "stint");
+  assert.ok(Math.abs(drive.v - 6.6) < 0.01 && drive.level === "ok");
+  assert.ok(stint.v > 3.1 && stint.level === "amarillo", "continuo " + stint.v + " " + stint.level);
+  assert.ok(drive.at > now && drive.at < now + 4 * 3600000);
+  // en vivo: el vehículo está manejando hace 4 min (todavía no hay viaje registrado)
+  const lt = GI.liveTrips(fm, trips, [{ d: "v1", r: null, driving: true, since: now - 4 * 60000 }], 36, now);
+  const live = GI.buildShifts(fm, new Set(["v1"]), null, { now, tripsByDevice: lt }).shifts.find(j => j.open);
+  assert.ok(live.live && GI.shiftProgress(live, limits, now).driving);
 }
 // Corredores v2: riesgo del camino ajustado por conductor.
 {

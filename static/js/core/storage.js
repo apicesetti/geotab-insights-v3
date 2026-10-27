@@ -103,12 +103,14 @@
     const settingsParts = [];
     const benchParts = [];
     const milestones = [];
+    const fcases = [];
     for (const rec of all) {
       const d = parseDetails(rec);
       if (!d) continue;
       if (d.kind === "settings") settingsParts.push({ id: rec.id, groups: rec.groups || [], ...d });
       else if (d.kind === "benchmark") benchParts.push({ id: rec.id, ...d });
       else if (d.kind === "milestone") milestones.push({ ...d, id: rec.id });
+      else if (d.kind === "fcase") fcases.push({ ...d, id: rec.id });
     }
     // Arma el último rev completo de un objeto guardado en partes.
     const assemble = list => {
@@ -123,7 +125,7 @@
     const settings = assemble(settingsParts);
     const benchmark = assemble(benchParts);
     milestones.sort((a, b) => (a.date < b.date ? -1 : 1));
-    return { settings, milestones, benchmark, _settingsRecords: settingsParts };
+    return { settings, milestones, benchmark, fcases, _settingsRecords: settingsParts };
   }
 
   // Guarda un objeto grande en partes (kind = "settings" | "benchmark"):
@@ -182,6 +184,26 @@
     await api.call("Remove", { typeName: "AddInData", entity: { id } });
   }
 
+  // Seguimiento de casos de fatiga: un registro por jornada revisada
+  // ({kind:"fcase", key: "conductor|inicio", status, owner, action, notes}).
+  async function saveFatigueCase(api, c) {
+    const details = { kind: "fcase", ...c, updated_at: new Date().toISOString() };
+    delete details.id;
+    const entity = { addInId: ADDIN_ID, groups: await shareGroups(api), details };
+    if (c.id) { await api.call("Set", { typeName: "AddInData", entity: { id: c.id, ...entity } }); return { ...details, id: c.id }; }
+    const id = await api.call("Add", { typeName: "AddInData", entity });
+    return { ...details, id };
+  }
+
+  async function loadFatigueCases(api) {
+    const out = [];
+    for (const rec of await getAll(api)) {
+      const d = parseDetails(rec);
+      if (d && d.kind === "fcase") out.push({ ...d, id: rec.id });
+    }
+    return out;
+  }
+
   // Datos del usuario actual (id, si es conductor). null si no se pudo.
   async function currentUser(api, userName) {
     try {
@@ -215,5 +237,5 @@
     return saved;
   }
 
-  Object.assign(GI, { _deepestOnly: deepestOnly, shareGroups, ADDIN_ID, loadShared, saveSettings, saveBenchmark, currentUser, sharingStatus, shareWithAll, addMilestone, updateMilestone, removeMilestone, resolveIsAdmin });
+  Object.assign(GI, { _deepestOnly: deepestOnly, shareGroups, ADDIN_ID, loadShared, saveSettings, saveBenchmark, currentUser, sharingStatus, shareWithAll, addMilestone, updateMilestone, removeMilestone, resolveIsAdmin, saveFatigueCase, loadFatigueCases });
 })(window.GI);

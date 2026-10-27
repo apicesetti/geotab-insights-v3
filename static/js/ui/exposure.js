@@ -437,7 +437,7 @@
     </div>`;
   }
 
-  const SECTIONS = [["horarios", "Horarios y tráfico"], ["conductores", "Conductores"], ["fatiga", "Jornada y fatiga"], ["gravedad", "Gravedad"]];
+  const SECTIONS = [["horarios", "Horarios y tráfico"], ["conductores", "Conductores"], ["gravedad", "Gravedad"]];
 
   function ExposureTab({ view, onDriver }) {
     const [sec, setSec] = useState("horarios");
@@ -467,5 +467,5 @@
     </div>`;
   }
 
-  Object.assign(GI, { ExposureTab, ExposureDetail, FatigueDetail });
+  Object.assign(GI, { ExposureTab, ExposureDetail, FatigueDetail, FatiguePanel });
 })(window.GI);
