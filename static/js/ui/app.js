@@ -38,9 +38,22 @@
 
   const LARGE_FLEET = window.GI_LARGE_FLEET || 300; // vehículos: a partir de acá el grupo filtra en la API
 
-  function rangeFor(days) {
-    const to = GI.dayKey(new Date());
-    return { from: GI.dayKey(GI.addDays(new Date(), -(days - 1))), to };
+  // Períodos como en MyGeotab: meses calendario completos (sin meses cortados).
+  const PRESETS = [
+    ["month", "Este mes"], ["last_month", "Mes pasado"], ["3m", "Últimos 3 meses"], ["6m", "Últimos 6 meses"], ["12m", "Últimos 12 meses"],
+  ];
+  function rangeFor(preset) {
+    const now = new Date(), y = now.getFullYear(), m = now.getMonth();
+    const first = k => GI.dayKey(new Date(y, m - k, 1));
+    if (preset === "last_month") return { from: first(1), to: GI.dayKey(new Date(y, m, 0)) };
+    const back = { month: 0, "3m": 2, "6m": 5, "12m": 11 }[preset];
+    return { from: first(back != null ? back : 2), to: GI.dayKey(now) };
+  }
+  // Configuraciones guardadas con "días" (versiones anteriores) → período por meses.
+  function presetFrom(ui) {
+    if (ui && PRESETS.some(([k]) => k === ui.default_period)) return ui.default_period;
+    const d = ui && ui.default_days;
+    return !d ? "3m" : d <= 31 ? "month" : d <= 95 ? "3m" : d <= 185 ? "6m" : "12m";
   }
 
   function App({ api, database, userName }) {
@@ -53,7 +66,7 @@
     // Conductor (no administrador): ve solo "Mi desempeño" con sus datos.
     const [me, setMe] = useState(null);
     const [benchmark, setBenchmark] = useState(null);
-    const [period, setPeriod] = useState({ preset: 90, ...rangeFor(90) });
+    const [period, setPeriod] = useState({ preset: "3m", ...rangeFor("3m") });
     const [customDraft, setCustomDraft] = useState(null);
     const [gran, setGran] = useState("week");
     const [filter, setFilter] = useState({ vtype: "", stype: "" });
@@ -102,8 +115,8 @@
           // elegido arriba pasa a filtrar en la API (no en el navegador).
           const large = cat.devices.length > LARGE_FLEET;
           setLargeFleet(large);
-          const days = large && !(s.scope_group_ids || []).length ? Math.min(30, s.ui.default_days) : s.ui.default_days;
-          const p = { preset: days, ...rangeFor(days) };
+          const pre = large && !(s.scope_group_ids || []).length ? "month" : presetFrom(s.ui);
+          const p = { preset: pre, ...rangeFor(pre) };
           setPeriod(p);
           setPhase("ready");
           if (!s.configured && admin) setTab("config");
@@ -244,7 +257,7 @@
     function applyPreset(v) {
       if (v === "custom") { setCustomDraft({ from: period.from, to: period.to }); return; }
       if (v === "range") return; // el rango personalizado ya aplicado
-      const p = { preset: +v, ...rangeFor(+v) };
+      const p = { preset: v, ...rangeFor(v) };
       setPeriod(p); setCustomDraft(null);
       load(settings, p, catalogs);
     }
@@ -264,7 +277,7 @@
         <div className="controls">
           <label className="ctl">Período
             <select value=${customDraft ? "custom" : period.preset || "range"} onChange=${e => applyPreset(e.target.value)}>
-              ${[30, 60, 90, 180, 365].map(d => html`<option key=${d} value=${d}>Últimos ${d} días</option>`)}
+              ${PRESETS.map(([k, l]) => html`<option key=${k} value=${k}>${l}</option>`)}
               ${!period.preset ? html`<option value="range">Del ${period.from} al ${period.to}</option>` : null}
               <option value="custom">Personalizado…</option>
             </select></label>
