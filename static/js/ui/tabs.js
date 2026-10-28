@@ -233,7 +233,7 @@
       ${summarySentence(view, () => setWhy(true))}
       ${why ? html`<${RiskWhy} view=${view} onClose=${() => setWhy(false)} onDriver=${onDriver} />` : null}
       <div className="grid-2-1">
-        <${Panel} title="Evolución" hint=${"Agrupado por " + GRAN_WORD[view.gran] + ". Las líneas amarillas punteadas son hitos. El asterisco marca " + GRAN_PLURAL[view.gran] + " incompletos (inicio o fin del período)."}
+        <${Panel} title="Evolución" hint=${"Agrupado por " + GRAN_WORD[view.gran] + ". Las líneas amarillas punteadas son hitos. El asterisco, el punto hueco y la línea punteada marcan " + GRAN_PLURAL[view.gran] + " incompletos (al inicio o al final del período): se muestran, pero con pocos días su valor es menos confiable."}
           actions=${html`<${Segmented} value=${metric} onChange=${setMetric} options=${[
             { value: "risk", label: "Riesgo" }, { value: "idlePct", label: "Ralentí" }, { value: "l100", label: "Consumo" }, { value: "km", label: "Km" }]} />`}>
           <${TrendChart} view=${view} metric=${metric} />
