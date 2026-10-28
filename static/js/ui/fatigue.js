@@ -46,15 +46,20 @@
   // las próximas horas (punteada), las jornadas abajo y los eventos de cámara
   // como contexto sobre la curva.
   function IndexChart({ entry, proj, fz, now, days, onCase, height }) {
-    const W = 1000, Hh = height || 230, L = 40, R = 990, T = 14, B = Hh - 46;
+    const W = 1000, Hh = height || 250, L = 40, R = 990, T = 20, B = Hh - 62;
     const t0 = now - days * 86400000, t1 = now + 16 * H;
-    const x = t => L + ((t - t0) / (t1 - t0)) * (R - L);
+    const x = t => L + ((Math.max(t0, Math.min(t1, t)) - t0) / (t1 - t0)) * (R - L);
     const yMax = 160, y = v => B - (Math.min(yMax, Math.max(0, v)) / yMax) * (B - T);
     const sim = entry.sim;
     const pts = [];
     for (let t = Math.max(t0, sim.t0); t <= now; t += 30 * MIN) pts.push(x(t).toFixed(1) + "," + y(sim.at(t)).toFixed(1));
     const proP = proj ? proj.pts.filter((p, i) => i % 2 === 0 || i === proj.pts.length - 1).map(([t, v]) => x(t).toFixed(1) + "," + y(v).toFixed(1)) : [];
     const shifts = entry.list.filter(j => j.e > t0);
+    // descansos entre jornadas (y el que está en curso si no está en jornada)
+    const rests = [];
+    for (const j of entry.list) if (j.prevE != null && j.s > t0 && j.restBefore < 48) rests.push({ a: j.prevE, b: j.s, h: j.restBefore, k: restKind(j, fz), j });
+    const last = entry.list[entry.list.length - 1];
+    if (last && !last.open && last.e < now) rests.push({ a: last.e, b: now, h: (now - last.e) / H, k: "curso", j: null });
     const cams = [];
     for (const j of shifts) for (const e of j.cam || []) if (e.t >= t0) cams.push(e);
     const ticks = [];
@@ -63,32 +68,61 @@
     for (let d = d0.getTime() + 86400000; d < t1; d += 86400000 * stepD) ticks.push(d);
     const nights = [];
     for (let d = d0.getTime(); d < t1; d += 86400000) nights.push([d, d + 6 * H]);
+    const BY = B + 8, BH = 18; // barra de jornadas y descansos
+    // texto dentro de la barra; si no entra, la versión corta ("11h"); si tampoco, solo el tooltip
+    const label = (a, b, txt, dark) => {
+      const w = x(b) - x(a), m = /(\d+) h/.exec(txt), short = m ? m[1] + "h" : null;
+      const t = w > txt.length * 6.2 + 6 ? txt : short && w > short.length * 6.2 + 4 ? short : null;
+      return t ? html`<text x=${(x(a) + x(b)) / 2} y=${BY + 13} textAnchor="middle" className=${"ft-tl-bar" + (dark ? " on-dark" : "")}>${t}</text>` : null;
+    };
+    const restColor = k => (k === "curso" ? "#a9dcbf" : GAP[k].color);
     return html`<div className="ft-tl">
       <svg viewBox=${"0 0 " + W + " " + Hh} role="img" aria-label="Evolución del índice de fatiga">
-        ${nights.filter(([a, b]) => b > t0 && a < t1).map(([a, b], i) => html`<rect key=${"n" + i} x=${x(Math.max(a, t0))} y=${T} width=${Math.max(0, x(Math.min(b, t1)) - x(Math.max(a, t0)))} height=${B - T} fill="#f1f3f8" />`)}
-        <rect x=${x(now)} y=${T} width=${R - x(now)} height=${B - T} fill="#f7f8fa" />
+        ${rests.filter(r => r.b > t0).map((r, i) => html`<rect key=${"rb" + i} x=${x(r.a)} y=${T} width=${Math.max(0, x(r.b) - x(r.a))} height=${B - T} fill=${restColor(r.k)} opacity="0.16" />`)}
+        ${nights.filter(([a, b]) => b > t0 && a < t1).map(([a, b], i) => html`<rect key=${"n" + i} x=${x(a)} y=${T - 8} width=${Math.max(0, x(b) - x(a))} height="5" rx="1" fill="#c9cfe3" />`)}
+        <rect x=${x(now)} y=${T} width=${R - x(now)} height=${B - T} fill="#f4f5f7" opacity="0.8" />
         ${[0, 40, 80, 120, 160].map(v => html`<g key=${"g" + v}><line x1=${L} x2=${R} y1=${y(v)} y2=${y(v)} stroke="#eceff3" /><text x=${L - 6} y=${y(v) + 4} textAnchor="end" className="ft-tl-tick">${v}</text></g>`)}
         ${[fz.fi_mod, fz.fi_high].map((v, i) => html`<g key=${"th" + v}><line x1=${L} x2=${R} y1=${y(v)} y2=${y(v)} stroke=${i ? "#d4561e" : "#c99400"} strokeDasharray="5 4" /><text x=${L + 4} y=${y(v) - 4} className="ft-tl-lab">${(i ? "alto " : "moderado ") + v}</text></g>`)}
-        ${shifts.map(j => html`<rect key=${j.key} x=${x(Math.max(j.s, t0))} y=${B + 6} width=${Math.max(2, x(j.e) - x(Math.max(j.s, t0)))} height="10" rx="2" fill=${FI_COLORS[GI.fiLevel(j.fiPeak, fz)] || "#1f2a37"} style=${{ cursor: "pointer" }} onClick=${() => onCase && onCase(j)}>
-          <title>${"Jornada " + when(j.s) + " → " + when(j.e) + " · " + dur(j.span) + " · índice máx. " + Math.round(j.fiPeak) + " (click para ver)"}</title></rect>`)}
-        ${proj && proj.nextStart && proj.nextStart < t1 ? html`<rect x=${x(proj.nextStart)} y=${B + 6} width=${Math.max(2, x(Math.min(t1, proj.nextStart + proj.hb.span * H)) - x(proj.nextStart))} height="10" rx="2" fill="none" stroke="#1f2a37" strokeDasharray="3 2"><title>${"Próximo turno habitual: " + when(proj.nextStart)}</title></rect>` : null}
-        <text x=${L} y=${B + 30} className="ft-tl-lab">jornadas (color = índice máximo)</text>
+
+        ${rests.filter(r => r.b > t0).map((r, i) => html`<g key=${"r" + i}><rect x=${x(r.a)} y=${BY} width=${Math.max(1.5, x(r.b) - x(r.a))} height=${BH} fill=${restColor(r.k)} />
+          ${label(r.a, r.b, (r.k === "curso" ? "descansa " : "") + dur(r.h))}
+          <title>${(r.k === "curso" ? "Descansando desde " + when(r.a) + " (" + dur(r.h) + " hasta ahora)" : GAP[r.k].label.split(" (")[0] + ": " + dur(r.h) + " · " + when(r.a) + " → " + when(r.b)) + (r.j && r.j.restPlace ? " · " + placeTxt(r.j.restPlace) : "")}</title></g>`)}
+        ${shifts.map(j => html`<g key=${j.key} style=${{ cursor: "pointer" }} onClick=${() => onCase && onCase(j)}>
+          <rect x=${x(j.s)} y=${BY} width=${Math.max(2, x(j.e) - x(j.s))} height=${BH} fill=${FI_COLORS[GI.fiLevel(j.fiPeak, fz)] || "#1f2a37"} />
+          ${(j.waits || []).map((w, i) => html`<rect key=${"w" + i} x=${x(w.a)} y=${BY + 5} width=${Math.max(1.5, x(w.b) - x(w.a))} height=${BH - 10} fill=${GAP.larga.color} />`)}
+          ${label(j.s, j.e, (j.open ? "en curso " : "") + dur(j.open ? (now - j.s) / H : j.span), GI.fiLevel(j.fiPeak, fz) !== "moderado")}
+          <title>${"Jornada " + when(j.s) + " → " + (j.open ? "en curso" : when(j.e)) + " · " + dur(j.span) + " (" + dur(j.dh) + " de manejo)" + ((j.waits || []).length ? " · esperas: " + j.waits.map(w => dur(w.h)).join(", ") : "") + " · índice máx. " + Math.round(j.fiPeak) + " (click para ver)"}</title></g>`)}
+        ${proj && proj.nextStart && proj.nextStart < t1 ? html`<g><rect x=${x(proj.nextStart)} y=${BY} width=${Math.max(2, x(proj.nextStart + proj.hb.span * H) - x(proj.nextStart))} height=${BH} fill="none" stroke="#1f2a37" strokeDasharray="3 2" />
+          ${label(proj.nextStart, proj.nextStart + proj.hb.span * H, "próximo " + dur(proj.hb.span))}<title>${"Próximo turno habitual: " + when(proj.nextStart) + " (" + dur(proj.hb.span) + ")"}</title></g>` : null}
+
         <path d=${"M" + pts.join("L")} fill="none" stroke="#1f2a37" strokeWidth="2.2" />
         ${proP.length ? html`<path d=${"M" + proP.join("L")} fill="none" stroke="#1f2a37" strokeWidth="2" strokeDasharray="5 4" opacity="0.7" />` : null}
         ${cams.map((e, i) => html`<path key=${"c" + i} d=${"M" + x(e.t) + " " + (y(sim.at(e.t)) - 5) + " l-5 -9 h10 z"} fill=${CAM_COLORS[e.cat] || "#b93a0f"} opacity="0.85"><title>${when(e.t) + " · " + GI.catLabel(e.cat) + " · índice " + Math.round(sim.at(e.t))}</title></path>`)}
-        <line x1=${x(now)} x2=${x(now)} y1=${T} y2=${B + 18} stroke="#2a78d6" strokeWidth="1.5" />
+        <line x1=${x(now)} x2=${x(now)} y1=${T} y2=${BY + BH} stroke="#2a78d6" strokeWidth="1.5" />
         <text x=${x(now) + 4} y=${T + 10} className="ft-tl-lab b" fill="#2a78d6">ahora ${proj ? Math.round(proj.Fnow) : ""}</text>
-        ${proj && proj.crossAt && proj.crossAt > now ? html`<g><circle cx=${x(proj.crossAt)} cy=${y(fz.fi_high)} r="4.5" fill="#d4561e" /><text x=${x(proj.crossAt) + 6} y=${y(fz.fi_high) - 6} className="ft-tl-lab b">${hm(proj.crossAt)}</text></g>` : null}
-        ${ticks.map(t => html`<text key=${"k" + t} x=${x(t)} y=${Hh - 4} textAnchor="middle" className="ft-tl-tick">${dshort(t)}</text>`)}
+        ${proj && proj.crossAt && proj.crossAt > now ? html`<g><circle cx=${x(proj.crossAt)} cy=${y(fz.fi_high)} r="4.5" fill="#d4561e" /><text x=${x(proj.crossAt) + (x(proj.crossAt) > R - 60 ? -6 : 6)} y=${y(fz.fi_high) - 6} textAnchor=${x(proj.crossAt) > R - 60 ? "end" : "start"} className="ft-tl-lab b">${(GI.dayKey(proj.crossAt) !== GI.dayKey(now) ? dshort(proj.crossAt) + " " : "") + hm(proj.crossAt)}</text></g>` : null}
+        ${ticks.map(t => html`<g key=${"k" + t}><line x1=${x(t)} x2=${x(t)} y1=${BY + BH} y2=${BY + BH + 5} stroke="#7b8492" /><text x=${x(t)} y=${Hh - 8} textAnchor="middle" className="ft-tl-tick">${dshort(t)}</text></g>`)}
       </svg>
       <div className="ft-tl-legend small">
         <span><i style=${{ background: "#1f2a37" }}></i>Índice estimado</span>
-        <span><i style=${{ background: "repeating-linear-gradient(90deg,#1f2a37 0 4px,transparent 4px 7px)" }}></i>Proyección si sigue su horario habitual</span>
-        <span><i style=${{ background: "#f1f3f8" }}></i>00–06 h</span>
-        <span><i className="tri" style=${{ borderBottomColor: CAM_COLORS.fatiga }}></i>Bostezo / fatiga</span>
-        <span><i className="tri" style=${{ borderBottomColor: CAM_COLORS.distraccion }}></i>Distracción</span>
-        <span><i className="tri" style=${{ borderBottomColor: CAM_COLORS.salida_carril }}></i>Salida de carril</span>
-        <span className="muted">Los eventos de cámara se muestran como contexto: no cuentan como señal de fatiga.</span>
+        <span><i style=${{ background: "repeating-linear-gradient(90deg,#1f2a37 0 4px,transparent 4px 7px)" }}></i>Proyección con su horario habitual</span>
+        <span><i style=${{ background: "#c9cfe3", height: "5px" }}></i>00–06 h</span>
+        <span>· Barra inferior, jornadas por índice máximo:</span>
+        <span><i style=${{ background: FI_COLORS.bajo }}></i>bajo</span>
+        <span><i style=${{ background: FI_COLORS.moderado }}></i>moderado</span>
+        <span><i style=${{ background: FI_COLORS.alto }}></i>alto</span>
+        <span><i style=${{ background: FI_COLORS["muy alto"] }}></i>muy alto</span>
+        <span><i style=${{ background: GAP.larga.color }}></i>espera de 1 h o más</span>
+        <span>· descansos:</span>
+        <span><i style=${{ background: GAP.ok.color }}></i>suficiente</span>
+        <span><i style=${{ background: GAP.dia.color }}></i>de día antes de un turno noche</span>
+        <span><i style=${{ background: GAP.motor.color }}></i>con motor en marcha</span>
+        <span><i style=${{ background: GAP.corto.color }}></i>más corto que ${fz.min_rest} h</span>
+        <span><i style=${{ background: "#a9dcbf" }}></i>en curso</span>
+        <span>· eventos de cámara (contexto):</span>
+        <span><i className="tri" style=${{ borderBottomColor: CAM_COLORS.fatiga }}></i>bostezo / fatiga</span>
+        <span><i className="tri" style=${{ borderBottomColor: CAM_COLORS.distraccion }}></i>distracción</span>
+        <span><i className="tri" style=${{ borderBottomColor: CAM_COLORS.salida_carril }}></i>salida de carril</span>
       </div>
     </div>`;
   }

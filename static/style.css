@@ -1154,3 +1154,5 @@
 #gi3-root .ft-subnav { margin-top: -4px; }
 #gi3-root .ft-more { margin-top: 12px; }
 #gi3-root .ft-more summary { cursor: pointer; font-weight: 600; font-family: var(--display); font-size: 16px; }
+#gi3-root .ft-tl-bar { font-size: 11px; font-weight: 600; fill: #1f2a37; pointer-events: none; }
+#gi3-root .ft-tl-bar.on-dark { fill: #fff; }
