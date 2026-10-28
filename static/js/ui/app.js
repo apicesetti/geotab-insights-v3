@@ -107,7 +107,7 @@
           setPeriod(p);
           setPhase("ready");
           if (!s.configured && admin) setTab("config");
-          if (!admin && user && user.isDriver && s.driver_view !== false) setTab("mi");
+          if (!admin && user && user.isDriver && user.ownDataOnly && s.driver_view !== false) setTab("mi");
           load(s, p, cat);
         } catch (e) {
           setError("No se pudo iniciar: " + (e.message || e)); setPhase("error");
@@ -320,7 +320,8 @@
             model=${model} isAdmin=${isAdmin} userName=${userName} onSave=${saveSettings}
             benchmark=${benchmark} onPublishBenchmark=${publishBenchmark} mgGroups=${mgGroups} />`
           : !view ? html`<div className="splash small"><div className="spinner"></div>Preparando el tablero…</div>`
-          : driverMode || tab === "mi" ? html`<${GI.MyPerformanceTab} view=${view} />`
+          : driverMode ? html`<${GI.MyPerformanceTab} view=${view} />`
+          : tab === "mi" ? html`<${GI.SummaryTab} view=${view} onGo=${setTab} onDriver=${(id, mode) => setDetail({ type: "d", id, mode: mode || "safety" })} />`
           : tab === "resumen" ? html`<${GI.SummaryTab} view=${view} onGo=${setTab} onDriver=${(id, mode) => setDetail({ type: "d", id, mode: mode || "safety" })} />`
           : tab === "combustible" ? html`<${GI.FuelTab} view=${view} onVehicle=${id => setDetail({ type: "v", id })} />`
           : tab === "seguridad" ? html`<${GI.SafetyTab} view=${view} onVehicle=${id => setDetail({ type: "v", id })} onDriver=${(id, mode) => setDetail({ type: "d", id, mode: mode || "safety" })} />`
