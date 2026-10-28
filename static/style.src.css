@@ -524,3 +524,4 @@ input:disabled, select:disabled { background: var(--sunken); color: var(--muted)
 .ft-now-meters { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 @media (max-width: 900px) { .ft-now-meters { grid-template-columns: 1fr 1fr; } }
 .ft-tl-gap { font-size: 11px; fill: #1f2a37; font-weight: 600; }
+.ft-cal { max-width: 640px; margin-top: 10px; }

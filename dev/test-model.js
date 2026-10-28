@@ -324,6 +324,14 @@ assert.strictEqual(GI.durationToHours("00:11:42.0300000").toFixed(4), (11 / 60 +
   const live = GI.buildShifts(fm, new Set(["v1"]), null, { now, tripsByDevice: lt }).shifts.find(j => j.open);
   assert.ok(live.live && GI.shiftProgress(live, limits, now).driving);
 }
+// Validación del índice: el ajuste de Poisson recupera la pendiente.
+{
+  const bins = [];
+  for (let F = 5; F < 160; F += 10) { const h = 100; bins.push({ F, h, n: Math.round(h * 0.05 * Math.exp(1.5 * F / 100)) }); }
+  const f = GI.poissonFit(bins);
+  assert.ok(Math.abs(f.b - 1.5) < 0.1, "b " + f.b);
+  assert.ok(GI.poissonFit([{ F: 5, h: 0, n: 0 }]) === null);
+}
 // Corredores v2: riesgo del camino ajustado por conductor.
 {
   const RD = GI._road;

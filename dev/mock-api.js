@@ -134,6 +134,12 @@
               ? { latitude: (zc[pos][1] + end[1]) / 2 + (rnd() - 0.5) * 0.002, longitude: (zc[pos][0] + end[0]) / 2 + (rnd() - 0.5) * 0.002, dateTime: new Date(et).toISOString() }
               : { latitude: zc[pos][1] + (end[1] - zc[pos][1]) * fr, longitude: zc[pos][0] + (end[0] - zc[pos][0]) * fr, dateTime: new Date(et).toISOString() });
           }
+          // Bostezos / salida de carril (cámara): más con horas acumuladas en el día y de madrugada.
+          if (drv) {
+            const hh = new Date(start).getHours(), lam = 0.05 * dh * (1 + leg + p) * (hh >= 22 || hh < 6 ? 3 : 1);
+            if (rnd() < lam) { const et = start + rnd() * (stop - start); exceptions.push({ id: "e" + (++eid), rule: { id: rnd() < 0.7 ? "aYawn" : "aLane" }, device: { id: d.id }, driver: { id: drv.id },
+              activeFrom: new Date(et).toISOString(), activeTo: new Date(et + 5000).toISOString(), duration: "00:00:05", state: "ExceptionEventStateValidId" }); }
+          }
           if (ih > 0.2) exceptions.push({ id: "e" + (++eid), rule: { id: "RuleIdlingId" }, device: { id: d.id }, driver: drv ? { id: drv.id } : "UnknownDriverId",
             activeFrom: new Date(start + 600000).toISOString(), duration: dur(ih), state: "ExceptionEventStateValidId" });
           if (d._fuel) {

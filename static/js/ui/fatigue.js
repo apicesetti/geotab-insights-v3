@@ -492,9 +492,131 @@ ${restFrom != null && restFrom < j.s ? (() => { const g = GAP[restKind(j, fz)]; 
     return html`<${GI.FatiguePanel} view=${view} rf=${rf} onDriver=${onDriver} onRow=${onDriver} />`;
   }
 
-  const SECTIONS = [["ahora", "Ahora"], ["proximo", "Próximo turno"], ["casos", "Casos"], ["conductores", "Conductores"]];
 
-  function FatigueTab({ view, api, onDriver, userName }) {
+  // ---------- Validación del índice (BETA) ----------
+  const pct = v => (v >= 0 ? "+" : "") + GI.fmtNum(v * 100, 0) + " %";
+  const MIN_BAND_H = 20; // horas de manejo mínimas en una franja para dar su tasa
+  const per10 = (n, h) => (h >= MIN_BAND_H ? (n / h) * 10 : null);
+  function bandRows(ex) {
+    const base = ex.bands[0];
+    const b0 = per10(base.cam, base.hours), o0 = per10(base.other, base.hours);
+    const H = ex.hours || 1;
+    return ex.bands.map(x => {
+      const r = per10(x.cam, x.hours), o = per10(x.other, x.hours);
+      return { ...x, share: x.hours / H, rate: r, ratio: r != null && b0 > 0 ? r / b0 : null, orate: o, oratio: o != null && o0 > 0 ? o / o0 : null };
+    });
+  }
+  function fitWords(fit) {
+    if (!fit) return null;
+    const m = Math.exp(fit.b / 10) - 1;
+    const lo = fit.se != null ? Math.exp((fit.b - 1.96 * fit.se) / 10) - 1 : null, hi = fit.se != null ? Math.exp((fit.b + 1.96 * fit.se) / 10) - 1 : null;
+    return { m, lo, hi, sig: lo != null && (lo > 0 || hi < 0) };
+  }
+  function paramWords(P) {
+    const D = GI.FI_DEFAULT;
+    return [
+      ["Cuánto pesa la madrugada (04 h contra 16 h)", "×" + GI.fmtNum(1 + 2 * D.amp, 1), "×" + GI.fmtNum(1 + 2 * P.amp, 1)],
+      ["Recuperación por hora de descanso de noche", n0(D.recNight * 100) + " %", n0(P.recNight * 100) + " %"],
+      ["Recuperación por hora de descanso de día", n0(D.recDay * 100) + " %", n0(P.recDay * 100) + " %"],
+      ["Una hora de espera en jornada equivale a", GI.fmtNum(D.work / D.drive, 2) + " h de manejo", GI.fmtNum(P.work / P.drive, 2) + " h de manejo"],
+    ];
+  }
+  function BandTable({ rows }) {
+    return html`<${DataTable} rowKey=${r => r.key} rows=${rows} defaultSort=${{ key: "key", dir: "asc" }} columns=${[
+      { key: "key", label: "Índice en ese momento", value: r => GI.FI_BANDS.indexOf(r.key), fmt: r => html`<span className=${"ft-fi ft-fi-" + r.key.replace(" ", "-")}>${r.key}</span>` },
+      { key: "hours", label: "Horas de manejo", align: "num", fmt: r => n0(r.hours) + " h" },
+      { key: "share", label: "% del manejo", align: "num", fmt: r => n0(r.share * 100) + " %" },
+      { key: "cam", label: "Eventos de fatiga", align: "num", title: "Bostezo / fatiga, distracción y salida de carril (cámaras y ADAS)", fmt: r => html`${n0(r.cam)}${r.cam ? html`<div className="small muted">${Object.entries(r.byCat).map(([k, v]) => GI.catLabel(k).split(" /")[0] + " " + v).join(" · ")}</div>` : ""}` },
+      { key: "rate", label: "Cada 10 h de manejo", align: "num", fmt: r => (r.rate == null ? html`<span className="muted small" title=${"Menos de " + MIN_BAND_H + " h de manejo en esta franja"}>pocas horas</span>` : GI.fmtNum(r.rate, 2)) },
+      { key: "ratio", label: "Contra la franja baja", align: "num", fmt: r => (r.ratio == null ? "–" : html`<b className=${r.ratio >= 1.5 ? "delta bad" : ""}>×${GI.fmtNum(r.ratio, 1)}</b>`) },
+      { key: "orate", label: "Otras infracciones cada 10 h", align: "num", title: "Control: el resto de las infracciones de riesgo. Si suben igual que las de fatiga, puede ser el horario o el camino y no el cansancio.", fmt: r => (r.orate == null ? "–" : html`${GI.fmtNum(r.orate, 2)} <span className="muted">×${r.oratio == null ? "–" : GI.fmtNum(r.oratio, 1)}</span>`) },
+    ]} empty="Sin manejo en el período." />`;
+  }
+
+  function ValidationSection({ view, res, isAdmin, settings, onSaveSettings }) {
+    const fz = res.limits;
+    const ex = useMemo(() => GI.fiExposure(res, fz), [res]);
+    const fit = useMemo(() => GI.poissonFit(ex.bins), [ex]);
+    const rows = bandRows(ex);
+    const w = fitWords(fit);
+    const [cal, setCal] = useState(null);
+    const [prog, setProg] = useState(null);
+    const [msg, setMsg] = useState(null);
+    const custom = !!(settings.fatigue && settings.fatigue.fi_params);
+    async function run() {
+      setCal(null); setMsg(null); setProg(0);
+      try { setCal(await GI.calibrateIndex(view.model, view.ids, view.driverOk, setProg)); } catch (e) { setMsg("No se pudo calibrar: " + ((e && e.message) || e)); }
+      setProg(null);
+    }
+    async function apply(P) {
+      setMsg(null);
+      try {
+        const next = { ...settings, fatigue: { ...settings.fatigue } };
+        if (P) next.fatigue.fi_params = P; else delete next.fatigue.fi_params;
+        await onSaveSettings(next);
+        setCal(null); setMsg(P ? "Listo: el índice de esta base usa los coeficientes calibrados." : "Listo: el índice volvió a los coeficientes de fábrica.");
+      } catch (e) { setMsg("No se pudo guardar: " + ((e && e.message) || e)); }
+    }
+    const hi = [...rows].reverse().find(r => r.key !== "bajo" && r.ratio != null) || rows[1];
+    const few = ex.cam < 30;
+    let verdict;
+    if (!ex.cam) verdict = null;
+    else if (few) verdict = html`<div className="verdict-line"><span className="vtag">Pocos eventos</span><span>Hay ${n0(ex.cam)} eventos de fatiga en el período: son pocos para sacar conclusiones. Probá con un período de 90 días o más.</span></div>`;
+    else if (w && w.sig && w.m > 0) verdict = html`<div className="verdict-line good"><span className="vtag">El índice anticipa</span><span>Cada 10 puntos más de índice, los eventos de fatiga aumentan un <b>${pct(w.m)}</b> (entre ${pct(w.lo)} y ${pct(w.hi)}, con 95 % de confianza)${hi.ratio != null ? html`. Con índice ${hi.key} hay <b>×${GI.fmtNum(hi.ratio, 1)}</b> eventos por hora de manejo que con índice bajo` : ""}.${hi.oratio != null && hi.ratio != null && hi.oratio >= hi.ratio * 0.8 ? " Ojo: las otras infracciones también suben casi igual, así que parte del efecto puede ser el horario o el camino." : ""}</span></div>`;
+    else if (w && w.sig && w.m < 0) verdict = html`<div className="verdict-line bad"><span className="vtag">Al revés</span><span>Los eventos de fatiga bajan cuando el índice sube (${pct(w.m)} cada 10 puntos). Con estos datos el índice no está capturando el cansancio: conviene calibrarlo o revisar qué reglas cuentan como fatiga.</span></div>`;
+    else verdict = html`<div className="verdict-line bad"><span className="vtag">Sin relación clara</span><span>Con ${n0(ex.cam)} eventos no se ve que suban con el índice (${pct(w ? w.m : 0)} cada 10 puntos, no significativo). Probá calibrarlo para esta base.</span></div>`;
+    return html`<div>
+      <${Panel} title="¿El índice anticipa los eventos de fatiga?"
+        hint=${"Para cada tramo de 15 minutos de manejo del período se calcula el índice de fatiga en ese momento y se cuentan las horas de manejo y los eventos de fatiga (bostezo, distracción, salida de carril de cámaras y ADAS) en cada franja del índice. Si el índice mide algo real, los eventos por hora tienen que subir de la franja baja a la muy alta. Las otras infracciones son el control: si suben igual, el efecto puede ser el horario o el camino. La pendiente sale de un ajuste de Poisson sobre el índice (cada 10 puntos)."}>
+        ${!ex.cam ? html`<${Info} tone="warn">No hay eventos de fatiga, distracción o salida de carril en el período. Revisá en Configuración → Reglas y objetivos que las reglas de las cámaras tengan esas categorías, o elegí un período más largo.<//>` : null}
+        ${verdict}
+        ${ex.cam ? html`<${GI.ChartView} height=${220} config=${{
+          type: "bar",
+          data: { labels: rows.map(r => r.key), datasets: [
+            { type: "bar", label: "Eventos de fatiga (× franja baja)", data: rows.map(r => (r.ratio == null ? null : GI.round(r.ratio, 2))), backgroundColor: rows.map(r => FI_COLORS[r.key]), borderRadius: 4, borderSkipped: "start", order: 2 },
+            { type: "line", label: "Otras infracciones (× franja baja)", data: rows.map(r => (r.oratio == null ? null : GI.round(r.oratio, 2))), borderColor: "#7b8492", backgroundColor: "#7b8492", pointRadius: 4, order: 1 },
+          ] },
+          options: { plugins: { tooltip: { callbacks: { afterLabel: c => { const r = rows[c.dataIndex]; return c.datasetIndex === 0 ? n0(r.cam) + " eventos en " + n0(r.hours) + " h de manejo" : n0(r.other) + " infracciones"; } } } },
+            scales: { x: { title: { display: true, text: "índice de fatiga en el momento del evento" } }, y: { beginAtZero: true, title: { display: true, text: "veces la franja baja" } } } },
+        }} />` : null}
+        <${BandTable} rows=${rows} />
+        <p className="muted small">${n0(ex.hours)} h de manejo y ${n0(ex.cam)} eventos de fatiga en el período. Índice ${custom ? "con coeficientes calibrados para esta base" : "con los coeficientes de fábrica"}.</p>
+      <//>
+      <${Panel} title="Calibrar el índice para esta base"
+        hint="Prueba 72 combinaciones de coeficientes (cuánto pesa la madrugada, cuánto se recupera descansando de noche y de día, cuánto cuentan las esperas) y elige la que mejor anticipa los eventos de fatiga de esta base. Cada combinación se reescala para que una jornada diurna normal siga terminando cerca de 67, así los umbrales moderado y alto conservan su sentido.">
+        <p className="small">Usa los mismos datos del período elegido. Con pocos eventos (menos de unos 100) el resultado puede ser casualidad: conviene un período largo.</p>
+        <div className="form-actions">
+          <button className="btn primary" disabled=${prog != null || !ex.cam} onClick=${run}>${prog != null ? "Probando… " + n0(prog * 100) + " %" : "Buscar coeficientes para esta base"}</button>
+          ${custom && isAdmin ? html`<button className="btn" onClick=${() => apply(null)}>Volver a los de fábrica</button>` : null}
+          ${msg ? html`<span className="small">${msg}</span>` : null}
+        </div>
+        ${cal ? (() => {
+          const c = cal.current, b = cal.best, wc = fitWords(c.fit), wb = fitWords(b.fit);
+          const gain = b.fit && c.fit ? b.fit.ll - c.fit.ll : 0;
+          const same = b === c || gain < 2;
+          return html`<div style=${{ marginTop: "12px" }}>
+            <div className=${"verdict-line " + (same ? "" : "good")}><span className="vtag">${same ? "Sin mejora clara" : "Mejor ajuste"}</span><span>
+              ${same ? html`Ninguna combinación anticipa los eventos claramente mejor que la actual. Conviene quedarse con los coeficientes que están.`
+                : html`Con los coeficientes calibrados, cada 10 puntos de índice los eventos ${wb.m >= 0 ? "aumentan" : "bajan"} un <b>${pct(wb.m)}</b> (ahora: ${pct(wc ? wc.m : 0)}).${b.fit.n < 100 ? " Son menos de 100 eventos: tomalo con cuidado." : ""}`}</span></div>
+            ${!same ? html`
+              <table className="tbl ft-cal"><thead><tr><th></th><th className="num">Actual</th><th className="num">Calibrado</th></tr></thead>
+                <tbody>${paramWords(b.P).map(([l, , v], i) => html`<tr key=${i}><td>${l}</td><td className="num">${paramWords(c.P)[i][2]}</td><td className="num"><b>${v}</b></td></tr>`)}</tbody></table>
+              <h3 style=${{ marginTop: "12px" }}>Con los coeficientes calibrados</h3>
+              <${BandTable} rows=${bandRows(b.ex)} />
+              ${isAdmin ? html`<div className="form-actions"><button className="btn primary" onClick=${() => apply(b.P)}>Usar estos coeficientes en esta base</button>
+                <span className="muted small">Se guardan en la configuración compartida y cambian el índice en toda la pestaña Fatiga.</span></div>`
+                : html`<p className="muted small">Solo un administrador puede aplicar los coeficientes.</p>`}` : null}
+          </div>`;
+        })() : null}
+      <//>
+    </div>`;
+  }
+
+  const SECTIONS = [["ahora", "Ahora"], ["proximo", "Próximo turno"], ["casos", "Casos"], ["conductores", "Conductores"], ["validacion", "Validación del índice"]];
+  const BETA_SECTIONS = new Set(["validacion"]);
+  const isBeta = () => GI.BUILD === "beta" || /\/dev\//.test(window.location.pathname);
+
+  function FatigueTab({ view, api, onDriver, userName, isAdmin, onSaveSettings }) {
     const [sec, setSec] = useState("ahora");
     const [sel, setSel] = useState(null);
     const [drv, setDrv] = useState(null);
@@ -538,8 +660,9 @@ ${restFrom != null && restFrom < j.s ? (() => { const g = GAP[restKind(j, fz)]; 
         <${Kpi} label="Próximo turno con índice alto" value=${n0(nextRisk.length)} tone=${nextRisk.length ? "bad" : null} sub=${html`<span>si arrancan a su hora habitual</span>`} />
         <${Kpi} label="Con eventos de cámara agrupados" value=${n0(cam.length)} sub=${html`<span>3 o más en una hora (fatiga, distracción, carril)</span>`} />
       </div>
-      <div className="subnav"><${Segmented} value=${sec} onChange=${setSec} options=${SECTIONS.map(([value, label]) => ({ value, label }))} /></div>
-      ${sec === "ahora" ? html`<${NowSection} view=${view} res=${res} live=${live} onRefresh=${refresh} onDriver=${openDriver} onCase=${setSel} />`
+      <div className="subnav"><${Segmented} value=${sec} onChange=${setSec} options=${SECTIONS.filter(([k]) => !BETA_SECTIONS.has(k) || isBeta()).map(([value, label]) => ({ value, label }))} /></div>
+      ${sec === "validacion" && isBeta() ? html`<${ValidationSection} view=${view} res=${period} isAdmin=${isAdmin} settings=${view.settings} onSaveSettings=${onSaveSettings} />`
+        : sec === "ahora" ? html`<${NowSection} view=${view} res=${res} live=${live} onRefresh=${refresh} onDriver=${openDriver} onCase=${setSel} />`
         : sec === "proximo" ? html`<${NextSection} view=${view} res=${res} live=${live} onDriver=${openDriver} />`
         : sec === "casos" ? html`<${CasesSection} view=${view} shifts=${shifts} cases=${cases} limits=${limits} onOpen=${setSel} onDriver=${openDriver} />`
         : html`<${DriversSection} view=${view} onDriver=${openDriver} />`}

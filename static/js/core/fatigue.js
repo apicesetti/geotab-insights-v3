@@ -36,10 +36,15 @@
   // circadiano) y baja mientras descansa, más rápido si descansa de noche.
   // Calibrado para que una jornada diurna normal termine cerca de 50–70 y un
   // turno noche largo o con descanso corto pase de 100.
-  const FI = { drive: 5, work: 2, recNight: 0.16, recNap: 0.1, recDay: 0.07, start: 20, step: 15 * MIN };
+  // Coeficientes de fábrica. Se pueden calibrar por base (Fatiga → Validación)
+  // y quedan en settings.fatigue.fi_params. FI es el juego en uso: lo fija
+  // cada cálculo según la configuración (todo es sincrónico).
+  const FI_DEFAULT = { drive: 5, work: 2, amp: 0.3, recNight: 0.16, recNap: 0.1, recDay: 0.07, start: 20, step: 15 * MIN };
+  let FI = FI_DEFAULT;
+  const useParams = P => { FI = P || FI_DEFAULT; };
   const hourOf = t => { const d = new Date(t); return d.getHours() + d.getMinutes() / 60; };
   // 1,0 a las 16 h, 1,6 a las 04 h
-  const circ = t => 1.3 + 0.3 * Math.cos(((hourOf(t) - 4) / 24) * 2 * Math.PI);
+  const circ = t => 1 + FI.amp * (1 + Math.cos(((hourOf(t) - 4) / 24) * 2 * Math.PI));
   const sleepQ = t => { const h = hourOf(t); return h >= 22 || h < 7 ? FI.recNight : h >= 13 && h < 16 ? FI.recNap : FI.recDay; };
   // Avanza el índice un paso: trabajando (df = fracción manejando) o descansando.
   function fiStep(F, t, working, df, stepH) {
@@ -111,6 +116,7 @@
   // Riesgo del próximo turno: arranque en su horario habitual con el descanso
   // que lleva, y descanso necesario para no terminar por encima del umbral alto.
   function nextShiftRisk(list, sim, fz, now) {
+    useParams(fz.P);
     const hb = habitual(list);
     const last = list[list.length - 1];
     if (!hb || !sim || !last || last.open) return null;
@@ -128,6 +134,7 @@
   }
   // Jornada en curso: índice ahora, y si completa su jornada habitual.
   function openShiftIndex(j, list, sim, fz, now) {
+    useParams(fz.P);
     const Fnow = sim ? sim.at(now - 1) : null;
     const hb = habitual(list);
     const spanH = hb ? hb.span : fz.max_span;
@@ -165,6 +172,7 @@
   function fatigueLimits(settings) {
     const fz = Object.assign({ max_drive_day: 9, max_span: 12, min_rest: 8, max_continuous: 4, max_days_row: 6, rest_split: 4, fi_mod: 80, fi_high: 100 }, (settings && settings.fatigue) || {});
     fz.SPLIT = Math.max(1, Math.min(fz.rest_split || 4, fz.min_rest || 8)) * H;
+    fz.P = Object.assign({}, FI_DEFAULT, fz.fi_params || {}, { start: FI_DEFAULT.start, step: FI_DEFAULT.step });
     return fz;
   }
 
@@ -196,6 +204,7 @@
 
   function buildShifts(model, ids, driverOk, opts) {
     const fz = fatigueLimits(model.settings);
+    useParams(fz.P);
     const o = Object.assign({ now: Date.now() }, opts || {});
     const byDrv = tripsByDriver(o.tripsByDevice || model.tripsByDevice, ids, driverOk, o.now);
     const camByDrv = new Map(), evByDrv = new Map();
@@ -341,5 +350,97 @@
     return { spanNow, sinceLast, stint, items, nightAhead, worst, driving };
   }
 
-  Object.assign(GI, { FATIGUE_SIGNALS: SIGNALS, FATIGUE_CAM_CATS: CAM_CATS, buildShifts, shiftProgress, liveTrips, fatigueLimits, fiLevel, openShiftIndex, nextShiftRisk, _fat: { overlapHours, nightFrac, circ, fiWork, fiRest, simulateDriver, habitual } });
+
+  // ---------- Validación del índice contra eventos de cámara ----------
+  const FI_BANDS = ["bajo", "moderado", "alto", "muy alto"];
+  // Horas de manejo, km y eventos según la franja del índice en ese momento.
+  // Eventos "de fatiga" = categorías de cámara (bostezo, distracción, carril);
+  // "otros" = el resto de las infracciones de riesgo (control).
+  function fiExposure(res, fz) {
+    const bands = FI_BANDS.map(key => ({ key, hours: 0, km: 0, cam: 0, other: 0, byCat: {} }));
+    const bins = []; // por 10 puntos: { h, n } para el ajuste
+    const bin = F => { const i = Math.min(25, Math.max(0, Math.floor(F / 10))); return bins[i] || (bins[i] = { F: i * 10 + 5, h: 0, n: 0 }); };
+    const bOf = F => FI_BANDS.indexOf(fiLevel(F, fz));
+    for (const { list, sim } of res.sims.values()) {
+      if (!sim) continue;
+      for (const j of list) {
+        for (const t of j.trips) {
+          const len = t.e - t.s;
+          if (!(len > 0)) continue;
+          for (let a = t.s; a < t.e; a += 15 * MIN) {
+            const b = Math.min(t.e, a + 15 * MIN), f = (b - a) / len, F = sim.at((a + b) / 2);
+            const x = bands[bOf(F)];
+            x.hours += t.dh * f; x.km += t.km * f; bin(F).h += t.dh * f;
+          }
+        }
+        for (const e of j.cam || []) { const F = sim.at(e.t), x = bands[bOf(F)]; x.cam++; x.byCat[e.cat] = (x.byCat[e.cat] || 0) + 1; bin(F).n++; }
+        for (const e of j.events || []) if (!CAM_CATS.has(e.cat)) bands[bOf(sim.at(e.t))].other++;
+      }
+    }
+    return { bands, bins: bins.filter(Boolean), cam: GI.sum(bands, x => x.cam), hours: GI.sum(bands, x => x.hours) };
+  }
+  // Ajuste de Poisson: eventos por hora = exp(a + b·F/100). Devuelve b y la
+  // log-verosimilitud (para comparar juegos de coeficientes con los mismos datos).
+  function poissonFit(bins) {
+    const B = bins.filter(x => x.h > 0);
+    const N = GI.sum(B, x => x.n), Ht = GI.sum(B, x => x.h);
+    if (!(N > 0) || !(Ht > 0)) return null;
+    let a = Math.log(N / Ht), b = 0;
+    for (let it = 0; it < 40; it++) {
+      let ga = 0, gb = 0, haa = 0, hab = 0, hbb = 0;
+      for (const x of B) { const z = x.F / 100, mu = x.h * Math.exp(a + b * z); ga += x.n - mu; gb += (x.n - mu) * z; haa += mu; hab += mu * z; hbb += mu * z * z; }
+      const det = haa * hbb - hab * hab;
+      if (!(det > 1e-12)) break;
+      const da = (hbb * ga - hab * gb) / det, db = (haa * gb - hab * ga) / det;
+      a += da; b += db;
+      if (Math.abs(da) + Math.abs(db) < 1e-9) break;
+    }
+    let ll = 0, se = null;
+    let hbb = 0, haa = 0, hab = 0;
+    for (const x of B) { const z = x.F / 100, mu = x.h * Math.exp(a + b * z); ll += x.n * Math.log(mu) - mu; haa += mu; hab += mu * z; hbb += mu * z * z; }
+    const det = haa * hbb - hab * hab;
+    if (det > 0) se = Math.sqrt(haa / det);
+    return { a, b, se, ll, n: N, hours: Ht };
+  }
+  // Índice al final de una jornada diurna típica (06–16 h, 5 días): para que
+  // los umbrales 80/100 sigan significando lo mismo con otros coeficientes.
+  function refPeak(P) {
+    const prev = FI; useParams(P);
+    const base = new Date(2026, 0, 5).getTime(), list = [];
+    for (let d = 0; d < 5; d++) {
+      let t = base + d * 86400000 + 6 * H; const trips = [];
+      for (const [du, pa] of [[3, 0.5], [3, 0.75], [2.5, 0]]) { trips.push({ s: t, e: t + du * H, dh: du, km: du * 70 }); t += (du + pa) * H; }
+      list.push({ s: trips[0].s, e: trips[2].e, trips });
+    }
+    simulateDriver(list);
+    FI = prev;
+    return list[4].fiPeak;
+  }
+  const REF_DAY = 67;
+  function scaled(P) { const k = REF_DAY / refPeak(P); return Object.assign({}, P, { drive: GI.round(P.drive * k, 3), work: GI.round(P.work * k, 3) }); }
+  // Busca los coeficientes que mejor separan los eventos de cámara (asincrónico, con avance).
+  async function calibrateIndex(model, ids, driverOk, onProgress) {
+    const grid = [];
+    for (const amp of [0, 0.15, 0.3, 0.45]) for (const recNight of [0.1, 0.16, 0.24]) for (const dayR of [0.25, 0.45, 0.7]) for (const wr of [0.4, 0.1])
+      grid.push(scaled({ drive: 5, work: 5 * wr, amp, recNight, recDay: GI.round(recNight * dayR, 4), recNap: GI.round(recNight * Math.min(1, dayR * 1.4), 4) }));
+    const fz0 = fatigueLimits(model.settings);
+    const fit = P => {
+      const settings = Object.assign({}, model.settings, { fatigue: Object.assign({}, model.settings.fatigue, { fi_params: P }) });
+      const res = buildShifts(Object.assign({}, model, { settings }), ids, driverOk);
+      const ex = fiExposure(res, res.limits);
+      return { P, ex, fit: poissonFit(ex.bins) };
+    };
+    const current = fit(fz0.P);
+    let best = current;
+    for (let i = 0; i < grid.length; i++) {
+      const r = fit(grid[i]);
+      if (r.fit && (!best.fit || r.fit.ll > best.fit.ll)) best = r;
+      if (onProgress) onProgress((i + 1) / grid.length);
+      await new Promise(ok => setTimeout(ok, 0));
+    }
+    useParams(fz0.P);
+    return { current, best, tried: grid.length };
+  }
+
+  Object.assign(GI, { FI_DEFAULT, FI_BANDS, fiExposure, poissonFit, calibrateIndex, FATIGUE_SIGNALS: SIGNALS, FATIGUE_CAM_CATS: CAM_CATS, buildShifts, shiftProgress, liveTrips, fatigueLimits, fiLevel, openShiftIndex, nextShiftRisk, _fat: { overlapHours, nightFrac, circ, fiWork, fiRest, simulateDriver, habitual } });
 })(window.GI);
