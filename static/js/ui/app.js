@@ -365,7 +365,10 @@
     render() {
       if (!this.state.err) return this.props.children;
       const e = this.state.err;
+      // "x is not a function": el navegador mezcló archivos de dos versiones (caché).
+      const stale = /is not a function|is not defined/.test(String(e && e.message || ""));
       return html`<${Info} tone="error"><b>No se pudo mostrar esta pestaña.</b> ${String(e && e.message || e)}
+        ${stale ? html`<div style=${{ marginTop: "6px" }}>Puede ser que el navegador haya mezclado archivos de una versión anterior. Recargá la página forzando la actualización (Ctrl + F5).</div>` : null}
         <details style=${{ marginTop: "8px" }}><summary>Detalle técnico (para soporte)</summary><pre style=${{ whiteSpace: "pre-wrap", fontSize: "12px" }}>${String(e && e.stack || "")}</pre></details>
         <button className="btn small" style=${{ marginTop: "8px" }} onClick=${() => this.setState({ err: null })}>Reintentar</button><//>`;
     }

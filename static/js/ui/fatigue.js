@@ -1013,7 +1013,8 @@ ${restFrom != null && restFrom < j.s ? (() => { const g = GAP[restKind(j, fz)]; 
       const t = setInterval(() => setLive(l => ({ ...l, now: Date.now() })), 60000);
       let off = false;
       GI.loadFatigueCases(api).then(list => { if (!off) setCases(new Map(list.map(c => [c.key, c]))); }).catch(e => console.warn("[Geotab Insights] casos de fatiga", e));
-      GI.loadRosters(api).then(list => { if (!off) setRosters(new Map(list.map(r => [r.drv, r]))); }).catch(e => console.warn("[Geotab Insights] diagramas", e));
+      // (si storage.js quedó de una versión anterior en caché, sigue sin diagramas manuales)
+      (GI.loadRosters ? GI.loadRosters(api) : Promise.resolve([])).then(list => { if (!off) setRosters(new Map(list.map(r => [r.drv, r]))); }).catch(e => console.warn("[Geotab Insights] diagramas", e));
       return () => { off = true; clearInterval(t); };
     }, [api]);
     // Seguimiento y fichas: período + viajes en vivo de las últimas horas.
