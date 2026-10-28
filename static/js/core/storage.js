@@ -204,6 +204,21 @@
     return out;
   }
 
+  // Diagrama de trabajo fijado a mano para un conductor ({kind:"roster", drv, work, off} o {none:true}).
+  async function saveRoster(api, r) {
+    const details = { kind: "roster", drv: r.drv, work: r.work || 0, off: r.off || 0, none: !!r.none, by: r.by || "", updated_at: new Date().toISOString() };
+    const entity = { addInId: ADDIN_ID, groups: await shareGroups(api), details };
+    if (r.id) { await api.call("Set", { typeName: "AddInData", entity: { id: r.id, ...entity } }); return { ...details, id: r.id }; }
+    const id = await api.call("Add", { typeName: "AddInData", entity });
+    return { ...details, id };
+  }
+  async function removeRoster(api, id) { await api.call("Remove", { typeName: "AddInData", entity: { id } }); }
+  async function loadRosters(api) {
+    const out = [];
+    for (const rec of await getAll(api)) { const d = parseDetails(rec); if (d && d.kind === "roster") out.push({ ...d, id: rec.id }); }
+    return out;
+  }
+
   // Datos del usuario actual (id, si es conductor). null si no se pudo.
   async function currentUser(api, userName) {
     try {
@@ -237,5 +252,5 @@
     return saved;
   }
 
-  Object.assign(GI, { _deepestOnly: deepestOnly, shareGroups, ADDIN_ID, loadShared, saveSettings, saveBenchmark, currentUser, sharingStatus, shareWithAll, addMilestone, updateMilestone, removeMilestone, resolveIsAdmin, saveFatigueCase, loadFatigueCases });
+  Object.assign(GI, { _deepestOnly: deepestOnly, shareGroups, ADDIN_ID, loadShared, saveSettings, saveBenchmark, currentUser, sharingStatus, shareWithAll, addMilestone, updateMilestone, removeMilestone, resolveIsAdmin, saveFatigueCase, loadFatigueCases, saveRoster, removeRoster, loadRosters });
 })(window.GI);

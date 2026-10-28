@@ -27,6 +27,7 @@
     { key: "cambio", label: "Cambio de turno" },
     { key: "descanso", label: "Descanso corto o de día" },
     { key: "seguidos", label: "Días seguidos" },
+    { key: "franco", label: "Franco corto" },
     { key: "francos", label: "Noche después de francos" },
     { key: "motor", label: "Descanso con motor en marcha" },
     { key: "lejos", label: "Descansos fuera de base" },
@@ -125,14 +126,14 @@
   }
   // Riesgo del próximo turno: arranque en su horario habitual con el descanso
   // que lleva, y descanso necesario para no terminar por encima del umbral alto.
-  function nextShiftRisk(list, sim, fz, now) {
+  function nextShiftRisk(list, sim, fz, now, rs) {
     useParams(fz.P);
     const hb = habitual(list);
     const last = list[list.length - 1];
     if (!hb || !sim || !last || last.open) return null;
     const df = hb.span > 0 ? Math.min(1, hb.dh / hb.span) : 0.7;
     const Fnow = fiRest(last.fiEnd != null ? last.fiEnd : FI.start, last.e, now);
-    const start = nextAt(hb.startMin, Math.max(now, last.e + H));
+    const start = nextAt(hb.startMin, Math.max(now, last.e + H, (rs && rs.inFranco && rs.backAt) || 0));
     const Fstart = fiRest(Fnow, now, start);
     const w = fiWork(Fstart, start, hb.span, df);
     let needRest = null;
@@ -266,6 +267,7 @@
         if (!cur || t.s - cur.e >= fz.SPLIT) { cur = { drv, s: t.s, e: t.e, trips: [] }; list.push(cur); }
         cur.trips.push(t); cur.e = Math.max(cur.e, t.e);
       }
+      const rs = rosterOf(list, o.now, o.rosters && o.rosters.get(drv));
       let prev = null, row = 0, away = 0;
       for (const j of list) {
         j.dk = GI.dayKey(new Date(j.s));
@@ -311,6 +313,7 @@
           j.afterOff = j.restBefore >= 36;
         } else row = 1;
         j.daysRow = row;
+        if (rs) { const di = dayIdx(GI.dayKey(j.s)), b = rs.blockOf(di); if (b) { j.cycleDay = di - b.start + 1; j.offBefore = di === b.start ? b.offBefore : null; } }
         // esperas: cortes de 1 h o más dentro de la jornada, con el lugar
         j.waits = [];
         for (let k = 1; k < j.trips.length; k++) {
@@ -339,7 +342,10 @@
           add("descanso", 1, j.restBefore < fz.min_rest ? "descanso previo de " + GI.fmtNum(j.restBefore, 1) + " h (mínimo " + fz.min_rest + " h)" : "descanso previo de " + GI.fmtNum(j.restBefore, 1) + " h, casi todo de día, antes de un turno noche");
         if (prev && j.restEngine) add("motor", 1, GI.fmtNum(j.restIdleH, 1) + " h del descanso previo con el motor en marcha (probablemente durmió en la cabina)" + (j.restPlace ? ", en " + j.restPlace.name : ""));
         if (j.awayRow >= 3) add("lejos", 1, j.awayRow + " descansos seguidos fuera de la base" + (j.restPlace ? " (el último en " + j.restPlace.name + ")" : ""));
-        if (j.daysRow > fz.max_days_row) add("seguidos", 1, j.daysRow + " días seguidos de trabajo (máximo " + fz.max_days_row + ")");
+        if (rs && rs.work) {
+          if (j.cycleDay > rs.work + 1) add("seguidos", 1, "día " + j.cycleDay + " de la vuelta: su diagrama es " + rs.label + (rs.source === "auto" ? " (detectado)" : ""));
+          if (j.offBefore != null && rs.off && j.offBefore < rs.off - 1) add("franco", 1, "volvió después de " + j.offBefore + " días de franco; su diagrama es " + rs.label);
+        } else if (j.daysRow > fz.max_days_row) add("seguidos", 1, j.daysRow + " días seguidos de trabajo (máximo " + fz.max_days_row + ")");
         j.signals = sg;
         // jornada en curso: el último viaje terminó hace menos de la pausa que cierra la jornada
         j.open = o.now - j.e < fz.SPLIT && o.now >= j.e - 60000;
@@ -352,17 +358,58 @@
       // "fuera de base" solo si sabemos cuál es su base (descansó ahí alguna vez en el período)
       const knowsBase = list.some(j => j.restPlace && j.restPlace.kind === "base");
       for (const j of list) {
-        if (!knowsBase) j.signals = j.signals.filter(x => x.key !== "lejos");
+        // sin base conocida, o con diagrama por vueltas (vive en la operación), "fuera de base" no aplica
+        if (!knowsBase || (rs && rs.work)) j.signals = j.signals.filter(x => x.key !== "lejos");
         j.sim = sim;
         j.fiLevel = fiLevel(j.fiPeak, fz);
         if (j.fiPeak >= fz.fi_high) j.signals.push({ key: "indice", w: 1, label: "Índice de fatiga alto", text: "el índice de fatiga estimado llegó a " + Math.round(j.fiPeak) + " a las " + new Date(j.fiPeakAt).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit", hour12: false }) + " (alto desde " + fz.fi_high + ")" });
         j.score = GI.sum(j.signals, x => x.w);
         j.level = j.score >= 3 ? "alto" : j.score === 2 ? "medio" : "bajo";
       }
-      sims.set(drv, { sim, list, next: nextShiftRisk(list, sim, fz, o.now), rot: rotationSummary(list) });
+      sims.set(drv, { sim, list, rs, next: nextShiftRisk(list, sim, fz, o.now, rs), rot: rotationSummary(list) });
     }
     shifts.sort((a, b) => b.s - a.s);
     return { shifts, limits: fz, sims };
+  }
+
+
+  // ---------- Diagramas de trabajo (14x7, 7x7, 21x7…) ----------
+  // Se detectan de los viajes: bloques de días trabajados separados por 3 o más
+  // días sin trabajar (un día suelto sin viajes no corta la vuelta). El diagrama
+  // es la mediana de las vueltas completas y de los francos. También se puede
+  // fijar a mano por conductor (manual = { work, off }).
+  const dayIdx = dk => Math.round(GI.parseDayKey(dk).getTime() / 86400000);
+  function rosterOf(list, now, manual) {
+    const days = [...new Set(list.map(j => dayIdx(GI.dayKey(j.s))))].sort((a, b) => a - b);
+    if (!days.length) return null;
+    const blocks = [];
+    for (const d of days) {
+      const b = blocks[blocks.length - 1];
+      if (b && d - b.end - 1 < 3) { b.end = d; b.n++; } else blocks.push({ start: d, end: d, n: 1, offBefore: b ? d - b.end - 1 : null });
+    }
+    const today = dayIdx(GI.dayKey(now));
+    const last = blocks[blocks.length - 1];
+    const lastDone = today - last.end >= 3;
+    // vueltas completas: sin la primera (puede empezar antes del período) ni la última si sigue
+    const done = blocks.slice(1, lastDone ? blocks.length : blocks.length - 1);
+    const offs = blocks.slice(1).map(b => b.offBefore);
+    let work = null, off = null, source = null;
+    if (manual && manual.none) { /* fijado a mano: sin diagrama */ }
+    else if (manual && manual.work > 0) { work = manual.work; off = manual.off || 0; source = "manual"; }
+    else if (done.length >= 2 && offs.length >= 2) {
+      // solo si las vueltas y los francos son parejos (si no, es trabajo irregular, no un diagrama)
+      const lens = done.map(b => b.end - b.start + 1), W = GI.median(lens), O = GI.median(offs);
+      const near = (arr, m) => arr.filter(v => Math.abs(v - m) <= Math.max(2, 0.2 * m)).length / arr.length;
+      if (W >= 4 && O >= 3 && near(lens, W) >= 0.7 && near(offs, O) >= 0.7) { work = Math.round(W); off = Math.round(O); source = "auto"; }
+    }
+    const curDay = today - last.start + 1;
+    const lenLast = last.end - last.start + 1;
+    // de franco: terminó una vuelta (o lleva 2 días sin trabajar al final de ella)
+    let inFranco = !!work && today > last.end && (lastDone || (lenLast >= work - 1 && today - last.end >= 1));
+    if (inFranco && today >= last.end + off + 1) inFranco = false; // ya pasó su franco y no volvió: no es franco
+    const backDay = inFranco ? last.end + off + 1 : null;
+    return { work, off, source, blocks, cycles: done.length, curDay, inFranco, backAt: backDay != null ? backDay * 86400000 + new Date(backDay * 86400000).getTimezoneOffset() * 60000 : null,
+      label: work ? work + "x" + off : null, blockOf: d => blocks.find(b => d >= b.start && d <= b.end) };
   }
 
   // Rotación de turnos del conductor: cambios día ↔ noche, hacia atrás (noche →
@@ -438,7 +485,7 @@
   // habitual. Devuelve la curva, cuándo cruzaría el umbral alto y la acción.
   function projectIndex(entry, fz, now, horizonH) {
     useParams(fz.P);
-    const { list, sim } = entry;
+    const { list, sim, rs } = entry;
     if (!sim || !list.length) return null;
     const hz = (horizonH || 16) * H;
     const last = list[list.length - 1];
@@ -461,13 +508,13 @@
       for (let t = now; t < Math.min(workEnd, now + hz); t += FI.step) step(t, true, df);
       for (let t = workEnd; t < now + hz; t += FI.step) step(t, false, 0);
     } else {
-      nextStart = nextAt(hb.startMin, Math.max(now, last.e + H));
+      nextStart = nextAt(hb.startMin, Math.max(now, last.e + H, (rs && rs.inFranco && rs.backAt) || 0));
       const df = hb.span > 0 ? Math.min(1, hb.dh / hb.span) : 0.7;
       const nEnd = nextStart + hb.span * H;
       for (let t = now; t < now + hz; t += FI.step) step(t, t >= nextStart && t < nEnd, df);
     }
     const Fnow = pts[0][1];
-    const next = open ? null : nextShiftRisk(list, sim, fz, now);
+    const next = open ? null : nextShiftRisk(list, sim, fz, now, rs);
     // acción sugerida
     let level = "ok", action;
     const hhmm = t => new Date(t).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit", hour12: false });
@@ -486,7 +533,8 @@
       } else if (next.peak >= fz.fi_mod) { level = "amarillo"; action = "Próximo turno moderado (" + Math.round(next.peak) + ")"; }
       else action = "Sin riesgo para su próximo turno";
     } else action = "Sin datos suficientes";
-    return { pts, Fnow, crossAt, peak, peakAt, open, next, nextStart, workEnd, hb, level, action, risk: Math.max(peak, next ? next.peak : 0) };
+    if (!open && rs && rs.inFranco && level !== "rojo") { level = "ok"; action = "De franco hasta " + (rs.backAt ? new Date(rs.backAt).toLocaleDateString("es-AR", { weekday: "short", day: "numeric", month: "short" }) : "–") + " (" + rs.label + ")"; }
+    return { pts, Fnow, crossAt, peak, peakAt, open, next, nextStart, workEnd, hb, level, action, rs, franco: !open && !!(rs && rs.inFranco), risk: Math.max(peak, next ? next.peak : 0) };
   }
 
   // ---------- Validación del índice contra eventos de cámara ----------
@@ -583,5 +631,5 @@
     return { current, best, tried: grid.length };
   }
 
-  Object.assign(GI, { projectIndex, FI_DEFAULT, FI_BANDS, fiExposure, poissonFit, calibrateIndex, FATIGUE_SIGNALS: SIGNALS, FATIGUE_CAM_CATS: CAM_CATS, buildShifts, shiftProgress, liveTrips, fatigueLimits, fiLevel, openShiftIndex, nextShiftRisk, _fat: { overlapHours, nightFrac, circ, fiWork, fiRest, simulateDriver, habitual } });
+  Object.assign(GI, { rosterOf, projectIndex, FI_DEFAULT, FI_BANDS, fiExposure, poissonFit, calibrateIndex, FATIGUE_SIGNALS: SIGNALS, FATIGUE_CAM_CATS: CAM_CATS, buildShifts, shiftProgress, liveTrips, fatigueLimits, fiLevel, openShiftIndex, nextShiftRisk, _fat: { overlapHours, nightFrac, circ, fiWork, fiRest, simulateDriver, habitual } });
 })(window.GI);

@@ -194,7 +194,8 @@
     const now = Date.now();
     let t = now - 7 * H;
     t = addTrip(dev2, od, t, 3.4) + 0.3 * H; addTrip(dev2, od, t, 3.13); // terminó hace 10 min; vuelve a manejar hace 8 min
-    for (let day = 10; day >= 1; day--) { const base = new Date(today); base.setDate(base.getDate() - day); let x = base.getTime() + 7 * H; x = addTrip(dev2, od, x, 4) + H; addTrip(dev2, od, x, 4); }
+    // diagrama 14x7 (hoy es el día 7 de la vuelta); una vuelta se extendió 3 días
+    for (let day = 90; day >= 1; day--) { const pos = (90 - day) % 21; if (pos >= 14 && !(day >= 40 && day <= 42)) continue; const base = new Date(today); base.setDate(base.getDate() - day); let x = base.getTime() + 7 * H; x = addTrip(dev2, od, x, 4) + H; addTrip(dev2, od, x, 4); }
   }
 
   // AddInData persiste en sessionStorage para poder probar admin → conductor recargando la página.

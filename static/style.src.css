@@ -542,3 +542,6 @@ input:disabled, select:disabled { background: var(--sunken); color: var(--muted)
 .ft-more summary { cursor: pointer; font-weight: 600; font-family: var(--display); font-size: 16px; }
 .ft-tl-bar { font-size: 11px; font-weight: 600; fill: #1f2a37; pointer-events: none; }
 .ft-tl-bar.on-dark { fill: #fff; }
+.ft-roster { background: var(--sunken); border-radius: 8px; padding: 8px 12px; margin: 4px 0 10px; font-size: 14px; display: flex; flex-direction: column; gap: 6px; }
+.ft-roster-edit { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.ft-roster-edit input { width: 60px; }

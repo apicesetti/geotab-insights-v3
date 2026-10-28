@@ -371,6 +371,31 @@ assert.strictEqual(GI.durationToHours("00:11:42.0300000").toFixed(4), (11 / 60 +
   assert.ok(Math.abs(L[1].restBefore - 7) < 0.01 && L[1].restEngine);
   assert.ok(Math.abs(L[0].dh + L[1].dh - 9) < 1e-6);
 }
+// Diagramas: 14x7 detectado, día 15 de la vuelta, franco corto y franco en curso.
+{
+  const D = (n, h) => new Date(2026, 6, 1 + n, h || 0).getTime();
+  const trips = [];
+  const work = (d0, n) => { for (let d = d0; d < d0 + n; d++) trips.push({ d: "v1", r: "L", s: D(d, 7), e: D(d, 17), dh: 9, km: 600 }); };
+  work(0, 14); work(21, 14); work(42, 16); /* 2 días de más */ work(61, 14); /* volvió con 3 de franco */ work(81, 14);
+  const now = D(97, 12); // terminó el día 94: de franco
+  const r = GI.buildShifts({ settings: { fatigue: {} }, tripsByDevice: new Map([["v1", trips]]), events: [] }, new Set(["v1"]), null, { now });
+  const e = r.sims.get("L");
+  assert.strictEqual(e.rs.label, "14x7"); assert.strictEqual(e.rs.source, "auto");
+  const L = e.list;
+  const d57 = L.find(j => GI.dayKey(j.s) === GI.dayKey(D(57)));
+  assert.ok(d57.cycleDay === 16 && d57.signals.some(x => x.key === "seguidos"), d57.cycleDay);
+  const d10 = L.find(j => GI.dayKey(j.s) === GI.dayKey(D(10)));
+  assert.ok(!d10.signals.some(x => x.key === "seguidos"), "día 11 de 14 no es 'días seguidos'");
+  const d60 = L.find(j => GI.dayKey(j.s) === GI.dayKey(D(61)));
+  assert.ok(d60.signals.some(x => x.key === "franco"), JSON.stringify(d60.signals));
+  assert.ok(e.rs.inFranco && e.rs.backAt >= D(102) && e.rs.backAt <= D(102, 1), new Date(e.rs.backAt).toString());
+  const pj = GI.projectIndex(e, r.limits, now, 16);
+  assert.ok(pj.franco && /De franco/.test(pj.action), pj.action);
+  assert.ok(e.next.start >= D(102), new Date(e.next.start).toString());
+  // manual: 7x7
+  const r2 = GI.buildShifts({ settings: { fatigue: {} }, tripsByDevice: new Map([["v1", trips]]), events: [] }, new Set(["v1"]), null, { now, rosters: new Map([["L", { work: 7, off: 7 }]]) });
+  assert.strictEqual(r2.sims.get("L").rs.label, "7x7");
+}
 // Validación del índice: el ajuste de Poisson recupera la pendiente.
 {
   const bins = [];

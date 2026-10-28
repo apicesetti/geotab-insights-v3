@@ -178,7 +178,9 @@
           <td><${DriverLink} view=${view} id=${r.id} onDriver=${onDriver} /><div className="small muted">${r.last.devices.map(d => devName(view, d)).join(", ")}</div></td>
           <td className="small">${p.open ? html`${r.prog && r.prog.driving ? html`<span className="ft-live">● Manejando</span>` : "En jornada, parado hace " + dur(r.prog ? r.prog.sinceLast / 60 : 0)}
               <div className="muted">desde las ${hm(p.open.s)} · ${r.prog ? r.prog.items.map(it => html`<span key=${it.key} className=${"ft-lim " + it.level}>${it.label.replace("Manejo continuo", "Continuo")} ${dur(it.v)}/${it.max} h</span>`) : null}</div>`
-            : html`Descansando hace ${dur((now - r.last.e) / H)}<div className="muted">${p.nextStart ? "arranque habitual " + when(p.nextStart) : ""}</div>`}</td>
+            : p.franco ? html`De franco <span className="tag">${p.rs.label}</span><div className="muted">vuelve ${p.rs.backAt ? dshort(p.rs.backAt) : "–"}</div>`
+            : html`Descansando hace ${dur((now - r.last.e) / H)}<div className="muted">${p.nextStart ? "arranque habitual " + when(p.nextStart) : ""}</div>`}
+            ${p.rs && p.rs.work && !p.franco ? html`<div className="muted">día ${p.rs.curDay} de ${p.rs.work} <span className="tag" title=${p.rs.source === "auto" ? "Detectado de sus vueltas" : "Fijado a mano"}>${p.rs.label}</span></div>` : null}</td>
           <td className="num">${fiTag(p.Fnow, fz)}</td>
           <td><${Spark} entry=${r.entry} proj=${p} fz=${fz} now=${now} /></td>
           <td className="num">${p.crossAt && p.crossAt > now ? html`<b>${(GI.dayKey(p.crossAt) !== GI.dayKey(now) ? dshort(p.crossAt) + " " : "") + hm(p.crossAt)}</b>${p.open ? "" : html`<div className="small muted">en su próximo turno</div>`}` : p.open && p.Fnow >= fz.fi_high ? html`<b className="delta bad">ya</b>` : html`<span className="muted">–</span>`}</td>
@@ -440,7 +442,44 @@ ${restFrom != null && restFrom < j.s ? (() => { const g = GAP[restKind(j, fz)]; 
     </div>`;
   }
 
-  function FatigueDriver({ view, id, res, cases, now, onClose, onCase, onSafety }) {
+  function RosterBox({ api, id, rs, roster, isAdmin, userName, onRoster }) {
+    const PRE = ["14x7", "7x7", "21x7", "14x14", "10x5", "7x3", "4x4", "5x2"];
+    const cur = roster ? (roster.none ? "none" : roster.work + "x" + roster.off) : "auto";
+    const [v, setV] = useState(PRE.includes(cur) || cur === "auto" || cur === "none" ? cur : "otro");
+    const [w, setW] = useState(roster && roster.work ? roster.work : 14), [o, setO] = useState(roster && roster.off ? roster.off : 7);
+    const [busy, setBusy] = useState(false), [msg, setMsg] = useState(null);
+    async function save() {
+      setBusy(true); setMsg(null);
+      try {
+        if (v === "auto") { if (roster && roster.id) await GI.removeRoster(api, roster.id); onRoster({ drv: id, removed: true }); }
+        else {
+          const [ww, oo] = v === "otro" ? [+w, +o] : v === "none" ? [0, 0] : v.split("x").map(Number);
+          onRoster(await GI.saveRoster(api, { id: roster && roster.id, drv: id, work: ww, off: oo, none: v === "none", by: userName }));
+        }
+        setMsg("Guardado");
+      } catch (e) { setMsg("No se pudo guardar: " + ((e && e.message) || e)); }
+      setBusy(false);
+    }
+    const blocks = rs ? rs.blocks.slice(-6).reverse() : [];
+    return html`<div className="ft-roster">
+      <div><b>Diagrama:</b> ${rs && rs.work ? html`<span className="tag">${rs.label}</span> ${rs.source === "auto" ? html`<span className="muted small">detectado de ${rs.cycles} ${rs.cycles === 1 ? "vuelta" : "vueltas"}</span>` : html`<span className="muted small">fijado a mano</span>`}
+        · ${rs.inFranco ? "de franco, vuelve el " + (rs.backAt ? dshort(rs.backAt) : "–") : "día " + rs.curDay + " de " + rs.work}` : html`<span className="muted">${roster && roster.none ? "sin diagrama (fijado a mano)" : "no se detecta un diagrama por vueltas"}</span>`}</div>
+      ${isAdmin ? html`<div className="ft-roster-edit">
+        <select value=${v} onChange=${e => setV(e.target.value)} aria-label="Diagrama">
+          <option value="auto">Automático (según sus viajes)</option>
+          ${PRE.map(k => html`<option key=${k} value=${k}>${k}</option>`)}
+          <option value="otro">Otro…</option>
+          <option value="none">Sin diagrama (semana normal)</option>
+        </select>
+        ${v === "otro" ? html`<input type="number" min="1" max="60" value=${w} onInput=${e => setW(e.target.value)} aria-label="Días de trabajo" /> x <input type="number" min="0" max="60" value=${o} onInput=${e => setO(e.target.value)} aria-label="Días de franco" />` : null}
+        <button className="btn small" disabled=${busy} onClick=${save}>${busy ? "Guardando…" : "Guardar"}</button>
+        ${msg ? html`<span className="small">${msg}</span>` : null}
+      </div>` : null}
+      ${blocks.length > 1 ? html`<div className="small muted ft-roster-blocks">Últimas vueltas: ${blocks.map((b, i) => html`<span key=${i}>${dshort((b.start * 86400000) + new Date(b.start * 86400000).getTimezoneOffset() * 60000)}: ${b.end - b.start + 1} días${b.offBefore != null ? " (franco previo " + b.offBefore + ")" : ""}${i < blocks.length - 1 ? " · " : ""}</span>`)}</div>` : null}
+    </div>`;
+  }
+
+  function FatigueDriver({ view, id, res, cases, now, onClose, onCase, onSafety, api, isAdmin, userName, roster, onRoster }) {
     const fz = res.limits;
     const [days, setDays] = useState(14);
     const s = res.sims.get(id);
@@ -480,6 +519,7 @@ ${restFrom != null && restFrom < j.s ? (() => { const g = GAP[restKind(j, fz)]; 
         <b>${proj.action}.</b>
         ${proj.open ? html` Empezó a las ${hm(proj.open.s)} (turno ${proj.open.type}); lleva ${dur((now - proj.open.s) / H)} de jornada y ${dur(proj.open.dh)} de manejo. Si completa su jornada habitual (${dur(proj.hb.span)}) el índice llegaría a ${fiTag(proj.peak, fz)}${proj.crossAt && proj.crossAt > now ? html` y pasaría de ${fz.fi_high} a las <b>${hm(proj.crossAt)}</b>` : ""}.`
           : proj.next ? html` Terminó el ${when(proj.next.lastE)}. Si arranca a su hora habitual, el ${when(proj.next.start)} (turno ${proj.next.hb.type}, ${dur(proj.next.hb.span)}), empezaría con ${fiTag(proj.next.Fstart, fz)} y terminaría en ${fiTag(proj.next.peak, fz)}.` : null}</span></div>` : null}
+      <${RosterBox} api=${api} id=${id} rs=${s && s.rs} roster=${roster} isAdmin=${isAdmin} userName=${userName} onRoster=${onRoster} />
       ${s && s.sim ? html`<div className="ft-sub-head"><h3>Evolución del índice de fatiga</h3><${Segmented} value=${cdays} onChange=${setCdays} options=${[{ value: 3, label: "3 días" }, { value: 7, label: "7 días" }, { value: 14, label: "14 días" }]} /></div>
         <${IndexChart} entry=${s} proj=${proj} fz=${fz} now=${now} days=${cdays} onCase=${onCase} height=${250} />` : null}
       <div className="ft-facts">${facts.map(([l, v, bad]) => html`<div key=${l} className=${bad ? "bad" : ""}><span>${l}</span><b>${v}</b></div>`)}</div>
@@ -815,6 +855,28 @@ ${restFrom != null && restFrom < j.s ? (() => { const g = GAP[restKind(j, fz)]; 
           { key: "startSd", label: "Variación del inicio", align: "num", value: r => r.startSd || 0, fmt: r => (r.startSd == null ? "–" : html`<span className=${r.startSd > 3 ? "delta bad" : ""}>± ${dur(r.startSd)}</span>`) },
         ]} empty="Sin conductores con 3 jornadas o más." />
       <//>
+      <${Panel} title="Diagramas de trabajo"
+        hint="Se detectan de los viajes de cada conductor: vueltas de días trabajados separadas por 3 o más días sin trabajar (un día suelto sin viajes no corta la vuelta). El diagrama es la mediana de sus vueltas completas y de sus francos. Se puede fijar a mano desde la ficha de fatiga del conductor. Con diagrama, 'Días seguidos' se mide contra la vuelta (no contra el máximo general) y se marca volver con un franco más corto.">
+        ${(() => {
+          const rows = [...res.sims.entries()].filter(([, e]) => e.rs && e.rs.work).map(([id, e]) => {
+            const rs = e.rs, done = rs.blocks.slice(1, rs.inFranco ? rs.blocks.length : rs.blocks.length - 1);
+            return { id, rs, long: done.filter(b => b.end - b.start + 1 > rs.work + 1).length, short: rs.blocks.slice(1).filter(b => b.offBefore < rs.off - 1).length, maxLen: Math.max(...rs.blocks.map(b => b.end - b.start + 1)) };
+          });
+          const by = GI.groupBy(rows, r => r.rs.label);
+          const none = [...res.sims.values()].filter(e => !(e.rs && e.rs.work)).length;
+          return html`<p className="small">${[...by.entries()].sort((a, b) => b[1].length - a[1].length).map(([k, l]) => html`<span key=${k} className="tag">${k}: ${l.length}</span>`)} ${none ? html`<span className="muted"> · ${n0(none)} sin diagrama por vueltas</span>` : null}</p>
+            <${DataTable} rowKey=${r => r.id} rows=${rows} limit=${15} defaultSort=${{ key: "dev", dir: "desc" }} columns=${[
+              { key: "id", label: "Conductor", value: r => drvName(view, r.id), fmt: r => html`<${DriverLink} view=${view} id=${r.id} onDriver=${onDriver} />` },
+              { key: "label", label: "Diagrama", value: r => r.rs.label, fmt: r => html`${r.rs.label} <span className="muted small">${r.rs.source === "auto" ? "detectado" : "a mano"}</span>` },
+              { key: "cycles", label: "Vueltas completas", align: "num", value: r => r.rs.cycles, fmt: r => n0(r.rs.cycles) },
+              { key: "long", label: "Vueltas más largas", align: "num", title: "Vueltas con más días que el diagrama (+1 de tolerancia)", fmt: r => (r.long ? html`<span className="delta bad">${r.long}</span>` : "0") },
+              { key: "maxLen", label: "Vuelta más larga", align: "num", fmt: r => r.maxLen + " días" },
+              { key: "short", label: "Francos cortos", align: "num", fmt: r => (r.short ? html`<span className="delta bad">${r.short}</span>` : "0") },
+              { key: "state", label: "Ahora", value: r => (r.rs.inFranco ? 0 : r.rs.curDay), fmt: r => (r.rs.inFranco ? "de franco" + (r.rs.backAt ? ", vuelve " + dshort(r.rs.backAt) : "") : "día " + r.rs.curDay + " de " + r.rs.work) },
+              { key: "dev", label: "", value: r => r.long * 2 + r.short, fmt: () => "" },
+            ]} empty="No se detectan diagramas por vueltas en el período (con 1 mes suele no alcanzar: probá con 3 meses o más)." />`;
+        })()}
+      <//>
     </div>`;
   }
 
@@ -933,7 +995,9 @@ ${restFrom != null && restFrom < j.s ? (() => { const g = GAP[restKind(j, fz)]; 
     const [drv, setDrv] = useState(null);
     const [cases, setCases] = useState(new Map());
     const [live, setLive] = useState({ loading: true, now: Date.now() });
-    const period = useMemo(() => GI.buildShifts(view.model, view.ids, view.driverOk), [view]);
+    const [rosters, setRosters] = useState(new Map()); // diagramas fijados a mano
+    const rmap = useMemo(() => new Map([...rosters.values()].map(r => [r.drv, r])), [rosters]);
+    const period = useMemo(() => GI.buildShifts(view.model, view.ids, view.driverOk, { rosters: rmap }), [view, rmap]);
     async function refresh() {
       setLive(l => ({ ...l, loading: true }));
       try {
@@ -949,14 +1013,15 @@ ${restFrom != null && restFrom < j.s ? (() => { const g = GAP[restKind(j, fz)]; 
       const t = setInterval(() => setLive(l => ({ ...l, now: Date.now() })), 60000);
       let off = false;
       GI.loadFatigueCases(api).then(list => { if (!off) setCases(new Map(list.map(c => [c.key, c]))); }).catch(e => console.warn("[Geotab Insights] casos de fatiga", e));
+      GI.loadRosters(api).then(list => { if (!off) setRosters(new Map(list.map(r => [r.drv, r]))); }).catch(e => console.warn("[Geotab Insights] diagramas", e));
       return () => { off = true; clearInterval(t); };
     }, [api]);
     // Seguimiento y fichas: período + viajes en vivo de las últimas horas.
     const res = useMemo(() => {
-      if (!live.recent) return GI.buildShifts(view.model, view.ids, view.driverOk, { now: live.now });
+      if (!live.recent) return GI.buildShifts(view.model, view.ids, view.driverOk, { now: live.now, rosters: rmap });
       const tb = GI.liveTrips(view.model, live.recent, live.status, LIVE_HOURS, live.now);
-      return GI.buildShifts(view.model, view.ids, view.driverOk, { now: live.now, tripsByDevice: tb });
-    }, [view, live]);
+      return GI.buildShifts(view.model, view.ids, view.driverOk, { now: live.now, tripsByDevice: tb, rosters: rmap });
+    }, [view, live, rmap]);
     const { shifts, limits } = period;
     const findSel = sel && (res.shifts.find(j => j.key === sel.key) || shifts.find(j => j.key === sel.key) || sel);
     const openDriver = id => { setSel(null); setDrv(id); };
@@ -974,6 +1039,7 @@ ${restFrom != null && restFrom < j.s ? (() => { const g = GAP[restKind(j, fz)]; 
             : html`<${DriversSection} view=${view} onDriver=${openDriver} />`}
         </div>`}
       ${drv && !findSel ? html`<${FatigueDriver} key=${drv} view=${view} id=${drv} res=${res} cases=${cases} now=${live.now}
+        api=${api} isAdmin=${isAdmin} userName=${userName} roster=${rosters.get(drv)} onRoster=${r => setRosters(m => { const n = new Map(m); if (r && !r.removed) n.set(r.drv, r); else n.delete(drv); return n; })}
         onClose=${() => setDrv(null)} onCase=${j => setSel(j)} onSafety=${id => { setDrv(null); onDriver(id); }} />` : null}
       ${findSel ? html`<${CaseDetail} key=${findSel.key} view=${view} api=${api} j=${findSel} fz=${limits} rec=${cases.get(findSel.key)} userName=${userName}
         onDriver=${openDriver}
