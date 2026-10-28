@@ -20,9 +20,18 @@
   const GRAN_WORD = { day: "día", week: "semana", month: "mes" };
   const GRAN_PLURAL = { day: "días", week: "semanas", month: "meses" };
   const VS = "vs 1.ª mitad";
-  // En tasas, un período incompleto (ej. un solo domingo al inicio) da
-  // valores engañosos: no se dibuja.
-  const rateOf = (s, v) => (s.partial ? null : v);
+  // Un período incompleto (ej. una semana con solo el sábado y el domingo del
+  // período) se dibuja igual, pero con el punto hueco y la línea punteada, y
+  // el tooltip avisa cuántos días tiene: su valor es menos confiable.
+  const rateOf = (s, v) => v;
+  function partialStyle(series, color) {
+    const p = series.map(s => !!s.partial);
+    return {
+      pointBackgroundColor: p.map(x => (x ? "#ffffff" : color)), pointBorderColor: color, pointRadius: p.map(x => (x ? 4 : 3)),
+      segment: { borderDash: ctx => (p[ctx.p0DataIndex] || p[ctx.p1DataIndex] ? [5, 4] : undefined) },
+    };
+  }
+  const partialTip = series => ({ afterLabel: c => { const s = series[c.dataIndex]; return s && s.partial ? "Período incompleto: " + (s.days || 0) + " de " + (s.expectedDays || "?") + " días" : ""; } });
 
   // Comparación 1.ª vs 2.ª mitad del período, solo con buckets completos.
   // num/den: funciones sobre un bucket; el resultado es Σnum/Σden de cada mitad.
@@ -72,10 +81,11 @@
       data: {
         labels: view.series.map(s => s.label),
         datasets: [{ label: m.label + " (" + m.unit + ")", data: view.series.map(s => s[metric] == null ? null : bar ? GI.round(s[metric], m.dec) : rateOf(s, GI.round(s[metric], m.dec))),
-          borderColor: m.color, backgroundColor: bar ? m.color : m.color + "1f", fill: !bar, tension: 0.3, spanGaps: true }],
+          borderColor: m.color, backgroundColor: bar ? view.series.map(s => (s.partial ? m.color + "80" : m.color)) : m.color + "1f", fill: !bar, tension: 0.3, spanGaps: true,
+          ...(bar ? {} : partialStyle(view.series, m.color)) }],
       },
       options: {
-        plugins: { legend: { display: false }, milestones: { items: GI.milestoneMarks(view.milestones, view.series, view.gran) } },
+        plugins: { legend: { display: false }, tooltip: { callbacks: partialTip(view.series) }, milestones: { items: GI.milestoneMarks(view.milestones, view.series, view.gran) } },
         scales: { y: { beginAtZero: true, title: { display: true, text: m.unit } } },
       },
     }} />`;
@@ -288,7 +298,7 @@
           <${ChartView} config=${idleMode === "pct" ? {
             type: "line",
             data: { labels: view.series.map(s => s.label), datasets: [
-              { label: "% del tiempo en marcha", data: view.series.map(s => s.idlePct == null ? null : rateOf(s, GI.round(s.idlePct, 1))), borderColor: "#2a78d6", backgroundColor: "#2a78d61f", fill: true, tension: 0.3, spanGaps: true }] },
+              { label: "% del tiempo en marcha", data: view.series.map(s => s.idlePct == null ? null : rateOf(s, GI.round(s.idlePct, 1))), borderColor: "#2a78d6", backgroundColor: "#2a78d61f", fill: true, tension: 0.3, spanGaps: true, ...partialStyle(view.series, "#2a78d6") }] },
             options: { plugins: { legend: { display: false }, milestones: marks }, scales: { y: { beginAtZero: true, title: { display: true, text: "%" } } } },
           } : {
             type: "bar",
@@ -301,7 +311,7 @@
             type: "line",
             data: { labels: view.series.map(s => s.label), datasets: typeSeries.map(t => ({
               label: GI.vtypeLabel(view.settings, t.vt), data: t.s.map(x => x.l100 == null ? null : rateOf(x, GI.round(x.l100, 1))),
-              borderColor: t.color, backgroundColor: t.color, tension: 0.3, spanGaps: true })) },
+              borderColor: t.color, backgroundColor: t.color, tension: 0.3, spanGaps: true, ...partialStyle(t.s, t.color) })) },
             options: { plugins: { milestones: marks }, scales: { y: { beginAtZero: true, title: { display: true, text: "L/100 km" } } } },
           }} />
         <//>

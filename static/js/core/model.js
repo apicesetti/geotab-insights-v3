@@ -470,7 +470,7 @@
     // Buckets incompletos (inicio/fin del período) se marcan con "*".
     return [...buckets.entries()].map(([bk, c]) => {
       const partial = daysIn.get(bk) < expected(bk);
-      return { key: bk, label: GI.bucketLabel(bk, gran) + (partial ? " *" : ""), partial, ...kpis(c) };
+      return { key: bk, label: GI.bucketLabel(bk, gran) + (partial ? " *" : ""), partial, days: daysIn.get(bk), expectedDays: expected(bk), ...kpis(c) };
     });
   }
 
