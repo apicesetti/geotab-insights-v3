@@ -19,6 +19,10 @@
     ["config", "Configuración"],
   ];
 
+  // Pestañas que por ahora solo se publican en la BETA (en la versión normal no aparecen).
+  const BETA_ONLY = new Set(["corredores"]);
+  const showBetaTabs = () => GI.BUILD === "beta" || /\/dev\//.test(window.location.pathname);
+
   // Config guardada + campos nuevos que pudieran faltar (versiones futuras).
   function mergeDefaults(saved, defaults) {
     if (!saved) return defaults;
@@ -293,7 +297,7 @@
         <button className="btn link small" onClick=${() => setFilter({ vtype: "", stype: "" })}>Quitar filtros</button>
       </div>` : null}
       ${loading != null ? html`<${Progress} value=${loading} label=${loadingLabel || "Descargando datos"} />` : null}
-      <nav className="tabs">${(driverMode ? [["mi", "Mi desempeño"]] : TABS).map(([k, l]) => html`<button key=${k} className=${tab === k ? "on" : ""} onClick=${() => setTab(k)}>${l}</button>`)}</nav>
+      <nav className="tabs">${(driverMode ? [["mi", "Mi desempeño"]] : TABS.filter(([k]) => !BETA_ONLY.has(k) || showBetaTabs())).map(([k, l]) => html`<button key=${k} className=${tab === k ? "on" : ""} onClick=${() => setTab(k)}>${l}</button>`)}</nav>
       <div className="gi-main">
         ${error ? html`<${Info} tone="error">${error}<//>` : null}
         ${noShared && !isAdmin && !driverMode ? html`<${Info} tone="warn">Estás viendo la configuración por defecto: un administrador todavía no la configuró, o la guardó antes de que se compartiera con tu grupo. Pedile que abra el add-in y guarde la configuración (o use "Compartir con todos").<//>` : null}
@@ -324,7 +328,7 @@
           : tab === "recorridos" ? html`<${GI.RoutesTab} view=${view} api=${api} />`
           : tab === "fatiga" ? (GI.FatigueTab ? html`<${GI.FatigueTab} view=${view} api=${api} userName=${userName} onDriver=${id => setDetail({ type: "d", id, mode: "safety" })} />` : html`<${Info} tone="warn">Se está terminando de cargar la nueva versión. Recargá la página (Ctrl + F5).<//>`)
           : tab === "exposicion" ? html`<${GI.ExposureTab} view=${view} onDriver=${id => setDetail({ type: "d", id })} />`
-          : tab === "corredores" ? (GI.RoadsTab ? html`<${GI.RoadsTab} view=${view} api=${api} database=${database} />` : html`<${Info} tone="warn">Se está terminando de cargar la nueva versión de Corredores. Recargá la página (Ctrl + F5).<//>`)
+          : tab === "corredores" && showBetaTabs() ? (GI.RoadsTab ? html`<${GI.RoadsTab} view=${view} api=${api} database=${database} />` : html`<${Info} tone="warn">Se está terminando de cargar la nueva versión de Corredores. Recargá la página (Ctrl + F5).<//>`)
           : tab === "hitos" ? html`<${GI.MilestonesTab} view=${view} milestones=${milestones} isAdmin=${isAdmin} groups=${groupsFlat}
               onAdd=${async m => { const r = await GI.addMilestone(api, m); setMilestones(ms => [...ms, r]); }}
               onUpdate=${async m => { await GI.updateMilestone(api, m); setMilestones(ms => ms.map(x => (x.id === m.id ? m : x))); }}
