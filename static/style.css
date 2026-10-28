@@ -1140,3 +1140,17 @@
 #gi3-root .ft-tl-gap { font-size: 11px; fill: #1f2a37; font-weight: 600; }
 #gi3-root .ft-cal { max-width: 640px; margin-top: 10px; }
 #gi3-root .ft-kpis td:first-child { white-space: nowrap; }
+#gi3-root .ft-track td { vertical-align: middle; }
+#gi3-root .ft-track tr.ft-track-rojo td:first-child { box-shadow: inset 4px 0 0 var(--bad); }
+#gi3-root .ft-track tr.ft-track-amarillo td:first-child { box-shadow: inset 4px 0 0 var(--marking); }
+#gi3-root .ft-act { font-size: 13px; font-weight: 600; }
+#gi3-root .ft-act.rojo { color: var(--bad); }
+#gi3-root .ft-act.amarillo { color: var(--marking-ink); }
+#gi3-root .ft-act.ok { color: var(--good); font-weight: 500; }
+#gi3-root .ft-lim { display: inline-block; margin: 2px 4px 0 0; padding: 0 5px; border-radius: 4px; background: var(--sunken); font-size: 11.5px; color: var(--text-2); }
+#gi3-root .ft-lim.amarillo { background: var(--marking-soft); color: var(--marking-ink); }
+#gi3-root .ft-lim.rojo { background: var(--bad-soft); color: var(--bad); font-weight: 600; }
+#gi3-root .ft-spark { display: block; }
+#gi3-root .ft-subnav { margin-top: -4px; }
+#gi3-root .ft-more { margin-top: 12px; }
+#gi3-root .ft-more summary { cursor: pointer; font-weight: 600; font-family: var(--display); font-size: 16px; }

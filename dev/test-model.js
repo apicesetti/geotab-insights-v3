@@ -296,7 +296,8 @@ assert.strictEqual(GI.durationToHours("00:11:42.0300000").toFixed(4), (11 / 60 +
   const night = shifts.find(j => j.dk === "2026-10-20" && j.type === "noche");
   assert.ok(night, JSON.stringify(shifts.map(j => [j.dk, j.type])));
   const keys = night.signals.map(x => x.key).sort().join(",");
-  for (const k of ["camara", "cambio", "continuo", "descanso", "madrugada", "manejo"]) assert.ok(keys.includes(k), k + " en " + keys);
+  for (const k of ["cambio", "continuo", "descanso", "madrugada", "manejo", "indice"]) assert.ok(keys.includes(k), k + " en " + keys);
+  assert.ok(!keys.includes("camara"), "las cámaras no son señal");
   assert.strictEqual(night.level, "alto");
   assert.strictEqual(night.camCluster, 4);
   assert.ok(Math.abs(night.low - 3) < 0.01, "02–05 " + night.low);
@@ -311,6 +312,9 @@ assert.strictEqual(GI.durationToHours("00:11:42.0300000").toFixed(4), (11 / 60 +
   assert.ok(drive.at > now && drive.at < now + 4 * 3600000);
   // índice de fatiga: el turno noche tras descansar de día termina alto; el diurno, bajo
   assert.ok(night.fiPeak >= 100 && night.signals.some(x => x.key === "indice"), "índice noche " + night.fiPeak);
+  // proyección: la jornada en curso
+  const pj = GI.projectIndex(GI.buildShifts(fm, new Set(["v1"]), null, { now }).sims.get("L"), limits, now, 16);
+  assert.ok(pj.open && pj.pts.length > 10 && pj.peak >= pj.Fnow && typeof pj.action === "string");
   assert.ok(day.fiPeak < 80, "índice día " + day.fiPeak);
   const oi = GI.openShiftIndex(open[0], shifts.filter(j => j.drv === "L").reverse(), open[0].sim, limits, now);
   assert.ok(oi.Fnow > 30 && oi.peak >= oi.Fnow);

@@ -11,9 +11,10 @@
 //   cambio      cambia de turno día ↔ noche con un solo descanso entremedio
 //   descanso    descanso previo < min_rest, o mayormente de día antes de un turno noche
 //   seguidos    más de max_days_row días seguidos de trabajo
-//   camara      eventos de fatiga, distracción o salida de carril (cámara / ADAS):
-//               3 o más en 60 minutos pesa doble
-// Nivel: alto con 3 puntos o más (cámara agrupada vale 2), medio con 2.
+//   (los eventos de cámara —bostezo, distracción, salida de carril— NO son
+//   señales: bostezar no prueba cansancio. Se muestran como contexto y se usan
+//   para validar si el índice anticipa esos eventos.)
+// Nivel: alto con 3 señales o más, medio con 2.
 (function (GI) {
   "use strict";
   const H = 3600000, MIN = 60000;
@@ -29,7 +30,6 @@
     { key: "francos", label: "Noche después de francos" },
     { key: "motor", label: "Descanso con motor en marcha" },
     { key: "lejos", label: "Descansos fuera de base" },
-    { key: "camara", label: "Cámara" },
     { key: "indice", label: "Índice de fatiga alto" },
   ];
 
@@ -340,8 +340,6 @@
         if (prev && j.restEngine) add("motor", 1, GI.fmtNum(j.restIdleH, 1) + " h del descanso previo con el motor en marcha (probablemente durmió en la cabina)" + (j.restPlace ? ", en " + j.restPlace.name : ""));
         if (j.awayRow >= 3) add("lejos", 1, j.awayRow + " descansos seguidos fuera de la base" + (j.restPlace ? " (el último en " + j.restPlace.name + ")" : ""));
         if (j.daysRow > fz.max_days_row) add("seguidos", 1, j.daysRow + " días seguidos de trabajo (máximo " + fz.max_days_row + ")");
-        if (cluster >= 3) add("camara", 2, cluster + " eventos de fatiga, distracción o salida de carril en menos de una hora");
-        else if (cam.length >= 3) add("camara", 1, cam.length + " eventos de fatiga, distracción o salida de carril en la jornada");
         j.signals = sg;
         // jornada en curso: el último viaje terminó hace menos de la pausa que cierra la jornada
         j.open = o.now - j.e < fz.SPLIT && o.now >= j.e - 60000;
@@ -432,6 +430,65 @@
   }
 
 
+
+  // ---------- Proyección del índice (Seguimiento) ----------
+  // Curva de las próximas horas: si está en jornada, sigue trabajando al ritmo
+  // que lleva hasta completar su jornada habitual y después descansa; si está
+  // descansando, descansa hasta su próximo arranque habitual y hace su jornada
+  // habitual. Devuelve la curva, cuándo cruzaría el umbral alto y la acción.
+  function projectIndex(entry, fz, now, horizonH) {
+    useParams(fz.P);
+    const { list, sim } = entry;
+    if (!sim || !list.length) return null;
+    const hz = (horizonH || 16) * H;
+    const last = list[list.length - 1];
+    const open = last.open ? last : null;
+    const hb = habitual(list) || { span: fz.max_span, dh: fz.max_drive_day * 0.8, startMin: Math.round(hourOf(last.s) * 60), type: last.type };
+    let F = sim.at(now - 1);
+    const pts = [[now, F]];
+    let crossAt = F >= fz.fi_high ? now : null, peak = F, peakAt = now;
+    const step = (t, working, df) => {
+      F = fiStep(F, t, working, df, FI.step / H);
+      pts.push([t + FI.step, F]);
+      if (F > peak) { peak = F; peakAt = t + FI.step; }
+      if (crossAt == null && F >= fz.fi_high) crossAt = t + FI.step;
+    };
+    let workEnd, nextStart = null;
+    if (open) {
+      const spanNow = (now - open.s) / H;
+      const df = spanNow > 0.5 ? Math.min(1, open.dh / spanNow) : 0.7;
+      workEnd = Math.max(now, open.s + hb.span * H);
+      for (let t = now; t < Math.min(workEnd, now + hz); t += FI.step) step(t, true, df);
+      for (let t = workEnd; t < now + hz; t += FI.step) step(t, false, 0);
+    } else {
+      nextStart = nextAt(hb.startMin, Math.max(now, last.e + H));
+      const df = hb.span > 0 ? Math.min(1, hb.dh / hb.span) : 0.7;
+      const nEnd = nextStart + hb.span * H;
+      for (let t = now; t < now + hz; t += FI.step) step(t, t >= nextStart && t < nEnd, df);
+    }
+    const Fnow = pts[0][1];
+    const next = open ? null : nextShiftRisk(list, sim, fz, now);
+    // acción sugerida
+    let level = "ok", action;
+    const hhmm = t => new Date(t).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit", hour12: false });
+    const dayWord = t => (GI.dayKey(t) === GI.dayKey(now) ? "" : GI.dayKey(t) === GI.dayKey(now + 86400000) ? "mañana " : new Date(t).toLocaleDateString("es-AR", { weekday: "short" }) + " ");
+    if (open) {
+      if (Fnow >= fz.fi_high) { level = "rojo"; action = "Cortar la jornada: el índice ya está en " + Math.round(Fnow); }
+      else if (crossAt && crossAt <= workEnd) { level = "amarillo"; action = "Llega a " + fz.fi_high + " a las " + hhmm(crossAt) + ": programar relevo o pausa larga antes"; }
+      else if (Fnow >= fz.fi_mod) { level = "amarillo"; action = "Índice moderado: evitar extender la jornada"; }
+      else action = "Puede completar su jornada habitual";
+    } else if (next) {
+      if (next.peak >= fz.fi_high) {
+        level = next.restAtStart < (next.needRest || Infinity) ? "rojo" : "amarillo";
+        action = next.needRest == null ? "Acortar su próxima jornada: con la habitual pasa de " + fz.fi_high
+          : next.restAtStart < next.needRest ? "No asignar antes de " + dayWord(next.lastE + next.needRest * H) + "las " + hhmm(next.lastE + next.needRest * H) + " (necesita " + GI.fmtNum(next.needRest, 1) + " h de descanso)"
+          : "Próximo turno alto (" + Math.round(next.peak) + "): evitar madrugada y jornadas largas";
+      } else if (next.peak >= fz.fi_mod) { level = "amarillo"; action = "Próximo turno moderado (" + Math.round(next.peak) + ")"; }
+      else action = "Sin riesgo para su próximo turno";
+    } else action = "Sin datos suficientes";
+    return { pts, Fnow, crossAt, peak, peakAt, open, next, nextStart, workEnd, hb, level, action, risk: Math.max(peak, next ? next.peak : 0) };
+  }
+
   // ---------- Validación del índice contra eventos de cámara ----------
   const FI_BANDS = ["bajo", "moderado", "alto", "muy alto"];
   // Horas de manejo, km y eventos según la franja del índice en ese momento.
@@ -440,7 +497,7 @@
   function fiExposure(res, fz) {
     const bands = FI_BANDS.map(key => ({ key, hours: 0, km: 0, cam: 0, other: 0, byCat: {} }));
     const bins = []; // por 10 puntos: { h, n } para el ajuste
-    const bin = F => { const i = Math.min(25, Math.max(0, Math.floor(F / 10))); return bins[i] || (bins[i] = { F: i * 10 + 5, h: 0, n: 0 }); };
+    const bin = F => { const i = Math.min(25, Math.max(0, Math.floor(F / 10))); return bins[i] || (bins[i] = { F: i * 10 + 5, h: 0, n: 0, c: {} }); };
     const bOf = F => FI_BANDS.indexOf(fiLevel(F, fz));
     for (const { list, sim } of res.sims.values()) {
       if (!sim) continue;
@@ -454,11 +511,14 @@
             x.hours += t.dh * f; x.km += t.km * f; bin(F).h += t.dh * f;
           }
         }
-        for (const e of j.cam || []) { const F = sim.at(e.t), x = bands[bOf(F)]; x.cam++; x.byCat[e.cat] = (x.byCat[e.cat] || 0) + 1; bin(F).n++; }
+        for (const e of j.cam || []) { const F = sim.at(e.t), x = bands[bOf(F)]; x.cam++; x.byCat[e.cat] = (x.byCat[e.cat] || 0) + 1; const bb = bin(F); bb.n++; bb.c[e.cat] = (bb.c[e.cat] || 0) + 1; }
         for (const e of j.events || []) if (!CAM_CATS.has(e.cat)) bands[bOf(sim.at(e.t))].other++;
       }
     }
-    return { bands, bins: bins.filter(Boolean), cam: GI.sum(bands, x => x.cam), hours: GI.sum(bands, x => x.hours) };
+    const B = bins.filter(Boolean);
+    // los mismos tramos, con los eventos de un solo tipo (para ver qué tipo acompaña al índice)
+    const binsOf = cat => B.map(x => ({ F: x.F, h: x.h, n: x.c[cat] || 0 }));
+    return { bands, bins: B, binsOf, cam: GI.sum(bands, x => x.cam), hours: GI.sum(bands, x => x.hours) };
   }
   // Ajuste de Poisson: eventos por hora = exp(a + b·F/100). Devuelve b y la
   // log-verosimilitud (para comparar juegos de coeficientes con los mismos datos).
@@ -523,5 +583,5 @@
     return { current, best, tried: grid.length };
   }
 
-  Object.assign(GI, { FI_DEFAULT, FI_BANDS, fiExposure, poissonFit, calibrateIndex, FATIGUE_SIGNALS: SIGNALS, FATIGUE_CAM_CATS: CAM_CATS, buildShifts, shiftProgress, liveTrips, fatigueLimits, fiLevel, openShiftIndex, nextShiftRisk, _fat: { overlapHours, nightFrac, circ, fiWork, fiRest, simulateDriver, habitual } });
+  Object.assign(GI, { projectIndex, FI_DEFAULT, FI_BANDS, fiExposure, poissonFit, calibrateIndex, FATIGUE_SIGNALS: SIGNALS, FATIGUE_CAM_CATS: CAM_CATS, buildShifts, shiftProgress, liveTrips, fatigueLimits, fiLevel, openShiftIndex, nextShiftRisk, _fat: { overlapHours, nightFrac, circ, fiWork, fiRest, simulateDriver, habitual } });
 })(window.GI);

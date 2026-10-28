@@ -183,7 +183,7 @@
         if (base.getDay() === 0) continue;
         let t = base.getTime() + 6 * H;
         t = addTrip(dev, nd, t, 3) + 0.5 * H; t = addTrip(dev, nd, t, 3) + 0.75 * H; addTrip(dev, nd, t, 2.5, { x: zc.zCam[0], y: zc.zCam[1] });
-      } else if (day >= 8) { // turno noche 21–08: tirada larga y madrugada
+      } else { // turno noche 21–08 hasta anoche: tirada larga y madrugada
         let t = base.getTime() + (day === 14 ? -2 : 21) * H; // el primero, 6 h después del último turno día
         t = addTrip(dev, nd, t, 4.6) + 0.4 * H; t = addTrip(dev, nd, t, 4) + 0.6 * H; t = addTrip(dev, nd, t, 1.8, { x: -60.2, y: -33.6 }); // termina en un parador de la ruta
         if (day % 3 !== 0) exceptions.push({ id: "e" + (++eid), rule: { id: "RuleIdlingId" }, device: { id: dev.id }, driver: { id: nd.id }, activeFrom: new Date(t + 0.3 * H).toISOString(), duration: dur(5.5), state: "ExceptionEventStateValidId" });

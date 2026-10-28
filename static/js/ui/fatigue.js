@@ -41,84 +41,117 @@
     return html`<button className="btn link ft-name" onClick=${e => { e.stopPropagation(); onDriver(id); }}>${drvName(view, id)}</button>`;
   }
 
-  // ---------- Ahora ----------
-  function Bar({ it, now }) {
-    const pct = Math.min(1.15, it.pct);
-    const fmt = it.fmt || dur;
-    const txt = it.v >= it.max ? "superado" : it.at ? (it.at - now < 20 * H ? "llega a las " + hm(it.at) : "") : "";
-    return html`<div className="ft-meter" title=${it.label + ": " + fmt(it.v) + " de " + it.max + (it.unit != null ? it.unit : " h")}>
-      <div className="ft-meter-head"><span>${it.label}</span><b>${fmt(it.v)} <span className="muted">/ ${it.max}${it.unit != null ? it.unit : " h"}</span></b></div>
-      <div className="ft-bar"><div className=${"ft-fill " + it.level} style=${{ width: (pct / 1.15) * 100 + "%" }}></div><i style=${{ left: ((it.warn || 0.8) / 1.15) * 100 + "%" }}></i><i className="max" style=${{ left: (1 / 1.15) * 100 + "%" }}></i></div>
-      <div className=${"ft-meter-foot " + it.level}>${txt}</div>
+  // ---------- Evolución del índice ----------
+  // Gráfico del índice: la curva de los últimos días (sólida), la proyección de
+  // las próximas horas (punteada), las jornadas abajo y los eventos de cámara
+  // como contexto sobre la curva.
+  function IndexChart({ entry, proj, fz, now, days, onCase, height }) {
+    const W = 1000, Hh = height || 230, L = 40, R = 990, T = 14, B = Hh - 46;
+    const t0 = now - days * 86400000, t1 = now + 16 * H;
+    const x = t => L + ((t - t0) / (t1 - t0)) * (R - L);
+    const yMax = 160, y = v => B - (Math.min(yMax, Math.max(0, v)) / yMax) * (B - T);
+    const sim = entry.sim;
+    const pts = [];
+    for (let t = Math.max(t0, sim.t0); t <= now; t += 30 * MIN) pts.push(x(t).toFixed(1) + "," + y(sim.at(t)).toFixed(1));
+    const proP = proj ? proj.pts.filter((p, i) => i % 2 === 0 || i === proj.pts.length - 1).map(([t, v]) => x(t).toFixed(1) + "," + y(v).toFixed(1)) : [];
+    const shifts = entry.list.filter(j => j.e > t0);
+    const cams = [];
+    for (const j of shifts) for (const e of j.cam || []) if (e.t >= t0) cams.push(e);
+    const ticks = [];
+    const d0 = new Date(t0); d0.setHours(0, 0, 0, 0);
+    const stepD = days > 10 ? 2 : 1;
+    for (let d = d0.getTime() + 86400000; d < t1; d += 86400000 * stepD) ticks.push(d);
+    const nights = [];
+    for (let d = d0.getTime(); d < t1; d += 86400000) nights.push([d, d + 6 * H]);
+    return html`<div className="ft-tl">
+      <svg viewBox=${"0 0 " + W + " " + Hh} role="img" aria-label="Evolución del índice de fatiga">
+        ${nights.filter(([a, b]) => b > t0 && a < t1).map(([a, b], i) => html`<rect key=${"n" + i} x=${x(Math.max(a, t0))} y=${T} width=${Math.max(0, x(Math.min(b, t1)) - x(Math.max(a, t0)))} height=${B - T} fill="#f1f3f8" />`)}
+        <rect x=${x(now)} y=${T} width=${R - x(now)} height=${B - T} fill="#f7f8fa" />
+        ${[0, 40, 80, 120, 160].map(v => html`<g key=${"g" + v}><line x1=${L} x2=${R} y1=${y(v)} y2=${y(v)} stroke="#eceff3" /><text x=${L - 6} y=${y(v) + 4} textAnchor="end" className="ft-tl-tick">${v}</text></g>`)}
+        ${[fz.fi_mod, fz.fi_high].map((v, i) => html`<g key=${"th" + v}><line x1=${L} x2=${R} y1=${y(v)} y2=${y(v)} stroke=${i ? "#d4561e" : "#c99400"} strokeDasharray="5 4" /><text x=${L + 4} y=${y(v) - 4} className="ft-tl-lab">${(i ? "alto " : "moderado ") + v}</text></g>`)}
+        ${shifts.map(j => html`<rect key=${j.key} x=${x(Math.max(j.s, t0))} y=${B + 6} width=${Math.max(2, x(j.e) - x(Math.max(j.s, t0)))} height="10" rx="2" fill=${FI_COLORS[GI.fiLevel(j.fiPeak, fz)] || "#1f2a37"} style=${{ cursor: "pointer" }} onClick=${() => onCase && onCase(j)}>
+          <title>${"Jornada " + when(j.s) + " → " + when(j.e) + " · " + dur(j.span) + " · índice máx. " + Math.round(j.fiPeak) + " (click para ver)"}</title></rect>`)}
+        ${proj && proj.nextStart && proj.nextStart < t1 ? html`<rect x=${x(proj.nextStart)} y=${B + 6} width=${Math.max(2, x(Math.min(t1, proj.nextStart + proj.hb.span * H)) - x(proj.nextStart))} height="10" rx="2" fill="none" stroke="#1f2a37" strokeDasharray="3 2"><title>${"Próximo turno habitual: " + when(proj.nextStart)}</title></rect>` : null}
+        <text x=${L} y=${B + 30} className="ft-tl-lab">jornadas (color = índice máximo)</text>
+        <path d=${"M" + pts.join("L")} fill="none" stroke="#1f2a37" strokeWidth="2.2" />
+        ${proP.length ? html`<path d=${"M" + proP.join("L")} fill="none" stroke="#1f2a37" strokeWidth="2" strokeDasharray="5 4" opacity="0.7" />` : null}
+        ${cams.map((e, i) => html`<path key=${"c" + i} d=${"M" + x(e.t) + " " + (y(sim.at(e.t)) - 5) + " l-5 -9 h10 z"} fill=${CAM_COLORS[e.cat] || "#b93a0f"} opacity="0.85"><title>${when(e.t) + " · " + GI.catLabel(e.cat) + " · índice " + Math.round(sim.at(e.t))}</title></path>`)}
+        <line x1=${x(now)} x2=${x(now)} y1=${T} y2=${B + 18} stroke="#2a78d6" strokeWidth="1.5" />
+        <text x=${x(now) + 4} y=${T + 10} className="ft-tl-lab b" fill="#2a78d6">ahora ${proj ? Math.round(proj.Fnow) : ""}</text>
+        ${proj && proj.crossAt && proj.crossAt > now ? html`<g><circle cx=${x(proj.crossAt)} cy=${y(fz.fi_high)} r="4.5" fill="#d4561e" /><text x=${x(proj.crossAt) + 6} y=${y(fz.fi_high) - 6} className="ft-tl-lab b">${hm(proj.crossAt)}</text></g>` : null}
+        ${ticks.map(t => html`<text key=${"k" + t} x=${x(t)} y=${Hh - 4} textAnchor="middle" className="ft-tl-tick">${dshort(t)}</text>`)}
+      </svg>
+      <div className="ft-tl-legend small">
+        <span><i style=${{ background: "#1f2a37" }}></i>Índice estimado</span>
+        <span><i style=${{ background: "repeating-linear-gradient(90deg,#1f2a37 0 4px,transparent 4px 7px)" }}></i>Proyección si sigue su horario habitual</span>
+        <span><i style=${{ background: "#f1f3f8" }}></i>00–06 h</span>
+        <span><i className="tri" style=${{ borderBottomColor: CAM_COLORS.fatiga }}></i>Bostezo / fatiga</span>
+        <span><i className="tri" style=${{ borderBottomColor: CAM_COLORS.distraccion }}></i>Distracción</span>
+        <span><i className="tri" style=${{ borderBottomColor: CAM_COLORS.salida_carril }}></i>Salida de carril</span>
+        <span className="muted">Los eventos de cámara se muestran como contexto: no cuentan como señal de fatiga.</span>
+      </div>
     </div>`;
   }
-
-  function NowSection({ view, res, live, onRefresh, onDriver, onCase }) {
-    const { now } = live;
-    const fz = res.limits;
-    const rows = useMemo(() => {
-      const order = { rojo: 2, amarillo: 1, ok: 0 };
-      return res.shifts.filter(j => j.open).map(j => {
-        const p = GI.shiftProgress(j, fz, now);
-        const s = res.sims.get(j.drv);
-        const oi = GI.openShiftIndex(j, s ? s.list : [j], j.sim, fz, now);
-        if (oi.Fnow != null) {
-          const v = oi.Fnow;
-          p.items.push({ key: "fi", label: "Índice de fatiga", v, max: fz.fi_high, warn: fz.fi_mod / fz.fi_high, at: oi.crossAt && (p.driving || p.sinceLast <= 60) && oi.crossAt <= j.s + fz.max_span * H ? oi.crossAt : null, unit: "", fmt: x => String(Math.round(x)), pct: v / fz.fi_high,
-            level: v >= fz.fi_high ? "rojo" : v >= fz.fi_mod ? "amarillo" : "ok" });
-          p.worst = p.items.some(x => x.level === "rojo") ? "rojo" : p.items.some(x => x.level === "amarillo") ? "amarillo" : "ok";
-        }
-        return { j, p, oi };
-      }).sort((a, b) => order[b.p.worst] - order[a.p.worst] || Math.max(...b.p.items.map(x => x.pct)) - Math.max(...a.p.items.map(x => x.pct)));
-    }, [res, now]);
-    const red = rows.filter(r => r.p.worst === "rojo").length, yellow = rows.filter(r => r.p.worst === "amarillo").length;
-    return html`<${Panel} title="Jornadas en curso"
-        hint=${"Conductores que están manejando o cuyo último viaje terminó hace menos de " + fz.SPLIT / H + " h (la pausa que cierra una jornada). Cada barra compara lo que lleva contra el límite de Configuración → Fatiga y gravedad: amarillo cerca del límite, rojo al superarlo. La hora estimada supone que sigue al mismo ritmo que en lo que va de la jornada."}
-        actions=${html`<span className="muted small">${live.at ? "Datos de las " + hm(live.at) : ""}</span> <button className="btn small" disabled=${live.loading} onClick=${onRefresh}>${live.loading ? "Actualizando…" : "↻ Actualizar"}</button>`}>
-        ${live.err ? html`<${Info} tone="warn">No se pudieron traer los viajes de las últimas horas (${live.err}); se muestra lo que hay en el período cargado.<//>` : null}
-        <div className="readouts compact inset">
-          <${Kpi} label="Jornadas en curso" value=${n0(rows.length)} sub=${html`<span>${n0(rows.filter(r => r.p.driving).length)} manejando ahora</span>`} />
-          <${Kpi} label="Superaron un límite" value=${n0(red)} tone=${red ? "bad" : null} sub=${html`<span>jornada, manejo, continuo o índice</span>`} />
-          <${Kpi} label="Cerca del límite" value=${n0(yellow)} sub=${html`<span>a punto de superar alguno</span>`} />
-        </div>
-        ${!rows.length ? html`<p className="muted">${live.loading ? "Buscando jornadas en curso…" : "No hay jornadas en curso en este momento."}</p>` : html`<div className="ft-now">
-          ${rows.map(({ j, p, oi }) => html`<div key=${j.key} className=${"ft-now-row " + p.worst}>
-            <div className="ft-now-who">
-              <${DriverLink} view=${view} id=${j.drv} onDriver=${onDriver} />
-              <div className="small muted">${j.devices.map(d => devName(view, d)).join(", ")}</div>
-              <div className="small">${p.driving ? html`<span className="ft-live">● Manejando</span>` : "Parado hace " + dur(p.sinceLast / 60)} · empezó ${hm(j.s)} (turno ${j.type})</div>
-              <div className="small muted">Descanso previo: ${j.restBefore != null ? dur(j.restBefore) : "–"}${j.daysRow > 1 ? " · día " + j.daysRow + " seguido" : ""}</div>
-            </div>
-            <div className="ft-now-meters">${p.items.map(it => html`<${Bar} key=${it.key} it=${it} now=${now} />`)}</div>
-            <div className="ft-now-sig">
-              ${j.signals.length ? sigChips(j, true) : html`<span className="muted small">Sin señales todavía</span>`}
-              ${oi.peak != null && oi.peak > oi.Fnow + 1 ? html`<div className="small">Si completa su jornada habitual (${dur(oi.spanH)}) el índice llegaría a ${fiTag(oi.peak, fz)}.</div>` : null}
-              ${p.nightAhead ? html`<div className="small ft-warn">Turno noche: va a manejar en la franja de 02 a 05 h.</div>` : null}
-              <button className="btn link small" onClick=${() => onCase(j)}>Ver jornada</button>
-            </div>
-          </div>`)}
-        </div>`}
-      <//>`;
+  // Mini curva para la lista: últimas 72 h + proyección.
+  function Spark({ entry, proj, fz, now }) {
+    const W = 220, Hh = 44, t0 = now - 72 * H, t1 = now + 16 * H;
+    const x = t => ((t - t0) / (t1 - t0)) * W, y = v => Hh - 3 - (Math.min(160, Math.max(0, v)) / 160) * (Hh - 6);
+    const sim = entry.sim, pts = [];
+    for (let t = Math.max(t0, sim.t0); t <= now; t += H) pts.push(x(t).toFixed(1) + "," + y(sim.at(t)).toFixed(1));
+    const pp = proj ? proj.pts.filter((p, i) => i % 4 === 0 || i === proj.pts.length - 1).map(([t, v]) => x(t).toFixed(1) + "," + y(v).toFixed(1)) : [];
+    return html`<svg className="ft-spark" viewBox=${"0 0 " + W + " " + Hh} width="220" height="44" aria-hidden="true">
+      <rect x=${x(now)} y="0" width=${W - x(now)} height=${Hh} fill="#f4f6f9" />
+      <line x1="0" x2=${W} y1=${y(fz.fi_high)} y2=${y(fz.fi_high)} stroke="#d4561e" strokeDasharray="3 3" />
+      <line x1="0" x2=${W} y1=${y(fz.fi_mod)} y2=${y(fz.fi_mod)} stroke="#c99400" strokeDasharray="2 3" opacity="0.6" />
+      ${pts.length ? html`<path d=${"M" + pts.join("L")} fill="none" stroke="#1f2a37" strokeWidth="1.6" />` : null}
+      ${pp.length ? html`<path d=${"M" + pp.join("L")} fill="none" stroke="#1f2a37" strokeWidth="1.4" strokeDasharray="3 2" opacity="0.7" />` : null}
+      <line x1=${x(now)} x2=${x(now)} y1="0" y2=${Hh} stroke="#2a78d6" />
+    </svg>`;
   }
 
-  // ---------- Próximo turno ----------
-  function NextSection({ view, res, live, onDriver }) {
+  // ---------- Seguimiento: quién se acerca a un índice alto ----------
+  function TrackSection({ view, res, live, onRefresh, onDriver }) {
     const fz = res.limits, now = live.now;
-    const rows = [...res.sims.entries()].map(([drv, s]) => ({ drv, ...s.next })).filter(r => r.start && r.lastE > now - 72 * H);
-    return html`<${Panel} title="Riesgo del próximo turno"
-      hint=${"Para cada conductor que trabajó en las últimas 72 h y no está en jornada: si arranca a su hora habitual (la mediana de sus últimas jornadas del mismo tipo) con el descanso que lleva y hace su jornada habitual, a cuánto llegaría el índice de fatiga estimado. El descanso recomendado es el mínimo, contado desde que terminó, para no pasar de " + fz.fi_high + " (el índice se recupera más rápido descansando de noche)."}
-      actions=${html`<span className="muted small">${live.at ? "Datos de las " + hm(live.at) : ""}</span>`}>
-      <${DataTable} rowKey=${r => r.drv} rows=${rows} limit=${30} defaultSort=${{ key: "peak", dir: "desc" }} columns=${[
-        { key: "drv", label: "Conductor", value: r => drvName(view, r.drv), fmt: r => html`<${DriverLink} view=${view} id=${r.drv} onDriver=${onDriver} />` },
-        { key: "lastE", label: "Terminó", fmt: r => when(r.lastE) },
-        { key: "rest", label: "Descansó hasta ahora", align: "num", value: r => now - r.lastE, fmt: r => dur((now - r.lastE) / H) },
-        { key: "start", label: "Próximo arranque (habitual)", fmt: r => html`${when(r.start)} <span className="muted small">turno ${r.hb.type}, ${dur(r.hb.span)}</span>` },
-        { key: "Fstart", label: "Índice al arrancar", align: "num", fmt: r => fiTag(r.Fstart, fz) },
-        { key: "peak", label: "Índice al terminar", align: "num", fmt: r => fiTag(r.peak, fz) },
-        { key: "needRest", label: "Descanso recomendado", align: "num", value: r => (r.needRest == null ? 99 : r.needRest),
-          fmt: r => (r.needRest == null ? html`<span className="delta bad" title="Con su jornada habitual supera el umbral aun con 48 h de descanso">acortar la jornada</span>`
-            : html`<span className=${r.restAtStart < r.needRest ? "delta bad" : ""}>${dur(r.needRest)}</span><div className="small muted">desde las ${when(r.lastE + r.needRest * H)}</div>`) },
-      ]} empty="No hay conductores que hayan trabajado en las últimas 72 h." />
+    const [all, setAll] = useState(false);
+    const rows = useMemo(() => {
+      const out = [];
+      for (const [id, entry] of res.sims) {
+        const last = entry.list[entry.list.length - 1];
+        if (!last || !entry.sim || (!last.open && last.e < now - 72 * H)) continue;
+        const proj = GI.projectIndex(entry, fz, now, 16);
+        if (!proj) continue;
+        const prog = proj.open ? GI.shiftProgress(proj.open, fz, now) : null;
+        out.push({ id, entry, proj, prog, last });
+      }
+      const ord = { rojo: 2, amarillo: 1, ok: 0 };
+      return out.sort((a, b) => ord[b.proj.level] - ord[a.proj.level] || b.proj.risk - a.proj.risk);
+    }, [res, now]);
+    const show = all ? rows : rows.filter(r => r.proj.level !== "ok");
+    const red = rows.filter(r => r.proj.level === "rojo"), soon = rows.filter(r => r.proj.open && r.proj.crossAt && r.proj.crossAt > now);
+    const nextHigh = rows.filter(r => !r.proj.open && r.proj.next && r.proj.next.peak >= fz.fi_high);
+    return html`<${Panel} title="¿Quién se acerca a un índice de fatiga alto?"
+      hint=${"Conductores que trabajaron en las últimas 72 h o están en jornada. La curva muestra su índice de fatiga estimado de los últimos 3 días y, punteada, la proyección de las próximas 16 h: si está en jornada, sigue al ritmo que lleva hasta completar su jornada habitual; si descansa, arranca a su hora habitual (la mediana de sus últimas jornadas) y hace su jornada habitual. Alto desde " + fz.fi_high + ", moderado desde " + fz.fi_mod + " (Configuración → Fatiga y gravedad)."}
+      actions=${html`<span className="muted small">${live.at ? "Datos de las " + hm(live.at) : ""}</span> <button className="btn small" disabled=${live.loading} onClick=${onRefresh}>${live.loading ? "Actualizando…" : "↻ Actualizar"}</button>`}>
+      ${live.err ? html`<${Info} tone="warn">No se pudieron traer los viajes de las últimas horas (${live.err}); se usa lo cargado del período.<//>` : null}
+      <div className="readouts compact inset">
+        <${Kpi} label="Actuar ahora" value=${n0(red.length)} tone=${red.length ? "bad" : null} sub=${html`<span>en jornada con índice alto, o próximo turno que no llega a descansar lo necesario</span>`} />
+        <${Kpi} label=${"En jornada y llegan a " + fz.fi_high} value=${n0(soon.length)} sub=${html`<span>${soon.length ? "el primero a las " + hm(Math.min(...soon.map(r => r.proj.crossAt))) : "en las próximas horas"}</span>`} />
+        <${Kpi} label="Próximo turno con índice alto" value=${n0(nextHigh.length)} sub=${html`<span>si arrancan a su hora habitual</span>`} />
+        <${Kpi} label="Conductores activos" value=${n0(rows.length)} sub=${html`<span>${n0(rows.filter(r => r.proj.open).length)} en jornada ahora</span>`} />
+      </div>
+      <div className="ft-filters"><${Segmented} value=${all ? "all" : "risk"} onChange=${v => setAll(v === "all")} options=${[{ value: "risk", label: "Con riesgo (" + rows.filter(r => r.proj.level !== "ok").length + ")" }, { value: "all", label: "Todos (" + rows.length + ")" }]} /></div>
+      ${!show.length ? html`<p className="muted">${live.loading ? "Calculando…" : "Ningún conductor activo se acerca a un índice alto."}</p>` : html`<div className="table-wrap"><table className="tbl ft-track">
+        <thead><tr><th>Conductor</th><th>Estado</th><th className="num">Índice ahora</th><th>Últimas 72 h y próximas 16 h</th><th className="num">Llega a ${fz.fi_high}</th><th>Qué hacer</th></tr></thead>
+        <tbody>${show.map(r => { const p = r.proj; return html`<tr key=${r.id} className=${"ft-track-" + p.level} onClick=${() => onDriver(r.id)} style=${{ cursor: "pointer" }}>
+          <td><${DriverLink} view=${view} id=${r.id} onDriver=${onDriver} /><div className="small muted">${r.last.devices.map(d => devName(view, d)).join(", ")}</div></td>
+          <td className="small">${p.open ? html`${r.prog && r.prog.driving ? html`<span className="ft-live">● Manejando</span>` : "En jornada, parado hace " + dur(r.prog ? r.prog.sinceLast / 60 : 0)}
+              <div className="muted">desde las ${hm(p.open.s)} · ${r.prog ? r.prog.items.map(it => html`<span key=${it.key} className=${"ft-lim " + it.level}>${it.label.replace("Manejo continuo", "Continuo")} ${dur(it.v)}/${it.max} h</span>`) : null}</div>`
+            : html`Descansando hace ${dur((now - r.last.e) / H)}<div className="muted">${p.nextStart ? "arranque habitual " + when(p.nextStart) : ""}</div>`}</td>
+          <td className="num">${fiTag(p.Fnow, fz)}</td>
+          <td><${Spark} entry=${r.entry} proj=${p} fz=${fz} now=${now} /></td>
+          <td className="num">${p.crossAt && p.crossAt > now ? html`<b>${(GI.dayKey(p.crossAt) !== GI.dayKey(now) ? dshort(p.crossAt) + " " : "") + hm(p.crossAt)}</b>${p.open ? "" : html`<div className="small muted">en su próximo turno</div>`}` : p.open && p.Fnow >= fz.fi_high ? html`<b className="delta bad">ya</b>` : html`<span className="muted">–</span>`}</td>
+          <td><span className=${"ft-act " + p.level}>${p.action}</span></td>
+        </tr>`; })}</tbody></table></div>`}
     <//>`;
   }
 
@@ -380,10 +413,6 @@ ${restFrom != null && restFrom < j.s ? (() => { const g = GAP[restKind(j, fz)]; 
     const [days, setDays] = useState(14);
     const s = res.sims.get(id);
     const list = s ? s.list : [];
-    const open = list.find(j => j.open);
-    const nx = s && s.next;
-    const oi = open ? GI.openShiftIndex(open, list, open.sim, fz, now) : null;
-    const Fnow = s && s.sim ? (open ? oi.Fnow : nx ? nx.Fnow : null) : null;
     const done = list.filter(j => !j.open);
     const rests = list.map(j => j.restBefore).filter(v => v != null && v < 48);
     const withRest = list.filter(j => j.restBefore != null && j.restBefore < 48);
@@ -405,28 +434,27 @@ ${restFrom != null && restFrom < j.s ? (() => { const g = GAP[restKind(j, fz)]; 
       ["Cambios de turno", s && s.rot ? n0(s.rot.changes) + (s.rot.back ? " (" + s.rot.back + " hacia atrás)" : "") : "–", !!(s && s.rot && s.rot.back)],
       ["Variación de la hora de inicio", s && s.rot && s.rot.startSd != null ? "± " + dur(s.rot.startSd) : "–", !!(s && s.rot && s.rot.startSd > 3)],
     ];
-    const lastLevel = Fnow != null ? GI.fiLevel(Fnow, fz) : null;
+    const proj = s && s.sim ? GI.projectIndex(s, fz, now, 16) : null;
+    const [cdays, setCdays] = useState(7);
     return html`<${Modal} wide title=${"Fatiga · " + drvName(view, id)} onClose=${onClose}>
       <div className="ft-case-head">
-        ${lastLevel ? html`<span>Índice de fatiga ahora: ${fiTag(Fnow, fz)} <span className="muted">(${lastLevel})</span></span>` : null}
+        ${proj ? html`<span>Índice de fatiga ahora: ${fiTag(proj.Fnow, fz)} <span className="muted">(${GI.fiLevel(proj.Fnow, fz)})</span></span>` : null}
         <span className="ft-case-links">
           <button className="btn small" onClick=${() => onSafety(id)}>Ficha de seguridad</button>
           <button className="btn small" onClick=${() => GI.openEventsPage({ driverIds: [id], from: view.model.dayKeys[0], to: view.model.dayKeys[view.model.dayKeys.length - 1] })}>Eventos en MyGeotab ↗</button>
         </span>
       </div>
-      ${open ? html`<div className="verdict-line"><span className="vtag">En jornada</span><span>
-          Empezó a las <b>${hm(open.s)}</b> (turno ${open.type}), lleva ${dur((now - open.s) / H)} de jornada y ${dur(open.dh)} de manejo.
-          ${oi.peak != null ? html` Si completa su jornada habitual de ${dur(oi.spanH)}, el índice llegaría a ${fiTag(oi.peak, fz)}.` : null}
-          ${oi.crossAt ? html` Pasaría de ${fz.fi_high} cerca de las <b>${hm(oi.crossAt)}</b>.` : null}</span></div>`
-        : nx ? html`<div className=${"verdict-line " + (nx.peak >= fz.fi_high ? "bad" : "")}><span className="vtag">Próximo turno</span><span>
-          Terminó el ${when(nx.lastE)}. Si arranca a su hora habitual, el <b>${when(nx.start)}</b> (turno ${nx.hb.type}, ${dur(nx.hb.span)}), con ${dur(nx.restAtStart)} de descanso,
-          empezaría con índice ${fiTag(nx.Fstart, fz)} y terminaría en ${fiTag(nx.peak, fz)}.
-          ${nx.needRest == null ? html` Con su jornada habitual supera ${fz.fi_high} aun con 48 h de descanso: conviene acortarla.`
-            : nx.restAtStart < nx.needRest ? html` Para no pasar de ${fz.fi_high} necesita <b>${dur(nx.needRest)}</b> de descanso: arrancar después del <b>${when(nx.lastE + nx.needRest * H)}</b>.`
-            : html` Con ese descanso no pasa de ${fz.fi_high}.`}</span></div>` : null}
+      ${proj ? html`<div className=${"verdict-line " + (proj.level === "rojo" ? "bad" : "")}><span className="vtag">${proj.open ? "En jornada" : "Próximo turno"}</span><span>
+        <b>${proj.action}.</b>
+        ${proj.open ? html` Empezó a las ${hm(proj.open.s)} (turno ${proj.open.type}); lleva ${dur((now - proj.open.s) / H)} de jornada y ${dur(proj.open.dh)} de manejo. Si completa su jornada habitual (${dur(proj.hb.span)}) el índice llegaría a ${fiTag(proj.peak, fz)}${proj.crossAt && proj.crossAt > now ? html` y pasaría de ${fz.fi_high} a las <b>${hm(proj.crossAt)}</b>` : ""}.`
+          : proj.next ? html` Terminó el ${when(proj.next.lastE)}. Si arranca a su hora habitual, el ${when(proj.next.start)} (turno ${proj.next.hb.type}, ${dur(proj.next.hb.span)}), empezaría con ${fiTag(proj.next.Fstart, fz)} y terminaría en ${fiTag(proj.next.peak, fz)}.` : null}</span></div>` : null}
+      ${s && s.sim ? html`<div className="ft-sub-head"><h3>Evolución del índice de fatiga</h3><${Segmented} value=${cdays} onChange=${setCdays} options=${[{ value: 3, label: "3 días" }, { value: 7, label: "7 días" }, { value: 14, label: "14 días" }]} /></div>
+        <${IndexChart} entry=${s} proj=${proj} fz=${fz} now=${now} days=${cdays} onCase=${onCase} height=${250} />` : null}
       <div className="ft-facts">${facts.map(([l, v, bad]) => html`<div key=${l} className=${bad ? "bad" : ""}><span>${l}</span><b>${v}</b></div>`)}</div>
-      <div className="ft-sub-head"><h3>Patrón de jornadas</h3><${Segmented} value=${days} onChange=${setDays} options=${[{ value: 14, label: "14 días" }, { value: 28, label: "28 días" }]} /></div>
-      <${ShiftPattern} list=${list} fz=${fz} days=${days} onCase=${onCase} />
+      <details className="ft-more"><summary>Patrón de jornadas por día</summary>
+        <div className="ft-sub-head"><span></span><${Segmented} value=${days} onChange=${setDays} options=${[{ value: 14, label: "14 días" }, { value: 28, label: "28 días" }]} /></div>
+        <${ShiftPattern} list=${list} fz=${fz} days=${days} onCase=${onCase} />
+      </details>
       <h3 style=${{ marginTop: "14px" }}>Jornadas</h3>
       <${DataTable} rowKey=${j => j.key} rows=${list} limit=${12} defaultSort=${{ key: "s", dir: "desc" }} onRowClick=${onCase} columns=${[
         { key: "s", label: "Inicio", fmt: j => html`${dshort(j.s)} <span className="muted">${hm(j.s)}</span>${j.open ? html` <span className="ft-live">● en curso</span>` : ""}` },
@@ -460,7 +488,7 @@ ${restFrom != null && restFrom < j.s ? (() => { const g = GAP[restKind(j, fz)]; 
     const byDrv = GI.groupBy(rows, j => j.drv);
     const repeat = [...byDrv.values()].filter(l => l.length >= 2).length;
     return html`<${Panel} title="Jornadas con señales de fatiga"
-      hint=${"Cada fila es una jornada (viajes sin una pausa de " + limits.SPLIT / H + " h o más). Señales: jornada de más de " + limits.max_span + " h, más de " + limits.max_drive_day + " h de manejo, más de " + limits.max_continuous + " h sin una pausa de 15 min, manejo entre las 02 y las 05 h, cambio de turno día ↔ noche con un solo descanso, descanso de menos de " + limits.min_rest + " h o casi todo de día antes de un turno noche, más de " + limits.max_days_row + " días seguidos, eventos de fatiga, distracción o salida de carril de cámaras o ADAS (3 o más en una hora valen doble) e índice de fatiga estimado de " + limits.fi_high + " o más. Nivel alto: 3 puntos o más. Medio: 2."}>
+      hint=${"Cada fila es una jornada (viajes sin una pausa de " + limits.SPLIT / H + " h o más). Señales: jornada de más de " + limits.max_span + " h, más de " + limits.max_drive_day + " h de manejo, más de " + limits.max_continuous + " h sin una pausa de 15 min, manejo entre las 02 y las 05 h, cambio de turno día ↔ noche con un solo descanso, descanso de menos de " + limits.min_rest + " h o casi todo de día antes de un turno noche, más de " + limits.max_days_row + " días seguidos e índice de fatiga estimado de " + limits.fi_high + " o más. Nivel alto: 3 señales o más; medio: 2. Los eventos de cámara (bostezo, distracción, salida de carril) no son señales: se ven en la jornada como contexto y se analizan en Análisis → Validación del índice."}>
       <div className="ft-filters">
         <${Segmented} value=${lvl} onChange=${setLvl} options=${[{ value: "alto", label: "Nivel alto" }, { value: "medio", label: "Alto y medio" }, { value: "todas", label: "Con alguna señal" }]} />
         <select value=${st} onChange=${e => setSt(e.target.value)} aria-label="Estado">
@@ -590,6 +618,16 @@ ${restFrom != null && restFrom < j.s ? (() => { const g = GAP[restKind(j, fz)]; 
             scales: { x: { title: { display: true, text: "índice de fatiga en el momento del evento" } }, y: { beginAtZero: true, title: { display: true, text: "veces la franja baja" } } } },
         }} />` : null}
         <${BandTable} rows=${rows} />
+        ${ex.cam ? html`<h3 style=${{ marginTop: "14px" }}>¿Qué tipo de evento acompaña al índice?</h3>
+          <p className="small muted">Un bostezo aislado no prueba cansancio. Si un tipo de evento sube claramente cuando el índice sube, ese tipo sí está reflejando fatiga en esta base; si no sube, conviene no darle peso.</p>
+          <${DataTable} rowKey=${r => r.cat} rows=${[...GI.FATIGUE_CAM_CATS].map(cat => { const f = GI.poissonFit(ex.binsOf(cat)); return { cat, f, w: fitWords(f), n: f ? f.n : 0 }; })} columns=${[
+            { key: "cat", label: "Tipo de evento", value: r => GI.catLabel(r.cat), fmt: r => html`<span className="dot" style=${{ background: CAM_COLORS[r.cat] }}></span>${GI.catLabel(r.cat)}` },
+            { key: "n", label: "Eventos", align: "num", fmt: r => n0(r.n) },
+            { key: "m", label: "Cada 10 puntos de índice", align: "num", value: r => (r.w ? r.w.m : -9), fmt: r => (r.w && r.n >= 10 ? html`${pct(r.w.m)} <span className="muted small">(${pct(r.w.lo)} a ${pct(r.w.hi)})</span>` : "–") },
+            { key: "read", label: "Lectura", value: r => (r.w && r.w.sig && r.w.m > 0 ? 2 : r.n < 30 ? 0 : 1), fmt: r => (r.n < 30 ? html`<span className="muted">Pocos eventos para concluir</span>`
+              : r.w && r.w.sig && r.w.m > 0 ? html`<span className="delta good">Sube con el índice: refleja fatiga</span>`
+              : r.w && r.w.sig && r.w.m < 0 ? html`<span className="delta bad">Baja cuando el índice sube</span>` : html`<span className="delta flat">No se relaciona con el índice</span>`) },
+          ]} />` : null}
         <p className="muted small">${n0(ex.hours)} h de manejo y ${n0(ex.cam)} eventos de fatiga en el período. Índice ${custom ? "con coeficientes calibrados para esta base" : "con los coeficientes de fábrica"}.</p>
       <//>
       <${Panel} title="Calibrar el índice para esta base"
@@ -851,12 +889,14 @@ ${restFrom != null && restFrom < j.s ? (() => { const g = GAP[restKind(j, fz)]; 
       ]} />
     <//>`;
   }
-  const SECTIONS = [["ahora", "Ahora"], ["proximo", "Próximo turno"], ["casos", "Casos"], ["conductores", "Conductores"], ["descanso", "Descanso"], ["operacion", "Operación"], ["indicadores", "Indicadores"], ["validacion", "Validación"]];
-  const BETA_SECTIONS = new Set(["descanso", "operacion", "indicadores", "validacion"]);
+  const SECTIONS = [["seguimiento", "Seguimiento"], ["casos", "Casos"], ["analisis", "Análisis"]];
+  const ANALYSIS = [["conductores", "Conductores"], ["descanso", "Descanso"], ["operacion", "Operación"], ["indicadores", "Indicadores"], ["validacion", "Validación del índice"]];
+  const BETA_ANALYSIS = new Set(["descanso", "operacion", "indicadores", "validacion"]);
   const isBeta = () => GI.BUILD === "beta" || /\/dev\//.test(window.location.pathname);
 
   function FatigueTab({ view, api, onDriver, userName, isAdmin, onSaveSettings }) {
-    const [sec, setSec] = useState("ahora");
+    const [sec, setSec] = useState("seguimiento");
+    const [sub, setSub] = useState("conductores");
     const [sel, setSel] = useState(null);
     const [drv, setDrv] = useState(null);
     const [cases, setCases] = useState(new Map());
@@ -879,35 +919,28 @@ ${restFrom != null && restFrom < j.s ? (() => { const g = GAP[restKind(j, fz)]; 
       GI.loadFatigueCases(api).then(list => { if (!off) setCases(new Map(list.map(c => [c.key, c]))); }).catch(e => console.warn("[Geotab Insights] casos de fatiga", e));
       return () => { off = true; clearInterval(t); };
     }, [api]);
-    // Ahora / próximo turno / fichas: período + viajes en vivo de las últimas horas.
+    // Seguimiento y fichas: período + viajes en vivo de las últimas horas.
     const res = useMemo(() => {
       if (!live.recent) return GI.buildShifts(view.model, view.ids, view.driverOk, { now: live.now });
       const tb = GI.liveTrips(view.model, live.recent, live.status, LIVE_HOURS, live.now);
       return GI.buildShifts(view.model, view.ids, view.driverOk, { now: live.now, tripsByDevice: tb });
     }, [view, live]);
     const { shifts, limits } = period;
-    const high = shifts.filter(j => j.level === "alto");
-    const pending = shifts.filter(j => j.level !== "bajo" && !((cases.get(j.key) || {}).status && cases.get(j.key).status !== "Detectado"));
-    const nextRisk = [...res.sims.values()].filter(s => s.next && s.next.lastE > live.now - 72 * H && s.next.peak >= limits.fi_high);
-    const cam = shifts.filter(j => j.camCluster >= 3);
     const findSel = sel && (res.shifts.find(j => j.key === sel.key) || shifts.find(j => j.key === sel.key) || sel);
     const openDriver = id => { setSel(null); setDrv(id); };
+    const subs = ANALYSIS.filter(([k]) => !BETA_ANALYSIS.has(k) || isBeta());
     return html`<div>
-      <div className="readouts">
-        <${Kpi} label="Jornadas de nivel alto" value=${n0(high.length)} sub=${html`<span>en ${n0(new Set(high.map(j => j.drv)).size)} conductores</span>`} />
-        <${Kpi} label="Sin revisar" value=${n0(pending.length)} sub=${html`<span>nivel alto o medio en estado Detectado</span>`} />
-        <${Kpi} label="Próximo turno con índice alto" value=${n0(nextRisk.length)} tone=${nextRisk.length ? "bad" : null} sub=${html`<span>si arrancan a su hora habitual</span>`} />
-        <${Kpi} label="Con eventos de cámara agrupados" value=${n0(cam.length)} sub=${html`<span>3 o más en una hora (fatiga, distracción, carril)</span>`} />
-      </div>
-      <div className="subnav"><${Segmented} value=${sec} onChange=${setSec} options=${SECTIONS.filter(([k]) => !BETA_SECTIONS.has(k) || isBeta()).map(([value, label]) => ({ value, label }))} /></div>
-      ${sec === "validacion" && isBeta() ? html`<${ValidationSection} view=${view} res=${period} isAdmin=${isAdmin} settings=${view.settings} onSaveSettings=${onSaveSettings} /><${OutcomePanel} res=${period} />`
-        : sec === "descanso" && isBeta() ? html`<${RestSection} view=${view} res=${period} onDriver=${openDriver} />`
-        : sec === "operacion" && isBeta() ? html`<${OpsSection} view=${view} res=${period} onDriver=${openDriver} />`
-        : sec === "indicadores" && isBeta() ? html`<${KpiSection} view=${view} res=${period} cases=${cases} />`
-        : sec === "ahora" ? html`<${NowSection} view=${view} res=${res} live=${live} onRefresh=${refresh} onDriver=${openDriver} onCase=${setSel} />`
-        : sec === "proximo" ? html`<${NextSection} view=${view} res=${res} live=${live} onDriver=${openDriver} />`
+      <div className="subnav"><${Segmented} value=${sec} onChange=${setSec} options=${SECTIONS.map(([value, label]) => ({ value, label }))} /></div>
+      ${sec === "seguimiento" ? html`<${TrackSection} view=${view} res=${res} live=${live} onRefresh=${refresh} onDriver=${openDriver} />`
         : sec === "casos" ? html`<${CasesSection} view=${view} shifts=${shifts} cases=${cases} limits=${limits} onOpen=${setSel} onDriver=${openDriver} />`
-        : html`<${DriversSection} view=${view} onDriver=${openDriver} />`}
+        : html`<div>
+          <div className="subnav ft-subnav"><${Segmented} value=${sub} onChange=${setSub} options=${subs.map(([value, label]) => ({ value, label }))} /></div>
+          ${sub === "validacion" && isBeta() ? html`<${ValidationSection} view=${view} res=${period} isAdmin=${isAdmin} settings=${view.settings} onSaveSettings=${onSaveSettings} /><${OutcomePanel} res=${period} />`
+            : sub === "descanso" && isBeta() ? html`<${RestSection} view=${view} res=${period} onDriver=${openDriver} />`
+            : sub === "operacion" && isBeta() ? html`<${OpsSection} view=${view} res=${period} onDriver=${openDriver} />`
+            : sub === "indicadores" && isBeta() ? html`<${KpiSection} view=${view} res=${period} cases=${cases} />`
+            : html`<${DriversSection} view=${view} onDriver=${openDriver} />`}
+        </div>`}
       ${drv && !findSel ? html`<${FatigueDriver} key=${drv} view=${view} id=${drv} res=${res} cases=${cases} now=${live.now}
         onClose=${() => setDrv(null)} onCase=${j => setSel(j)} onSafety=${id => { setDrv(null); onDriver(id); }} />` : null}
       ${findSel ? html`<${CaseDetail} key=${findSel.key} view=${view} api=${api} j=${findSel} fz=${limits} rec=${cases.get(findSel.key)} userName=${userName}
