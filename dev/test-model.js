@@ -324,6 +324,49 @@ assert.strictEqual(GI.durationToHours("00:11:42.0300000").toFixed(4), (11 / 60 +
   const live = GI.buildShifts(fm, new Set(["v1"]), null, { now, tripsByDevice: lt }).shifts.find(j => j.open);
   assert.ok(live.live && GI.shiftProgress(live, limits, now).driving);
 }
+// Descanso: lugar, motor en marcha, esperas y rotación.
+{
+  const T = (d, h, m) => new Date(2026, 9, d, h, m || 0).getTime();
+  const base = { id: "zB", name: "Base Neuquén", types: ["ZoneTypeOfficeId"] }, cli = { id: "zC", name: "Planta Añelo", types: ["ZoneTypeCustomerId"] };
+  const zoneAtPlace = (x, y) => (x === 1 ? base : x === 2 ? cli : null);
+  const trips = [];
+  const add = (s, hrs, x) => { trips.push({ d: "v1", r: "L", s, e: s + hrs * 3600000, dh: hrs, km: hrs * 70, x, y: 0 }); return s + hrs * 3600000; };
+  // día 1: sale de base, espera 3 h en la planta, vuelve a base
+  { let t = T(5, 6); t = add(t, 3, 2) + 3 * 3600000; add(t, 3, 1); }
+  // día 2 turno día terminando en ruta; descansa en ruta con motor en marcha 6 h
+  { let t = T(6, 6); add(t, 8, 9); }
+  // día 2 noche (rotación hacia adelante) y día 3 de día (hacia atrás)
+  { let t = T(6, 22); add(t, 8, 1); }
+  { let t = T(7, 13); add(t, 6, 1); }
+  // franco largo y primera noche
+  { let t = T(10, 21); add(t, 8, 1); }
+  const idle = [{ d: "v1", t: T(6, 14, 10), h: 6 }];
+  const fm = { settings: { fatigue: {} }, tripsByDevice: new Map([["v1", trips]]), events: [], idle, zoneAtPlace };
+  const r = GI.buildShifts(fm, new Set(["v1"]), null, { now: T(20, 0) });
+  const L = r.sims.get("L").list;
+  assert.strictEqual(L[0].waits.length, 1); assert.strictEqual(L[0].waits[0].place.name, "Planta Añelo"); assert.ok(Math.abs(L[0].waits[0].h - 3) < 1e-6);
+  assert.strictEqual(L[1].restPlace.kind, "base");
+  const n2 = L[2];
+  assert.strictEqual(n2.restPlace.kind, "ruta"); assert.ok(n2.restEngine && n2.signals.some(x => x.key === "motor"), JSON.stringify(n2.signals));
+  assert.strictEqual(n2.rotation, "adelante"); assert.strictEqual(L[3].rotation, "atras");
+  assert.ok(L[4].signals.some(x => x.key === "francos"));
+  const rot = r.sims.get("L").rot;
+  assert.strictEqual(rot.back, 1); assert.strictEqual(rot.fwd, 1); assert.strictEqual(rot.afterOff, 1); assert.ok(rot.startSd > 3);
+  // con el motor en marcha se recupera menos: arranca la noche más cansado que sin ralentí
+  const r2 = GI.buildShifts({ ...fm, idle: [] }, new Set(["v1"]), null, { now: T(20, 0) });
+  assert.ok(n2.fiStart > r2.sims.get("L").list[2].fiStart + 3, n2.fiStart + " vs " + r2.sims.get("L").list[2].fiStart);
+}
+// Viaje con 7 h de ralentí adentro (durmió con el motor en marcha): se parte y el ralentí es el descanso.
+{
+  const T = (h) => new Date(2026, 9, 12, 0, 0).getTime() + h * 3600000;
+  const trips = [{ d: "v1", r: "L", s: T(8), e: T(24), dh: 9, km: 600, ih: 7.2, x: 5, y: 5 }];
+  const idle = [{ d: "v1", t: T(16), h: 7 }];
+  const r = GI.buildShifts({ settings: { fatigue: {} }, tripsByDevice: new Map([["v1", trips]]), events: [], idle }, new Set(["v1"]), null, { now: T(48) });
+  const L = r.sims.get("L").list;
+  assert.strictEqual(L.length, 2, L.map(j => j.span).join(","));
+  assert.ok(Math.abs(L[1].restBefore - 7) < 0.01 && L[1].restEngine);
+  assert.ok(Math.abs(L[0].dh + L[1].dh - 9) < 1e-6);
+}
 // Validación del índice: el ajuste de Poisson recupera la pendiente.
 {
   const bins = [];

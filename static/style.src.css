@@ -525,3 +525,4 @@ input:disabled, select:disabled { background: var(--sunken); color: var(--muted)
 @media (max-width: 900px) { .ft-now-meters { grid-template-columns: 1fr 1fr; } }
 .ft-tl-gap { font-size: 11px; fill: #1f2a37; font-weight: 600; }
 .ft-cal { max-width: 640px; margin-top: 10px; }
+.ft-kpis td:first-child { white-space: nowrap; }

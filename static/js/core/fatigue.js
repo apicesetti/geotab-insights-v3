@@ -26,6 +26,9 @@
     { key: "cambio", label: "Cambio de turno" },
     { key: "descanso", label: "Descanso corto o de día" },
     { key: "seguidos", label: "Días seguidos" },
+    { key: "francos", label: "Noche después de francos" },
+    { key: "motor", label: "Descanso con motor en marcha" },
+    { key: "lejos", label: "Descansos fuera de base" },
     { key: "camara", label: "Cámara" },
     { key: "indice", label: "Índice de fatiga alto" },
   ];
@@ -75,6 +78,12 @@
     const n = Math.ceil((end - t0) / FI.step) + 1;
     const vals = new Float32Array(n);
     let F = FI.start, ji = 0, ti = 0;
+    // descansos con el motor en marcha (ralentí): se recupera la mitad
+    const poor = [];
+    for (const j of list) for (const iv of j.restIdle || []) poor.push(iv);
+    poor.sort((x, y) => x[0] - y[0]);
+    let pi = 0;
+    const poorAt = t => { while (pi < poor.length && poor[pi][1] <= t) pi++; return pi < poor.length && poor[pi][0] <= t; };
     for (let i = 0; i < n; i++) {
       const a = t0 + i * FI.step, b = a + FI.step;
       while (ji < list.length && list[ji].e <= a) ji++;
@@ -84,10 +93,11 @@
       if (working) {
         if (j._fiStart == null) { j._fiStart = F; j.fiPeak = F; j.fiPeakAt = j.s; }
         let ov = 0;
-        for (let k = 0; k < j.trips.length; k++) { const t = j.trips[k]; if (t.e <= a) continue; if (t.s >= b) break; ov += Math.min(b, t.e) - Math.max(a, t.s); }
+        for (let k = 0; k < j.trips.length; k++) { const t = j.trips[k]; if (t.e <= a) continue; if (t.s >= b) break; const len = t.e - t.s, fr = len > 0 ? Math.min(1, (t.dh * H) / len) : 1; ov += (Math.min(b, t.e) - Math.max(a, t.s)) * fr; }
         df = Math.min(1, ov / FI.step);
       }
-      F = fiStep(F, a, working, df, FI.step / H);
+      if (!working && poorAt(a)) F = F * Math.pow(1 - sleepQ(a) * 0.5, FI.step / H);
+      else F = fiStep(F, a, working, df, FI.step / H);
       vals[i] = F;
       if (working) { if (F > j.fiPeak) { j.fiPeak = F; j.fiPeakAt = b; } j.fiEnd = F; }
     }
@@ -177,14 +187,29 @@
   }
 
   // Viajes por conductor (sin superposiciones) con su vehículo.
-  function tripsByDriver(tripsByDevice, ids, driverOk, now) {
+  // Un viaje con un ralentí largo adentro (el conductor paró con el motor en
+  // marcha, por ejemplo para dormir) se parte en dos: el ralentí no es manejo y
+  // puede ser el descanso que cierra la jornada.
+  function splitIdle(t, idleByDev) {
+    if (!idleByDev || !(t.ih >= 1)) return [t];
+    const iv = (idleByDev.get(t.d) || []).filter(([a, b]) => b - a >= H && a > t.s && b < t.e);
+    if (!iv.length) return [t];
+    const segs = [];
+    let cur = t.s;
+    for (const [a, b] of iv) { if (a > cur) segs.push([cur, a]); cur = Math.max(cur, b); }
+    if (t.e > cur) segs.push([cur, t.e]);
+    const tot = GI.sum(segs, ([a, b]) => b - a) || 1, idleH = GI.sum(iv, ([a, b]) => (b - a) / H);
+    return segs.map(([a, b], i) => { const f = (b - a) / tot; return { ...t, s: a, e: b, dh: t.dh * f, km: t.km * f, ih: Math.max(0, t.ih - idleH) * f, x: i < segs.length - 1 ? null : t.x, y: i < segs.length - 1 ? null : t.y }; });
+  }
+
+  function tripsByDriver(tripsByDevice, ids, driverOk, now, idleByDev) {
     const by = new Map();
     for (const [dev, trips] of tripsByDevice) {
       if (!ids.has(dev)) continue;
       for (const t of trips) {
         if (!t.r || t.r === "_unknown" || (driverOk && !driverOk(t.r)) || (now && t.s > now)) continue;
         if (!by.has(t.r)) by.set(t.r, []);
-        by.get(t.r).push(t);
+        for (const p of splitIdle(t, idleByDev)) by.get(t.r).push(p);
       }
     }
     for (const [id, raw] of by) {
@@ -194,7 +219,7 @@
       for (const t of raw) {
         if (t.e <= reach) continue;
         const s0 = Math.max(t.s, reach), f = t.e > t.s ? (t.e - s0) / (t.e - t.s) : 1;
-        out.push({ s: s0, e: now ? Math.min(t.e, now) : t.e, dh: (t.dh || 0) * f, km: (t.km || 0) * f, d: t.d, live: !!t.live });
+        out.push({ s: s0, e: now ? Math.min(t.e, now) : t.e, dh: (t.dh || 0) * f, km: (t.km || 0) * f, ih: (t.ih || 0) * f, d: t.d, x: t.x, y: t.y, live: !!t.live });
         reach = t.e;
       }
       by.set(id, out);
@@ -206,7 +231,20 @@
     const fz = fatigueLimits(model.settings);
     useParams(fz.P);
     const o = Object.assign({ now: Date.now() }, opts || {});
-    const byDrv = tripsByDriver(o.tripsByDevice || model.tripsByDevice, ids, driverOk, o.now);
+    // ralentí por vehículo (reglas de ralentí con duración): para ver si descansó con el motor en marcha
+    const idleByDev = new Map();
+    for (const e of model.idle || []) {
+      if (!ids.has(e.d)) continue;
+      if (!idleByDev.has(e.d)) idleByDev.set(e.d, []);
+      idleByDev.get(e.d).push([e.t, e.t + e.h * H]);
+    }
+    for (const l of idleByDev.values()) l.sort((a, b) => a[0] - b[0]);
+    const idleIn = (dev, a, b) => {
+      const out = [];
+      for (const [x, y] of idleByDev.get(dev) || []) { if (x >= b) break; if (y > a) out.push([Math.max(a, x), Math.min(b, y)]); }
+      return out;
+    };
+    const byDrv = tripsByDriver(o.tripsByDevice || model.tripsByDevice, ids, driverOk, o.now, idleByDev);
     const camByDrv = new Map(), evByDrv = new Map();
     for (const e of model.events) {
       if (!ids.has(e.d) || !e.drv || e.drv === "_unknown") continue;
@@ -214,6 +252,12 @@
       if (e.w > 0) { if (!evByDrv.has(e.drv)) evByDrv.set(e.drv, []); evByDrv.get(e.drv).push(e); }
     }
     for (const l of camByDrv.values()) l.sort((a, b) => a.t - b.t);
+    const placeAt = (x, y) => {
+      const z = model.zoneAtPlace ? model.zoneAtPlace(x, y) : null;
+      if (!z) return x == null ? null : { kind: "ruta", name: "Fuera de geocercas" };
+      const ty = z.types || [];
+      return { kind: ty.includes("ZoneTypeOfficeId") || ty.includes("ZoneTypeHomeId") ? "base" : ty.includes("ZoneTypeCustomerId") ? "cliente" : "zona", name: z.name, id: z.id };
+    };
     const shifts = [], sims = new Map();
     for (const [drv, trips] of byDrv) {
       const list = [];
@@ -222,7 +266,7 @@
         if (!cur || t.s - cur.e >= fz.SPLIT) { cur = { drv, s: t.s, e: t.e, trips: [] }; list.push(cur); }
         cur.trips.push(t); cur.e = Math.max(cur.e, t.e);
       }
-      let prev = null, row = 0;
+      let prev = null, row = 0, away = 0;
       for (const j of list) {
         j.dk = GI.dayKey(new Date(j.s));
         j.key = drv + "|" + j.s;
@@ -255,8 +299,24 @@
           j.prevType = prev.type;
           const gap = Math.round((GI.parseDayKey(j.dk) - GI.parseDayKey(prev.dk)) / 86400000);
           row = gap === 1 ? row + 1 : gap === 0 ? row : 1;
+          // dónde descansó y si fue con el motor en marcha
+          const lt = prev.trips[prev.trips.length - 1];
+          j.restPlace = placeAt(lt.x, lt.y);
+          j.restIdle = j.restBefore < 48 ? idleIn(lt.d, prev.e, j.s) : [];
+          j.restIdleH = GI.sum(j.restIdle, ([a, b]) => (b - a) / H);
+          j.restEngine = j.restIdleH >= 1 && j.restIdleH >= 0.25 * j.restBefore;
+          away = j.restPlace && j.restPlace.kind !== "base" && j.restBefore < 48 ? away + 1 : 0;
+          j.awayRow = away;
+          j.rotation = prev.type !== j.type && j.restBefore < 24 ? (j.type === "día" ? "atras" : "adelante") : null;
+          j.afterOff = j.restBefore >= 36;
         } else row = 1;
         j.daysRow = row;
+        // esperas: cortes de 1 h o más dentro de la jornada, con el lugar
+        j.waits = [];
+        for (let k = 1; k < j.trips.length; k++) {
+          const a = j.trips[k - 1], b = j.trips[k];
+          if (b.s - a.e >= H) j.waits.push({ a: a.e, b: b.s, h: (b.s - a.e) / H, place: placeAt(a.x, a.y), idleH: GI.sum(idleIn(a.d, a.e, b.s), ([x, y]) => (y - x) / H) });
+        }
         // eventos de cámara/ADAS de fatiga en la jornada (hasta 30 min después del último corte)
         const cam = (camByDrv.get(drv) || []).filter(e => e.t >= j.s - 5 * MIN && e.t <= j.e + 30 * MIN);
         let cluster = 0, clusterAt = null;
@@ -273,9 +333,12 @@
         if (j.dh > fz.max_drive_day) add("manejo", 1, GI.fmtNum(j.dh, 1) + " h de manejo (límite " + fz.max_drive_day + " h)");
         if (j.maxStint > fz.max_continuous) add("continuo", 1, GI.fmtNum(j.maxStint, 1) + " h de manejo sin una pausa de 15 min (límite " + fz.max_continuous + " h)");
         if (j.low >= 0.5) add("madrugada", 1, GI.fmtNum(j.low, 1) + " h de manejo entre las 02 y las 05 h");
-        if (prev && j.prevType !== j.type && j.restBefore < 24) add("cambio", 1, "pasó de turno " + j.prevType + " a turno " + j.type + " con un solo descanso de " + GI.fmtNum(j.restBefore, 1) + " h");
+        if (prev && j.prevType !== j.type && j.restBefore < 24) add("cambio", 1, "pasó de turno " + j.prevType + " a turno " + j.type + " con un solo descanso de " + GI.fmtNum(j.restBefore, 1) + " h" + (j.rotation === "atras" ? " (rotación hacia atrás, de noche a día: la que más cuesta)" : ""));
+        if (prev && j.type === "noche" && j.afterOff) add("francos", 1, "primer turno noche después de " + GI.fmtNum(j.restBefore / 24, 1) + " días de franco (el cuerpo viene acostumbrado a dormir de noche)");
         if (prev && j.restBefore < 48 && (j.restBefore < fz.min_rest || (j.type === "noche" && j.restDayFrac >= 0.7)))
           add("descanso", 1, j.restBefore < fz.min_rest ? "descanso previo de " + GI.fmtNum(j.restBefore, 1) + " h (mínimo " + fz.min_rest + " h)" : "descanso previo de " + GI.fmtNum(j.restBefore, 1) + " h, casi todo de día, antes de un turno noche");
+        if (prev && j.restEngine) add("motor", 1, GI.fmtNum(j.restIdleH, 1) + " h del descanso previo con el motor en marcha (probablemente durmió en la cabina)" + (j.restPlace ? ", en " + j.restPlace.name : ""));
+        if (j.awayRow >= 3) add("lejos", 1, j.awayRow + " descansos seguidos fuera de la base" + (j.restPlace ? " (el último en " + j.restPlace.name + ")" : ""));
         if (j.daysRow > fz.max_days_row) add("seguidos", 1, j.daysRow + " días seguidos de trabajo (máximo " + fz.max_days_row + ")");
         if (cluster >= 3) add("camara", 2, cluster + " eventos de fatiga, distracción o salida de carril en menos de una hora");
         else if (cam.length >= 3) add("camara", 1, cam.length + " eventos de fatiga, distracción o salida de carril en la jornada");
@@ -288,17 +351,35 @@
       }
       // índice de fatiga estimado: serie del conductor y máximo de cada jornada
       const sim = simulateDriver(list, o.now);
+      // "fuera de base" solo si sabemos cuál es su base (descansó ahí alguna vez en el período)
+      const knowsBase = list.some(j => j.restPlace && j.restPlace.kind === "base");
       for (const j of list) {
+        if (!knowsBase) j.signals = j.signals.filter(x => x.key !== "lejos");
         j.sim = sim;
         j.fiLevel = fiLevel(j.fiPeak, fz);
         if (j.fiPeak >= fz.fi_high) j.signals.push({ key: "indice", w: 1, label: "Índice de fatiga alto", text: "el índice de fatiga estimado llegó a " + Math.round(j.fiPeak) + " a las " + new Date(j.fiPeakAt).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit", hour12: false }) + " (alto desde " + fz.fi_high + ")" });
         j.score = GI.sum(j.signals, x => x.w);
         j.level = j.score >= 3 ? "alto" : j.score === 2 ? "medio" : "bajo";
       }
-      sims.set(drv, { sim, list, next: nextShiftRisk(list, sim, fz, o.now) });
+      sims.set(drv, { sim, list, next: nextShiftRisk(list, sim, fz, o.now), rot: rotationSummary(list) });
     }
     shifts.sort((a, b) => b.s - a.s);
     return { shifts, limits: fz, sims };
+  }
+
+  // Rotación de turnos del conductor: cambios día ↔ noche, hacia atrás (noche →
+  // día con un solo descanso), primeras noches tras francos y cuánto varía la
+  // hora de inicio entre jornadas seguidas (desvío circular, en horas).
+  function rotationSummary(list) {
+    const done = list.filter(j => !j.open);
+    let changes = 0, back = 0, fwd = 0, afterOff = 0;
+    for (const j of done) { if (j.rotation) { changes++; if (j.rotation === "atras") back++; else fwd++; } if (j.type === "noche" && j.afterOff) afterOff++; }
+    let sx = 0, sy = 0;
+    for (const j of done) { const a = (hourOf(j.s) / 24) * 2 * Math.PI; sx += Math.cos(a); sy += Math.sin(a); }
+    const R = done.length ? Math.sqrt(sx * sx + sy * sy) / done.length : 1;
+    const startSd = done.length >= 3 ? (Math.sqrt(-2 * Math.log(Math.max(1e-9, R))) * 24) / (2 * Math.PI) : null;
+    const nights = done.filter(j => j.type === "noche").length;
+    return { n: done.length, changes, back, fwd, afterOff, startSd, nightPct: done.length ? nights / done.length : 0 };
   }
 
   // Viajes para "Ahora": los del período hasta hace `hours`, los recientes

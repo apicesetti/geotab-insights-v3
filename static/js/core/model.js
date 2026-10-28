@@ -230,6 +230,8 @@
     // Solo cuentan para recorridos las zonas de los tipos elegidos (vacío = todas).
     const ztypes = new Set((settings.journeys && settings.journeys.zone_type_ids) || []);
     const zoneAt = makeZoneLocator((cat.zones || []).filter(z => !ztypes.size || (z.types || []).some(t => ztypes.has(t))));
+    // Para saber dónde descansó o esperó un conductor: cualquier zona que no sea enorme (< ~20 × 20 km).
+    const zoneAtPlace = makeZoneLocator((cat.zones || []).filter(z => z.bbox && (z.bbox[2] - z.bbox[0]) * (z.bbox[3] - z.bbox[1]) < 0.04));
 
     // Tipo de vehículo
     const vtypes = settings.vehicle_types.map(vt => ({ ...vt, set: gr.expand(vt.groupIds) }));
@@ -357,10 +359,12 @@
     const sev = settings.severity || {};
     const riskCats = new Set(GI.CATEGORIES.filter(c => c.kind === "riesgo").map(c => c.key));
     const events = [];
+    const idle = []; // ralentí con duración (no son infracciones: se usan para el descanso con motor en marcha)
     for (const ev of raw.exceptions) {
       if (!devById.has(ev.d)) continue;
       const catKey = mapping[ev.rule];
       if (!catKey) continue;
+      if (!riskCats.has(catKey)) { if (catKey === "ralenti" && ev.h > 0) idle.push({ d: ev.d, t: ev.t, h: ev.h }); continue; }
       const dk = GI.dayKey(ev.t);
       if (!daySet.has(dk)) continue;
       let drv = ev.r;
@@ -408,10 +412,10 @@
     }
 
     return {
-      raw, cat, settings, gr, devices, devById, driverName, tripsByDevice, vtypeOf, serviceOf, serviceSource, profileOf, fuelTypeOf, priceOf,
+      raw, cat, settings, gr, devices, devById, driverName, tripsByDevice, zoneAt, zoneAtPlace, vtypeOf, serviceOf, serviceSource, profileOf, fuelTypeOf, priceOf,
       exclusionImpact, excludedCount, fleetCount: withSerial.length, excludedUnknown: exclUnknown ? excludedUnknown : null,
       hasPrice: [...priceOf.values()].some(p => p > 0),
-      dd, drvCells, events, journeys, dayKeys, hasFuel: fuelDeltas.size > 0,
+      dd, drvCells, events, idle, journeys, dayKeys, hasFuel: fuelDeltas.size > 0,
       fuelDevices: new Set(fuelDeltas.keys()), idleMeasuredDevices: new Set(idleDeltas.keys()),
     };
   }

@@ -1139,3 +1139,4 @@
 @media (max-width: 900px) { #gi3-root .ft-now-meters { grid-template-columns: 1fr 1fr; } }
 #gi3-root .ft-tl-gap { font-size: 11px; fill: #1f2a37; font-weight: 600; }
 #gi3-root .ft-cal { max-width: 640px; margin-top: 10px; }
+#gi3-root .ft-kpis td:first-child { white-space: nowrap; }

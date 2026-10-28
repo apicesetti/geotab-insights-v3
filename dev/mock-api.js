@@ -169,10 +169,10 @@
     const dev = { id: "b300", name: "BIT-NOC", serialNumber: "G9300", groups: [{ id: "gBit" }, { id: "gPes" }, { id: "GroupDieselId" }], _type: "bitren", _svc: "larga", _l100: 48, _fuel: false, _idleL: 2.6, _drivers: [nd] };
     const dev2 = { id: "b301", name: "CAM-HOY", serialNumber: "G9301", groups: [{ id: "gPes" }, { id: "GroupDieselId" }], _type: "camion", _svc: "larga", _l100: 33, _fuel: false, _idleL: 2.6, _drivers: [od] };
     devices.push(dev, dev2);
-    const addTrip = (d, drv, s, hours) => {
+    const addTrip = (d, drv, s, hours, stop) => {
       const km = hours * 72;
       trips.push({ id: "t" + (++tid), device: { id: d.id }, driver: { id: drv.id }, start: new Date(s).toISOString(), stop: new Date(s + hours * H).toISOString(),
-        distance: km, drivingDuration: dur(hours), idlingDuration: dur(hours * 0.05), stopPoint: { x: zc.zRos[0], y: zc.zRos[1] }, _a: zc.zCam });
+        distance: km, drivingDuration: dur(hours), idlingDuration: dur(hours * 0.05), stopPoint: stop || { x: zc.zRos[0], y: zc.zRos[1] }, _a: zc.zCam });
       return s + hours * H;
     };
     const addEv = (d, drv, t, rule) => exceptions.push({ id: "e" + (++eid), rule: { id: rule }, device: { id: d.id }, driver: { id: drv.id },
@@ -182,10 +182,11 @@
       if (day >= 15) { // turno día 06–16
         if (base.getDay() === 0) continue;
         let t = base.getTime() + 6 * H;
-        t = addTrip(dev, nd, t, 3) + 0.5 * H; t = addTrip(dev, nd, t, 3) + 0.75 * H; addTrip(dev, nd, t, 2.5);
+        t = addTrip(dev, nd, t, 3) + 0.5 * H; t = addTrip(dev, nd, t, 3) + 0.75 * H; addTrip(dev, nd, t, 2.5, { x: zc.zCam[0], y: zc.zCam[1] });
       } else if (day >= 8) { // turno noche 21–08: tirada larga y madrugada
         let t = base.getTime() + (day === 14 ? -2 : 21) * H; // el primero, 6 h después del último turno día
-        t = addTrip(dev, nd, t, 4.6) + 0.4 * H; t = addTrip(dev, nd, t, 4) + 0.6 * H; addTrip(dev, nd, t, 1.8);
+        t = addTrip(dev, nd, t, 4.6) + 0.4 * H; t = addTrip(dev, nd, t, 4) + 0.6 * H; t = addTrip(dev, nd, t, 1.8, { x: -60.2, y: -33.6 }); // termina en un parador de la ruta
+        if (day % 3 !== 0) exceptions.push({ id: "e" + (++eid), rule: { id: "RuleIdlingId" }, device: { id: dev.id }, driver: { id: nd.id }, activeFrom: new Date(t + 0.3 * H).toISOString(), duration: dur(5.5), state: "ExceptionEventStateValidId" });
         if (day % 2 === 0) { const c = base.getTime() + 27.2 * H; ["aYawn", "aLane", "aYawn", "aYawn"].forEach((r, i) => addEv(dev, nd, c + i * 13 * 60000, r)); }
       }
     }

@@ -127,7 +127,7 @@
     }
 
     return html`<${Panel} title="Reglas de MyGeotab → categoría"
-      sub="Asigná a una categoría de riesgo las reglas que miden infracciones. Solo esas se descargan: el ralentí se calcula con los viajes, así que no hace falta mapear reglas de ralentí ni operativas (y en flotas grandes son la mayor parte del volumen). Las de prueba (Dummy, [TEST], .test) quedan ocultas.">
+      sub="Asigná a una categoría de riesgo las reglas que miden infracciones. Solo esas se descargan: el ralentí se calcula con los viajes, así que no hace falta mapear reglas operativas (y en flotas grandes son la mayor parte del volumen). Excepción: si asignás Ralentí a la regla de ralentí, Fatiga puede detectar los descansos con el motor en marcha. Las de prueba (Dummy, [TEST], .test) quedan ocultas.">
       <div className="toolbar">
         <input placeholder="Buscar regla…" value=${q} onInput=${e => setQ(e.target.value)} />
         <label className="inline"><input type="checkbox" checked=${onlyUnmapped} onChange=${e => setOnlyUnmapped(e.target.checked)} /> Solo sin categoría</label>

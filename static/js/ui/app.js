@@ -123,7 +123,7 @@
       setLoading(0); setError(null);
       try {
         if (force) { zonesAreaRef.current = false; await GI.loadCatalogs(api, database, true).then(c => { setCatalogs(c); cat = c; }); }
-        const ruleIds = GI.riskRuleIds(s.rule_mapping);
+        const ruleIds = GI.loadRuleIds(s.rule_mapping);
         const large = cat.devices.length > LARGE_FLEET;
         const scope = large && groupRef.current.length ? groupRef.current : s.scope_group_ids;
         const t0 = performance.now();
@@ -224,7 +224,7 @@
       setNoShared(false);
       GI.loadShared(api).then(sh => GI.sharingStatus(api, sh._settingsRecords)).then(st => setSharing(st)).catch(() => {});
       const prevRules = raw ? raw.ruleIds : new Set();
-      const needsReload = GI.riskRuleIds(saved.rule_mapping).some(r => !prevRules.has(r));
+      const needsReload = GI.loadRuleIds(saved.rule_mapping).some(r => !prevRules.has(r));
       setSettings(saved);
       if (needsReload) load(saved, period, catalogs);
       return saved;

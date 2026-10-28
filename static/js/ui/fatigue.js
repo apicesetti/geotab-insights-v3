@@ -131,8 +131,11 @@
     ok: { color: "#6cc08f", label: "Descanso entre jornadas", word: "descanso" },
     dia: { color: "#f2c27a", label: "Descanso casi todo de día antes de un turno noche (se recupera menos)", word: "descanso de día" },
     corto: { color: "#ec7a6f", label: "Descanso más corto que el mínimo", word: "descanso corto" },
+    motor: { color: "#b39478", label: "Descanso con el motor en marcha (durmió en la cabina: se recupera menos)", word: "descanso con motor" },
   };
-  const restKind = (j, fz) => (j.restBefore < fz.min_rest ? "corto" : j.type === "noche" && j.restDayFrac >= 0.7 ? "dia" : "ok");
+  const restKind = (j, fz) => (j.restBefore < fz.min_rest ? "corto" : j.restEngine ? "motor" : j.type === "noche" && j.restDayFrac >= 0.7 ? "dia" : "ok");
+  const PLACE_WORD = { base: "en la base", cliente: "en cliente", zona: "en", ruta: "fuera de geocercas" };
+  const placeTxt = p => (!p ? "" : p.kind === "ruta" ? "fuera de geocercas (en ruta)" : p.name);
   function shiftGaps(j) {
     const out = [];
     for (let i = 1; i < j.trips.length; i++) {
@@ -153,7 +156,8 @@
     if (pz.length) parts.push(html`Pausas de 30 min o más: ${pz.slice(0, 4).map(([a, b]) => dur((b - a) / H) + " (" + hm(a) + "–" + hm(b) + ")").join(", ")}${pz.length > 4 ? " y otras" : ""}. `);
     if (pz.some(([a, b]) => b - a >= 3 * H)) parts.push(html`Una pausa de menos de ${fz.SPLIT / H} h no corta la jornada (Configuración → Fatiga y gravedad → Pausa que cierra una jornada). `);
     if (j.span > fz.max_span && j.span > 0 && j.dh / j.span < 0.45) parts.push(html`Mucha jornada con poco manejo suele ser espera (carga, descarga, cola): el conductor sigue en servicio y no descansa. `);
-    if (j.restBefore != null) parts.push(html`Antes había descansado <b>${dur(j.restBefore)}</b>. `);
+    if (j.waits && j.waits.length) parts.push(html`Esperas de 1 h o más: ${j.waits.map(w => dur(w.h) + " en " + placeTxt(w.place) + (w.idleH >= 0.5 ? " (" + dur(w.idleH) + " con motor en marcha)" : "")).join(", ")}. `);
+    if (j.restBefore != null) parts.push(html`Antes había descansado <b>${dur(j.restBefore)}</b>${j.restPlace ? " " + (j.restPlace.kind === "ruta" ? "fuera de geocercas (en ruta)" : "en " + j.restPlace.name) : ""}${j.restEngine ? html`, <b>${dur(j.restIdleH)} con el motor en marcha</b>` : ""}. `);
     if (j.fiPeak != null) parts.push(html`Índice de fatiga: empezó en ${fiTag(j.fiStart, fz)} y llegó a ${fiTag(j.fiPeak, fz)} a las ${hm(j.fiPeakAt)}.`);
     return parts;
   }
@@ -233,7 +237,7 @@ ${restFrom != null && restFrom < j.s ? (() => { const g = GAP[restKind(j, fz)]; 
       </svg>
       <div className="ft-tl-legend small">
         <span><i style=${{ background: "#1f2a37" }}></i>Viaje</span>
-        ${["breve", "pausa", "larga", "ok", "dia", "corto"].filter(k => gapKinds.has(k)).map(k => html`<span key=${k}><i style=${{ background: GAP[k].color }}></i>${k === "corto" ? "Descanso de menos de " + fz.min_rest + " h" : GAP[k].label}</span>`)}
+        ${["breve", "pausa", "larga", "ok", "dia", "motor", "corto"].filter(k => gapKinds.has(k)).map(k => html`<span key=${k}><i style=${{ background: GAP[k].color }}></i>${k === "corto" ? "Descanso de menos de " + fz.min_rest + " h" : GAP[k].label}</span>`)}
         <span><i style=${{ background: "#eff1f8" }}></i>Noche (00–06 h)</span>
         <span><i style=${{ background: "#dfe3f3" }}></i>02–05 h, cuando más cuesta mantenerse despierto</span>
         <span><i className="tri" style=${{ borderBottomColor: CAM_COLORS.fatiga }}></i>Fatiga</span>
@@ -253,7 +257,7 @@ ${restFrom != null && restFrom < j.s ? (() => { const g = GAP[restKind(j, fz)]; 
       setBusy(true); setErr(null); setOk(false);
       try {
         const notes = note.trim() ? [...f.notes, { t: Date.now(), user: userName || "", text: note.trim() }] : f.notes;
-        const saved = await GI.saveFatigueCase(api, { id: rec && rec.id, key: j.key, drv: j.drv, s: j.s, dk: j.dk, level: j.level, signals: j.signals.map(x => x.key),
+        const saved = await GI.saveFatigueCase(api, { id: rec && rec.id, first_at: rec && rec.first_at, key: j.key, drv: j.drv, s: j.s, dk: j.dk, level: j.level, signals: j.signals.map(x => x.key),
           status: f.status, owner: f.owner, action: f.action, notes, by: userName || "" });
         setF(x => ({ ...x, notes })); setNote(""); setOk(true); onSaved(saved);
       } catch (e) { setErr(String((e && e.message) || e)); }
@@ -382,6 +386,8 @@ ${restFrom != null && restFrom < j.s ? (() => { const g = GAP[restKind(j, fz)]; 
     const Fnow = s && s.sim ? (open ? oi.Fnow : nx ? nx.Fnow : null) : null;
     const done = list.filter(j => !j.open);
     const rests = list.map(j => j.restBefore).filter(v => v != null && v < 48);
+    const withRest = list.filter(j => j.restBefore != null && j.restBefore < 48);
+    const knowsBase = list.some(j => j.restPlace && j.restPlace.kind === "base");
     const notes = [];
     for (const j of list) { const c = cases.get(j.key); if (c) for (const n of c.notes || []) notes.push({ ...n, j, st: c.status, action: c.action }); }
     notes.sort((a, b) => b.t - a.t);
@@ -394,6 +400,10 @@ ${restFrom != null && restFrom < j.s ? (() => { const g = GAP[restKind(j, fz)]; 
       ["Descanso más corto", rests.length ? dur(Math.min(...rests)) : "–", rests.some(r => r < fz.min_rest)],
       ["Manejo entre 02 y 05 h", dur(GI.sum(list, j => j.low)), GI.sum(list, j => j.low) >= 2],
       ["Jornadas nivel alto", n0(list.filter(j => j.level === "alto").length), list.some(j => j.level === "alto")],
+      ["Descansos con motor en marcha", n0(withRest.filter(j => j.restEngine).length), withRest.some(j => j.restEngine)],
+      ["Descansos fuera de base", withRest.length && knowsBase ? n0((withRest.filter(j => j.restPlace && j.restPlace.kind !== "base").length / withRest.length) * 100) + " %" : "–", false],
+      ["Cambios de turno", s && s.rot ? n0(s.rot.changes) + (s.rot.back ? " (" + s.rot.back + " hacia atrás)" : "") : "–", !!(s && s.rot && s.rot.back)],
+      ["Variación de la hora de inicio", s && s.rot && s.rot.startSd != null ? "± " + dur(s.rot.startSd) : "–", !!(s && s.rot && s.rot.startSd > 3)],
     ];
     const lastLevel = Fnow != null ? GI.fiLevel(Fnow, fz) : null;
     return html`<${Modal} wide title=${"Fatiga · " + drvName(view, id)} onClose=${onClose}>
@@ -612,8 +622,237 @@ ${restFrom != null && restFrom < j.s ? (() => { const g = GAP[restKind(j, fz)]; 
     </div>`;
   }
 
-  const SECTIONS = [["ahora", "Ahora"], ["proximo", "Próximo turno"], ["casos", "Casos"], ["conductores", "Conductores"], ["validacion", "Validación del índice"]];
-  const BETA_SECTIONS = new Set(["validacion"]);
+
+  // ---------- Descanso (BETA) ----------
+  const pctTxt = (a, b) => (b > 0 ? (a > 0 && a / b < 0.01 ? "< 1 %" : n0((a / b) * 100) + " %") : "–");
+  function groupRows(items, keyOf, init, addTo) {
+    const m = new Map();
+    for (const it of items) { const k = keyOf(it); if (k == null) continue; if (!m.has(k)) m.set(k, init(it, k)); addTo(m.get(k), it); }
+    return [...m.values()];
+  }
+  function RestSection({ view, res, onDriver }) {
+    const fz = res.limits;
+    const rests = res.shifts.filter(j => j.restBefore != null && j.restBefore < 48);
+    const knowsBase = new Set([...res.sims.entries()].filter(([, x]) => x.list.some(j => j.restPlace && j.restPlace.kind === "base")).map(([d]) => d));
+    const short = rests.filter(j => j.restBefore < fz.min_rest), engine = rests.filter(j => j.restEngine), day = rests.filter(j => j.type === "noche" && j.restDayFrac >= 0.7);
+    const awayBase = rests.filter(j => knowsBase.has(j.drv)), away = awayBase.filter(j => j.restPlace && j.restPlace.kind !== "base");
+    const places = groupRows(rests.filter(j => j.restPlace), j => j.restPlace.kind === "ruta" ? "_ruta" : j.restPlace.id || j.restPlace.name,
+      j => ({ key: j.restPlace.id || j.restPlace.name, name: placeTxt(j.restPlace), kind: j.restPlace.kind, n: 0, drv: new Set(), h: [], engine: 0, short: 0 }),
+      (x, j) => { x.n++; x.drv.add(j.drv); x.h.push(j.restBefore); if (j.restEngine) x.engine++; if (j.restBefore < fz.min_rest) x.short++; });
+    const drivers = groupRows(rests, j => j.drv, j => ({ id: j.drv, n: 0, h: [], short: 0, engine: 0, engineH: 0, away: 0, maxAway: 0, base: knowsBase.has(j.drv) }),
+      (x, j) => { x.n++; x.h.push(j.restBefore); if (j.restBefore < fz.min_rest) x.short++; if (j.restEngine) { x.engine++; x.engineH += j.restIdleH; } if (j.restPlace && j.restPlace.kind !== "base") x.away++; x.maxAway = Math.max(x.maxAway, j.awayRow || 0); });
+    const KIND = { base: "Base", cliente: "Cliente", zona: "Otra geocerca", ruta: "En ruta" };
+    const hasIdle = (view.model.idle || []).length > 0;
+    return html`<div>
+      <${Panel} title="Calidad del descanso"
+        hint=${"Cada descanso es la pausa entre dos jornadas (hasta 48 h). Con el motor en marcha: el vehículo estuvo en ralentí al menos 1 h y un cuarto del descanso (según las reglas de ralentí con categoría Ralentí); casi siempre es dormir en la cabina con el aire o la calefacción, y se recupera la mitad. Fuera de la base: dónde terminó el último viaje antes de descansar, según las geocercas de tipo Oficina o Casa; solo se cuenta para conductores que descansaron en la base al menos una vez en el período."}>
+        ${!hasIdle ? html`<${Info} tone="warn">No hay eventos de ralentí en el período, así que no se puede saber si descansaron con el motor en marcha. Para medirlo, un administrador tiene que asignar la categoría Ralentí a la regla de ralentí de MyGeotab en Configuración → Reglas y objetivos (sus eventos se descargan solo para esto).<//>` : null}
+        <div className="readouts compact inset">
+          <${Kpi} label="Descansos analizados" value=${n0(rests.length)} sub=${html`<span>mediana ${dur(GI.median(rests.map(j => j.restBefore)))}</span>`} />
+          <${Kpi} label=${"Más cortos que " + fz.min_rest + " h"} value=${pctTxt(short.length, rests.length)} tone=${short.length ? "bad" : null} sub=${html`<span>${n0(short.length)} descansos</span>`} />
+          <${Kpi} label="Con el motor en marcha" value=${pctTxt(engine.length, rests.length)} sub=${html`<span>${n0(engine.length)} descansos, ${dur(GI.sum(engine, j => j.restIdleH))} en ralentí</span>`} />
+          <${Kpi} label="Fuera de la base" value=${pctTxt(away.length, awayBase.length)} sub=${html`<span>${n0(day.length)} de día antes de un turno noche</span>`} />
+        </div>
+        <h3>Dónde descansan</h3>
+        <${DataTable} rowKey=${r => r.key} rows=${places} limit=${12} defaultSort=${{ key: "n", dir: "desc" }} columns=${[
+          { key: "name", label: "Lugar", fmt: r => html`${r.name} <span className="tag">${KIND[r.kind]}</span>` },
+          { key: "n", label: "Descansos", align: "num" },
+          { key: "drv", label: "Conductores", align: "num", value: r => r.drv.size, fmt: r => n0(r.drv.size) },
+          { key: "med", label: "Duración mediana", align: "num", value: r => GI.median(r.h), fmt: r => dur(GI.median(r.h)) },
+          { key: "engine", label: "Con motor en marcha", align: "num", value: r => r.engine / r.n, fmt: r => html`<span className=${r.engine / r.n >= 0.3 ? "delta bad" : ""}>${pctTxt(r.engine, r.n)}</span>` },
+          { key: "short", label: "Cortos", align: "num", value: r => r.short / r.n, fmt: r => pctTxt(r.short, r.n) },
+        ]} empty="Sin descansos en el período." />
+        <h3 style=${{ marginTop: "14px" }}>Por conductor</h3>
+        <${DataTable} rowKey=${r => r.id} rows=${drivers} limit=${15} defaultSort=${{ key: "risk", dir: "desc" }} columns=${[
+          { key: "id", label: "Conductor", value: r => drvName(view, r.id), fmt: r => html`<${DriverLink} view=${view} id=${r.id} onDriver=${onDriver} />` },
+          { key: "n", label: "Descansos", align: "num" },
+          { key: "med", label: "Mediana", align: "num", value: r => GI.median(r.h), fmt: r => dur(GI.median(r.h)) },
+          { key: "short", label: "Cortos", align: "num", fmt: r => (r.short ? html`<span className="delta bad">${r.short}</span>` : "0") },
+          { key: "engine", label: "Con motor en marcha", align: "num", fmt: r => (r.engine ? html`<span className="delta bad">${r.engine}</span> <span className="muted small">${dur(r.engineH)}</span>` : "0") },
+          { key: "away", label: "Fuera de base", align: "num", value: r => (r.base ? r.away / r.n : -1), fmt: r => (r.base ? pctTxt(r.away, r.n) : html`<span className="muted small" title="Nunca descansó en una geocerca de base en el período">sin base</span>`) },
+          { key: "maxAway", label: "Seguidos fuera", align: "num", fmt: r => (r.base ? html`<span className=${r.maxAway >= 3 ? "delta bad" : ""}>${r.maxAway}</span>` : "–") },
+          { key: "risk", label: "", value: r => r.short * 2 + r.engine + (r.base ? r.maxAway : 0), fmt: () => "" },
+        ]} empty="Sin descansos en el período." />
+      <//>
+    </div>`;
+  }
+
+  // ---------- Operación (BETA): esperas, madrugada por recorrido, rotación ----------
+  function OpsSection({ view, res, onDriver }) {
+    const fz = res.limits;
+    const waits = [];
+    for (const j of res.shifts) for (const w of j.waits || []) waits.push({ ...w, j });
+    const byPlace = groupRows(waits.filter(w => w.place), w => (w.place.kind === "ruta" ? "_ruta" : w.place.id || w.place.name),
+      w => ({ key: w.place.id || w.place.name, name: placeTxt(w.place), kind: w.place.kind, n: 0, h: [], idle: 0, drv: new Set(), long: new Set() }),
+      (x, w) => { x.n++; x.h.push(w.h); x.idle += w.idleH; x.drv.add(w.j.drv); if (w.j.span > fz.max_span) x.long.add(w.j.key); });
+    const longJ = res.shifts.filter(j => j.span > fz.max_span);
+    const longWithWait = longJ.filter(j => (j.waits || []).length);
+    const topP = byPlace.filter(p => p.kind !== "ruta").sort((a, b) => GI.sum(b.h) - GI.sum(a.h))[0];
+    // madrugada por recorrido (origen → destino de MyGeotab)
+    const routes = new Map();
+    for (const jr of view.model.journeys || []) {
+      if (!view.ids.has(jr.d) || jr.internal) continue;
+      const k = jr.oName + " → " + jr.destName;
+      const r = routes.get(k) || { key: k, n: 0, dh: 0, low: 0, night: 0 };
+      r.n++;
+      for (const t of jr.tr || []) { const len = (t.e - t.s) / H || 1, f = t.dh / len; r.dh += t.dh; r.low += GI._fat.overlapHours(t.s, t.e, 2, 5) * f; r.night += GI._fat.overlapHours(t.s, t.e, 0, 6) * f; }
+      routes.set(k, r);
+    }
+    const rts = [...routes.values()].filter(r => r.low > 0.5);
+    const rot = [...res.sims.entries()].map(([id, x]) => ({ id, ...(x.rot || {}) })).filter(r => r.n >= 3);
+    const KIND = { base: "Base", cliente: "Cliente", zona: "Otra geocerca", ruta: "En ruta" };
+    return html`<div>
+      <${Panel} title="¿Dónde se alargan las jornadas?"
+        hint=${"Esperas: cortes de 1 h o más entre dos viajes dentro de una jornada (el conductor sigue en servicio, no descansa). El lugar es donde terminó el viaje anterior, según las geocercas. Muchas jornadas largas no se deben al manejo sino a colas de carga o descarga: eso se resuelve con el cliente o con turnos, no con el conductor."}>
+        ${topP ? html`<div className="verdict-line bad"><span className="vtag">Donde más se espera</span><span>En <b>${topP.name}</b> se esperaron <b>${dur(GI.sum(topP.h))}</b> en ${n0(topP.n)} esperas (mediana ${dur(GI.median(topP.h))}); aparece en ${n0(topP.long.size)} de las ${n0(longJ.length)} jornadas de más de ${fz.max_span} h.</span></div>` : null}
+        <p className="small muted">${n0(longWithWait.length)} de las ${n0(longJ.length)} jornadas de más de ${fz.max_span} h tienen al menos una espera de 1 h o más.</p>
+        <${DataTable} rowKey=${r => r.key} rows=${byPlace} limit=${12} defaultSort=${{ key: "tot", dir: "desc" }} columns=${[
+          { key: "name", label: "Lugar", fmt: r => html`${r.name} <span className="tag">${KIND[r.kind]}</span>` },
+          { key: "n", label: "Esperas", align: "num" },
+          { key: "tot", label: "Horas totales", align: "num", value: r => GI.sum(r.h), fmt: r => dur(GI.sum(r.h)) },
+          { key: "med", label: "Mediana", align: "num", value: r => GI.median(r.h), fmt: r => dur(GI.median(r.h)) },
+          { key: "max", label: "La más larga", align: "num", value: r => Math.max(...r.h), fmt: r => dur(Math.max(...r.h)) },
+          { key: "drv", label: "Conductores", align: "num", value: r => r.drv.size, fmt: r => n0(r.drv.size) },
+          { key: "long", label: "Jornadas largas", align: "num", value: r => r.long.size, fmt: r => n0(r.long.size), title: "Jornadas de más del máximo que tienen una espera en este lugar" },
+          { key: "idle", label: "Con motor en marcha", align: "num", value: r => r.idle / GI.sum(r.h), fmt: r => pctTxt(r.idle, GI.sum(r.h)) },
+        ]} empty="No hay esperas de 1 h o más en el período." />
+      <//>
+      <${Panel} title="Recorridos que obligan a manejar de madrugada"
+        hint="Recorridos de MyGeotab (de geocerca a geocerca) con más de media hora de manejo entre las 02 y las 05 h en el período. Si un recorrido se hace siempre de madrugada, conviene revisar el horario de salida con planificación o con el cliente.">
+        <${DataTable} rowKey=${r => r.key} rows=${rts} limit=${12} defaultSort=${{ key: "low", dir: "desc" }} columns=${[
+          { key: "key", label: "Recorrido" },
+          { key: "n", label: "Viajes", align: "num" },
+          { key: "dh", label: "Manejo", align: "num", fmt: r => dur(r.dh) },
+          { key: "low", label: "Entre 02 y 05 h", align: "num", fmt: r => html`<b>${dur(r.low)}</b>` },
+          { key: "share", label: "% de madrugada", align: "num", value: r => r.low / r.dh, fmt: r => html`<span className=${r.low / r.dh >= 0.2 ? "delta bad" : ""}>${pctTxt(r.low, r.dh)}</span>` },
+          { key: "night", label: "Entre 00 y 06 h", align: "num", fmt: r => dur(r.night) },
+        ]} empty="Ningún recorrido tiene manejo de madrugada en el período." />
+      <//>
+      <${Panel} title="Rotación de turnos"
+        hint="Cambios de turno día ↔ noche con un solo descanso de menos de 24 h. Hacia atrás (de noche a día) es la rotación que más cuesta: el cuerpo tiene que adelantar el reloj. La primera noche después de 36 h o más de franco también es de riesgo, porque el conductor viene de dormir de noche. La variación de la hora de inicio mide cuán irregular es su horario (±1 h es estable; ±4 h o más, el reloj biológico no llega a acomodarse).">
+        <div className="readouts compact inset">
+          <${Kpi} label="Rotaciones hacia atrás" value=${n0(GI.sum(rot, r => r.back))} sub=${html`<span>en ${n0(rot.filter(r => r.back).length)} conductores</span>`} />
+          <${Kpi} label="Primeras noches tras francos" value=${n0(GI.sum(rot, r => r.afterOff))} />
+          <${Kpi} label="Horario irregular" value=${n0(rot.filter(r => r.startSd > 3).length)} sub=${html`<span>conductores con inicio ±3 h o más</span>`} />
+        </div>
+        <${DataTable} rowKey=${r => r.id} rows=${rot} limit=${15} defaultSort=${{ key: "back", dir: "desc" }} columns=${[
+          { key: "id", label: "Conductor", value: r => drvName(view, r.id), fmt: r => html`<${DriverLink} view=${view} id=${r.id} onDriver=${onDriver} />` },
+          { key: "n", label: "Jornadas", align: "num" },
+          { key: "nightPct", label: "Turnos noche", align: "num", fmt: r => n0(r.nightPct * 100) + " %" },
+          { key: "changes", label: "Cambios de turno", align: "num" },
+          { key: "back", label: "Hacia atrás", align: "num", fmt: r => (r.back ? html`<span className="delta bad">${r.back}</span>` : "0") },
+          { key: "afterOff", label: "Noche tras francos", align: "num" },
+          { key: "startSd", label: "Variación del inicio", align: "num", value: r => r.startSd || 0, fmt: r => (r.startSd == null ? "–" : html`<span className=${r.startSd > 3 ? "delta bad" : ""}>± ${dur(r.startSd)}</span>`) },
+        ]} empty="Sin conductores con 3 jornadas o más." />
+      <//>
+    </div>`;
+  }
+
+  // ---------- Indicadores (BETA): mensuales para HSE + calidad de los datos ----------
+  const monthLabel = mk => { const [y, m] = mk.split("-").map(Number); return new Date(y, m - 1, 1).toLocaleDateString("es-AR", { month: "short", year: "2-digit" }); };
+  function KpiSection({ view, res, cases }) {
+    const fz = res.limits, model = view.model;
+    const months = [...new Set(model.dayKeys.map(dk => dk.slice(0, 7)))];
+    const byM = new Map(months.map(m => [m, []]));
+    for (const j of res.shifts) if (byM.has(j.dk.slice(0, 7))) byM.get(j.dk.slice(0, 7)).push(j);
+    const firstDays = (j, c) => (c && c.first_at ? (new Date(c.first_at).getTime() - j.e) / 86400000 : null);
+    const ind = [
+      { key: "n", label: "Jornadas", f: L => L.length, fmt: v => n0(v), neutral: true },
+      { key: "alto", label: "Jornadas de nivel alto", f: L => (L.length ? L.filter(j => j.level === "alto").length / L.length : null), fmt: v => GI.fmtNum(v * 100, 1) + " %" },
+      { key: "am", label: "Nivel alto o medio", f: L => (L.length ? L.filter(j => j.level !== "bajo").length / L.length : null), fmt: v => GI.fmtNum(v * 100, 1) + " %" },
+      { key: "low", label: "Manejo entre 02 y 05 h cada 100 h", f: L => { const dh = GI.sum(L, j => j.dh); return dh > 0 ? (GI.sum(L, j => j.low) / dh) * 100 : null; }, fmt: v => GI.fmtNum(v, 1) + " h" },
+      { key: "short", label: "Descansos cortos", f: L => { const R = L.filter(j => j.restBefore != null && j.restBefore < 48); return R.length ? R.filter(j => j.restBefore < fz.min_rest).length / R.length : null; }, fmt: v => GI.fmtNum(v * 100, 1) + " %" },
+      { key: "eng", label: "Descansos con motor en marcha", f: L => { const R = L.filter(j => j.restBefore != null && j.restBefore < 48); return R.length ? R.filter(j => j.restEngine).length / R.length : null; }, fmt: v => GI.fmtNum(v * 100, 1) + " %" },
+      { key: "fi", label: "Jornadas con índice alto (≥ " + fz.fi_high + ")", f: L => (L.length ? L.filter(j => j.fiPeak >= fz.fi_high).length / L.length : null), fmt: v => GI.fmtNum(v * 100, 1) + " %" },
+      { key: "rep", label: "Conductores con 2+ jornadas altas", f: L => [...GI.groupBy(L.filter(j => j.level === "alto"), j => j.drv).values()].filter(x => x.length >= 2).length, fmt: v => n0(v) },
+      { key: "rev", label: "Casos revisados", up: true, f: L => { const C = L.filter(j => j.level !== "bajo"); return C.length ? C.filter(j => { const c = cases.get(j.key); return c && c.status && c.status !== "Detectado"; }).length / C.length : null; }, fmt: v => GI.fmtNum(v * 100, 0) + " %" },
+      { key: "days", label: "Días hasta la primera revisión", f: L => GI.median(L.filter(j => j.level !== "bajo").map(j => firstDays(j, cases.get(j.key))).filter(v => v != null && v >= 0)), fmt: v => GI.fmtNum(v, 1) },
+    ];
+    const rows = ind.map(x => {
+      const vals = months.map(m => x.f(byM.get(m)));
+      const a = vals[vals.length - 2], b = vals[vals.length - 1];
+      const isPct = /%/.test(x.fmt(0.5));
+      // porcentajes: diferencia en puntos; números: cambio relativo
+      const delta = a == null || b == null ? null : isPct ? (b - a) * 100 : a !== 0 ? (b - a) / Math.abs(a) : null;
+      return { ...x, vals, delta, isPct };
+    });
+    // calidad de los datos
+    const rawTrips = (model.raw && model.raw.trips || []).filter(t => view.ids.has(t.d) && model.devById.has(t.d));
+    const idMonth = months.map(m => { const T = rawTrips.filter(t => GI.dayKey(t.s).startsWith(m)); const all = GI.sum(T, t => t.dh); return all > 0 ? GI.sum(T.filter(t => t.r), t => t.dh) / all : null; });
+    const byDev = groupRows(rawTrips, t => t.d, t => ({ id: t.d, all: 0, ok: 0 }), (x, t) => { x.all += t.dh; if (t.r) x.ok += t.dh; });
+    const lowId = byDev.filter(x => x.all >= 10 && x.ok / x.all < 0.9);
+    const allDh = GI.sum(byDev, x => x.all), okDh = GI.sum(byDev, x => x.ok);
+    const lastDay = GI.parseDayKey(model.dayKeys[model.dayKeys.length - 1]).getTime() + 86400000;
+    const camDev = new Map();
+    for (const e of model.events) if (view.ids.has(e.d) && GI.FATIGUE_CAM_CATS.has(e.cat)) { const x = camDev.get(e.d) || { id: e.d, n: 0, last: 0 }; x.n++; x.last = Math.max(x.last, e.t); camDev.set(e.d, x); }
+    const silent = [...camDev.values()].filter(x => lastDay - x.last > 14 * 86400000);
+    const tamper = groupRows(model.events.filter(e => view.ids.has(e.d) && e.cat === "camara"), e => e.d, e => ({ id: e.d, n: 0 }), x => x.n++);
+    return html`<div>
+      <${Panel} title="Indicadores mensuales"
+        hint="Para el informe de HSE o para el cliente. Cada mes cuenta las jornadas que empezaron en ese mes (dentro del período elegido: para ver varios meses, elegí un período más largo). La última columna compara el último mes con el anterior; el primer y el último mes pueden estar incompletos.">
+        <div className="table-wrap"><table className="tbl ft-kpis">
+          <thead><tr><th>Indicador</th>${months.map(m => html`<th key=${m} className="num">${monthLabel(m)}</th>`)}<th className="num">Último vs anterior</th></tr></thead>
+          <tbody>${rows.map(r => html`<tr key=${r.key}><td>${r.label}</td>${r.vals.map((v, i) => html`<td key=${i} className="num">${v == null ? "–" : r.fmt(v)}</td>`)}
+            <td className="num">${r.delta == null || r.neutral ? "–" : Math.abs(r.delta) < (r.isPct ? 0.05 : 0.005) ? html`<span className="delta flat">=</span>`
+              : html`<span className=${"delta " + ((r.up ? r.delta > 0 : r.delta < 0) ? "good" : "bad")}>${(r.delta > 0 ? "▲ " : "▼ ") + (r.isPct ? GI.fmtNum(Math.abs(r.delta), 1) + " pts" : GI.fmtNum(Math.abs(r.delta) * 100, 0) + " %")}</span>`}</td></tr>`)}</tbody>
+        </table></div>
+      <//>
+      <${Panel} title="Calidad de los datos"
+        hint="El módulo solo ve los viajes con el conductor identificado: si un conductor no se identifica, sus jornadas no existen para el análisis y los casos se subestiman. Las cámaras que dejaron de mandar eventos de fatiga, distracción o carril pueden estar desconectadas, tapadas o mal configuradas.">
+        <div className="readouts compact inset">
+          <${Kpi} label="Manejo con conductor identificado" value=${pctTxt(okDh, allDh)} tone=${allDh && okDh / allDh < 0.9 ? "bad" : null} sub=${html`<span>${months.map((m, i) => monthLabel(m) + " " + (idMonth[i] == null ? "–" : n0(idMonth[i] * 100) + " %")).join(" · ")}</span>`} />
+          <${Kpi} label="Vehículos con menos de 90 % identificado" value=${n0(lowId.length)} />
+          <${Kpi} label="Cámaras sin eventos en los últimos 14 días" value=${n0(silent.length)} sub=${html`<span>de ${n0(camDev.size)} con eventos en el período</span>`} />
+          <${Kpi} label="Avisos de cámara obstruida o manipulada" value=${n0(GI.sum(tamper, x => x.n))} sub=${html`<span>en ${n0(tamper.length)} vehículos</span>`} />
+        </div>
+        <div className="grid-2">
+          <div><h3>Vehículos con poca identificación</h3>
+            <${DataTable} rowKey=${r => r.id} rows=${lowId} limit=${10} defaultSort=${{ key: "pct", dir: "asc" }} columns=${[
+              { key: "id", label: "Vehículo", value: r => devName(view, r.id), fmt: r => devName(view, r.id) },
+              { key: "all", label: "Manejo", align: "num", fmt: r => dur(r.all) },
+              { key: "pct", label: "Identificado", align: "num", value: r => r.ok / r.all, fmt: r => html`<span className="delta bad">${pctTxt(r.ok, r.all)}</span>` },
+            ]} empty="Todos los vehículos tienen 90 % o más del manejo identificado." /></div>
+          <div><h3>Cámaras que dejaron de reportar</h3>
+            <${DataTable} rowKey=${r => r.id} rows=${silent} limit=${10} defaultSort=${{ key: "last", dir: "asc" }} columns=${[
+              { key: "id", label: "Vehículo", value: r => devName(view, r.id), fmt: r => devName(view, r.id) },
+              { key: "n", label: "Eventos en el período", align: "num" },
+              { key: "last", label: "Último evento", fmt: r => when(r.last) },
+            ]} empty="Todas las cámaras con eventos reportaron en los últimos 14 días." /></div>
+        </div>
+      <//>
+    </div>`;
+  }
+
+  // ---------- Validación: ¿las jornadas de nivel alto terminan en incidentes? ----------
+  function OutcomePanel({ res }) {
+    const lv = ["bajo", "medio", "alto"].map(level => {
+      const L = res.shifts.filter(j => j.level === level && !j.open);
+      const dh = GI.sum(L, j => j.dh), km = GI.sum(L, j => j.km);
+      const cnt = cat => GI.sum(L, j => (j.events || []).filter(e => e.cat === cat).length);
+      const w = GI.sum(L, j => GI.sum(j.events || [], e => e.w));
+      return { level, n: L.length, dh, km, col: cnt("colision"), brake: cnt("frenado_brusco"), w };
+    });
+    const r = (n, dh) => (dh >= MIN_BAND_H ? (n / dh) * 100 : null);
+    const base = lv[0];
+    const x = (v, b) => (v == null || !(b > 0) ? "–" : "×" + GI.fmtNum(v / b, 1));
+    const rows = lv.map(l => ({ ...l, colR: r(l.col, l.dh), brR: r(l.brake, l.dh), wR: l.km > 0 ? (l.w / l.km) * 100 : null }));
+    const b0 = rows[0], hi = rows[2];
+    const rel = hi.colR != null && b0.colR > 0 ? hi.colR / b0.colR : null;
+    return html`<${Panel} title="¿Las jornadas de nivel alto terminan en más incidentes?"
+      hint="Compara las jornadas según su nivel de fatiga: colisiones y casi colisiones (categoría Colisión), frenadas bruscas (cerca de un choque) y el índice de riesgo general, por cada 100 h de manejo. Si las jornadas de nivel alto tienen claramente más incidentes, los casos que marca el módulo son los que hay que atender. Con pocas colisiones el número cambia mucho por casualidad.">
+      ${rel != null ? html`<div className=${"verdict-line " + (rel >= 1.5 ? "bad" : "")}><span className="vtag">${rel >= 1.5 ? "Sí" : "No se ve"}</span><span>En las jornadas de nivel alto hay <b>×${GI.fmtNum(rel, 1)}</b> colisiones y casi colisiones por hora de manejo que en las de nivel bajo (${n0(hi.col)} contra ${n0(b0.col)}).</span></div>` : null}
+      <${DataTable} rowKey=${r => r.level} rows=${rows} columns=${[
+        { key: "level", label: "Nivel de la jornada", value: r => ["bajo", "medio", "alto"].indexOf(r.level), fmt: r => levelTag(r.level) },
+        { key: "n", label: "Jornadas", align: "num", fmt: r => n0(r.n) },
+        { key: "dh", label: "Manejo", align: "num", fmt: r => n0(r.dh) + " h" },
+        { key: "colR", label: "Colisiones / casi colisiones cada 100 h", align: "num", fmt: r => (r.colR == null ? "–" : html`${GI.fmtNum(r.colR, 2)} <span className="muted">${x(r.colR, b0.colR)}</span>`) },
+        { key: "brR", label: "Frenadas bruscas cada 100 h", align: "num", fmt: r => (r.brR == null ? "–" : html`${GI.fmtNum(r.brR, 1)} <span className="muted">${x(r.brR, b0.brR)}</span>`) },
+        { key: "wR", label: "Índice de riesgo (pts/100 km)", align: "num", fmt: r => (r.wR == null ? "–" : html`${GI.fmtNum(r.wR, 2)} <span className="muted">${x(r.wR, b0.wR)}</span>`) },
+      ]} />
+    <//>`;
+  }
+  const SECTIONS = [["ahora", "Ahora"], ["proximo", "Próximo turno"], ["casos", "Casos"], ["conductores", "Conductores"], ["descanso", "Descanso"], ["operacion", "Operación"], ["indicadores", "Indicadores"], ["validacion", "Validación"]];
+  const BETA_SECTIONS = new Set(["descanso", "operacion", "indicadores", "validacion"]);
   const isBeta = () => GI.BUILD === "beta" || /\/dev\//.test(window.location.pathname);
 
   function FatigueTab({ view, api, onDriver, userName, isAdmin, onSaveSettings }) {
@@ -661,7 +900,10 @@ ${restFrom != null && restFrom < j.s ? (() => { const g = GAP[restKind(j, fz)]; 
         <${Kpi} label="Con eventos de cámara agrupados" value=${n0(cam.length)} sub=${html`<span>3 o más en una hora (fatiga, distracción, carril)</span>`} />
       </div>
       <div className="subnav"><${Segmented} value=${sec} onChange=${setSec} options=${SECTIONS.filter(([k]) => !BETA_SECTIONS.has(k) || isBeta()).map(([value, label]) => ({ value, label }))} /></div>
-      ${sec === "validacion" && isBeta() ? html`<${ValidationSection} view=${view} res=${period} isAdmin=${isAdmin} settings=${view.settings} onSaveSettings=${onSaveSettings} />`
+      ${sec === "validacion" && isBeta() ? html`<${ValidationSection} view=${view} res=${period} isAdmin=${isAdmin} settings=${view.settings} onSaveSettings=${onSaveSettings} /><${OutcomePanel} res=${period} />`
+        : sec === "descanso" && isBeta() ? html`<${RestSection} view=${view} res=${period} onDriver=${openDriver} />`
+        : sec === "operacion" && isBeta() ? html`<${OpsSection} view=${view} res=${period} onDriver=${openDriver} />`
+        : sec === "indicadores" && isBeta() ? html`<${KpiSection} view=${view} res=${period} cases=${cases} />`
         : sec === "ahora" ? html`<${NowSection} view=${view} res=${res} live=${live} onRefresh=${refresh} onDriver=${openDriver} onCase=${setSel} />`
         : sec === "proximo" ? html`<${NextSection} view=${view} res=${res} live=${live} onDriver=${openDriver} />`
         : sec === "casos" ? html`<${CasesSection} view=${view} shifts=${shifts} cases=${cases} limits=${limits} onOpen=${setSel} onDriver=${openDriver} />`

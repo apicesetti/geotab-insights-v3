@@ -110,6 +110,12 @@
     return Object.keys(mapping || {}).filter(id => (CATEGORY_BY_KEY[mapping[id]] || {}).kind === "riesgo");
   }
 
+  // Reglas cuyos eventos se descargan: las de riesgo y las de ralentí (para
+  // saber si un conductor descansó con el motor en marcha).
+  function loadRuleIds(mapping) {
+    return Object.keys(mapping || {}).filter(id => { const c = CATEGORY_BY_KEY[mapping[id]] || {}; return c.kind === "riesgo" || mapping[id] === "ralenti"; });
+  }
+
   function isNoiseRule(rule) {
     return NOISE_STOCK_IDS.has(rule.id) || NOISE_RULE.test(rule.name || "") || rule.baseType === "ZoneStop";
   }
@@ -211,6 +217,6 @@
 
   Object.assign(GI, {
     CATEGORIES, CATEGORY_BY_KEY, CHART_SLOTS, OTHER_COLOR, SERIES_COLORS, DEFAULT_CATEGORIES, applyCategories, STOCK_RULES, SERVICE_TYPES,
-    suggestCategory, isNoiseRule, riskRuleIds, defaultFuelTypes, FUEL_SYSTEM_GROUPS, defaultSettings, defaultProfileTargets, profileKey,
+    suggestCategory, isNoiseRule, riskRuleIds, loadRuleIds, defaultFuelTypes, FUEL_SYSTEM_GROUPS, defaultSettings, defaultProfileTargets, profileKey,
   });
 })(window.GI);

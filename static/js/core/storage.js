@@ -187,7 +187,7 @@
   // Seguimiento de casos de fatiga: un registro por jornada revisada
   // ({kind:"fcase", key: "conductor|inicio", status, owner, action, notes}).
   async function saveFatigueCase(api, c) {
-    const details = { kind: "fcase", ...c, updated_at: new Date().toISOString() };
+    const details = { kind: "fcase", ...c, updated_at: new Date().toISOString(), first_at: c.first_at || new Date().toISOString() };
     delete details.id;
     const entity = { addInId: ADDIN_ID, groups: await shareGroups(api), details };
     if (c.id) { await api.call("Set", { typeName: "AddInData", entity: { id: c.id, ...entity } }); return { ...details, id: c.id }; }
