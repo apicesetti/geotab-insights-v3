@@ -89,9 +89,8 @@
           <title>${(r.k === "curso" ? "Descansando desde " + when(r.a) + " (" + dur(r.h) + " hasta ahora)" : GAP[r.k].label.split(" (")[0] + ": " + dur(r.h) + " · " + when(r.a) + " → " + when(r.b)) + (r.j && r.j.restPlace ? " · " + placeTxt(r.j.restPlace) : "")}</title></g>`)}
         ${shifts.map(j => html`<g key=${j.key} style=${{ cursor: "pointer" }} onClick=${() => onCase && onCase(j)}>
           <rect x=${x(j.s)} y=${BY} width=${Math.max(2, x(j.e) - x(j.s))} height=${BH} fill=${FI_COLORS[GI.fiLevel(j.fiPeak, fz)] || "#1f2a37"} />
-          ${(j.waits || []).map((w, i) => html`<rect key=${"w" + i} x=${x(w.a)} y=${BY + 5} width=${Math.max(1.5, x(w.b) - x(w.a))} height=${BH - 10} fill=${GAP.larga.color} />`)}
           ${label(j.s, j.e, (j.open ? "en curso " : "") + dur(j.open ? (now - j.s) / H : j.span), GI.fiLevel(j.fiPeak, fz) !== "moderado")}
-          <title>${"Jornada " + when(j.s) + " → " + (j.open ? "en curso" : when(j.e)) + " · " + dur(j.span) + " (" + dur(j.dh) + " de manejo)" + ((j.waits || []).length ? " · esperas: " + j.waits.map(w => dur(w.h)).join(", ") : "") + " · índice máx. " + Math.round(j.fiPeak) + " (click para ver)"}</title></g>`)}
+          <title>${"Jornada " + when(j.s) + " → " + (j.open ? "en curso" : when(j.e)) + " · " + dur(j.span) + " (" + dur(j.dh) + " de manejo)"  + " · índice máx. " + Math.round(j.fiPeak) + " (click para ver)"}</title></g>`)}
         ${proj && proj.nextStart && proj.nextStart < t1 ? html`<g><rect x=${x(proj.nextStart)} y=${BY} width=${Math.max(2, x(proj.nextStart + proj.hb.span * H) - x(proj.nextStart))} height=${BH} fill="none" stroke="#1f2a37" strokeDasharray="3 2" />
           ${label(proj.nextStart, proj.nextStart + proj.hb.span * H, "próximo " + dur(proj.hb.span))}<title>${"Próximo turno habitual: " + when(proj.nextStart) + " (" + dur(proj.hb.span) + ")"}</title></g>` : null}
 
@@ -112,7 +111,6 @@
         <span><i style=${{ background: FI_COLORS.moderado }}></i>moderado</span>
         <span><i style=${{ background: FI_COLORS.alto }}></i>alto</span>
         <span><i style=${{ background: FI_COLORS["muy alto"] }}></i>muy alto</span>
-        <span><i style=${{ background: GAP.larga.color }}></i>espera de 1 h o más</span>
         <span>· descansos:</span>
         <span><i style=${{ background: GAP.ok.color }}></i>suficiente</span>
         <span><i style=${{ background: GAP.dia.color }}></i>de día antes de un turno noche</span>

@@ -382,7 +382,9 @@
     if (drvs) parts.push("driversFilter:" + risonList(drvs));
     if (rules) parts.push("exceptionRulesFilter:" + risonList(rules));
     parts.push("groupByFilter:" + (drvs ? "Driver" : "Device"));
-    window.location.hash = parts.join(",");
+    // Fuera de MyGeotab (página independiente) se abre MyGeotab en otra pestaña.
+    if (GI.MG_BASE_URL) window.open(GI.MG_BASE_URL + "#" + parts.join(","), "_blank", "noopener");
+    else window.location.hash = parts.join(",");
   };
 
   GI.App = App;

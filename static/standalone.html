@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<title>Geotab Insights</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex" />
+<style>
+  :root { --ink: #1f2a37; --text: #1c2430; --muted: #7b8492; --rule: #e3e7ec; --canvas: #f2f4f6; --bad: #b93a0f; --focus: #2a78d6; }
+  body { margin: 0; background: var(--canvas); color: var(--text); font-family: "Barlow", system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .sa-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 8px 16px; background: var(--ink); color: #fff; font-size: 14px; }
+  .sa-bar b { font-weight: 600; }
+  .sa-bar .sp { flex: 1; }
+  .sa-bar select { max-width: 280px; font: inherit; font-size: 13px; padding: 3px 6px; border-radius: 6px; border: 0; }
+  .sa-bar button { font: inherit; font-size: 13px; background: transparent; color: #fff; border: 1px solid rgba(255,255,255,.45); border-radius: 6px; padding: 3px 10px; cursor: pointer; }
+  .sa-bar button:hover { background: rgba(255,255,255,.12); }
+  .sa-login { max-width: 380px; margin: 9vh auto 24px; padding: 28px 28px 22px; background: #fff; border: 1px solid var(--rule); border-radius: 12px; box-sizing: border-box; }
+  .sa-login h1 { margin: 0 0 4px; font-size: 22px; color: var(--ink); }
+  .sa-login p { margin: 0 0 18px; color: var(--muted); font-size: 14px; line-height: 1.45; }
+  .sa-login label { display: block; font-size: 13px; font-weight: 600; margin: 12px 0 4px; }
+  .sa-login input { width: 100%; box-sizing: border-box; font: inherit; font-size: 15px; padding: 8px 10px; border: 1px solid #cdd3db; border-radius: 8px; }
+  .sa-login input:focus { outline: 2px solid var(--focus); outline-offset: 0; border-color: var(--focus); }
+  .sa-login .row { display: flex; gap: 10px; }
+  .sa-login .row > div { flex: 1; }
+  .sa-login button { width: 100%; margin-top: 18px; font: inherit; font-size: 15px; font-weight: 600; padding: 10px; border: 0; border-radius: 8px; background: var(--ink); color: #fff; cursor: pointer; }
+  .sa-login button:disabled { opacity: .6; cursor: default; }
+  .sa-login .err { color: var(--bad); font-size: 14px; margin-top: 12px; }
+  .sa-login .note { font-size: 12px; color: var(--muted); margin-top: 14px; line-height: 1.4; }
+  .sa-login details { margin-top: 10px; font-size: 13px; color: var(--muted); }
+  @media (max-width: 480px) { .sa-login { margin: 16px; } }
+</style>
+</head>
+<body>
+<div id="sa-bar"></div>
+<div id="gi3-root"></div>
+
+<script>
+// Geotab Insights fuera de MyGeotab: inicia sesión directamente contra la API
+// de Geotab con el usuario de la persona, y arranca el add-in con esa sesión.
+// No se instala nada en la base y nadie más lo ve. La contraseña solo viaja a
+// los servidores de Geotab; en este navegador se guarda la sesión (no la clave).
+(function () {
+  "use strict";
+  var KEY = "giStandaloneSession", DBS = "giStandaloneDbs";
+  var bar = document.getElementById("sa-bar"), root = document.getElementById("gi3-root");
+  // La sesión se guarda solo en esta pestaña (sessionStorage): el dominio de la
+  // BETA (raw.githack.com) lo comparten otras páginas. Las bases usadas y el
+  // último usuario, en localStorage (no son secretos).
+  const box = k => (k === KEY ? sessionStorage : localStorage);
+  function store(k, v) { try { if (v == null) box(k).removeItem(k); else box(k).setItem(k, JSON.stringify(v)); } catch (e) {} }
+  function load(k) { try { return JSON.parse(box(k).getItem(k) || "null"); } catch (e) { return null; } }
+  function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
+
+  function rpc(server, method, params) {
+    // Formulario simple (JSON-RPC=...): la API de Geotab lo acepta y el navegador no necesita un "preflight" CORS.
+    return fetch("https://" + server + "/apiv1", {
+      method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: "JSON-RPC=" + encodeURIComponent(JSON.stringify({ method: method, params: params })),
+    }).then(function (r) {
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return r.json();
+    }).then(function (j) {
+      if (j.error) {
+        var e = new Error((j.error.errors && j.error.errors[0] && j.error.errors[0].message) || j.error.message || "Error de la API");
+        e.name = (j.error.errors && j.error.errors[0] && j.error.errors[0].name) || j.error.name || "GeotabError";
+        e.data = j.error;
+        throw e;
+      }
+      return j.result;
+    });
+  }
+
+  function authenticate(server, database, userName, password) {
+    return rpc(server, "Authenticate", { database: database, userName: userName, password: password }).then(function (res) {
+      var path = res.path && res.path !== "ThisServer" ? res.path : server;
+      return { server: path, credentials: res.credentials };
+    });
+  }
+
+  // API con la forma que espera un add-in (callbacks), sobre la sesión.
+  function makeApi(sess) {
+    function expired(e) {
+      if (/InvalidUser|DbUnavailable|session/i.test((e && e.name) + " " + (e && e.message))) {
+        store(KEY, null);
+        showLogin({ database: sess.credentials.database, userName: sess.credentials.userName, server: sess.server }, "La sesión venció. Volvé a ingresar.");
+      }
+    }
+    return {
+      call: function (method, params, ok, err) {
+        rpc(sess.server, method, Object.assign({}, params || {}, { credentials: sess.credentials }))
+          .then(ok, function (e) { expired(e); if (err) err(e); });
+      },
+      multiCall: function (calls, ok, err) {
+        var list = calls.map(function (c) { return { method: c[0], params: c[1] || {} }; });
+        rpc(sess.server, "ExecuteMultiCall", { calls: list, credentials: sess.credentials })
+          .then(ok, function (e) { expired(e); if (err) err(e); });
+      },
+      getSession: function (cb) { cb({ database: sess.credentials.database, userName: sess.credentials.userName, sessionId: sess.credentials.sessionId }, sess.server); },
+    };
+  }
+
+  function showLogin(prev, msg) {
+    bar.innerHTML = ""; bar.className = "";
+    var dbs = load(DBS) || [];
+    root.innerHTML =
+      '<form class="sa-login" autocomplete="on">' +
+      '<h1>Geotab Insights</h1>' +
+      '<p>Ingresá con tu usuario de MyGeotab. El add-in se abre sobre esa base sin instalarse: nadie más lo ve.</p>' +
+      '<label for="sa-db">Base de datos</label><input id="sa-db" name="database" list="sa-dbs" required autocapitalize="off" spellcheck="false" value="' + esc(prev && prev.database) + '" />' +
+      '<datalist id="sa-dbs">' + dbs.map(function (d) { return '<option value="' + esc(d) + '">'; }).join("") + '</datalist>' +
+      '<label for="sa-user">Usuario</label><input id="sa-user" name="username" type="email" autocomplete="username" required value="' + esc(prev && prev.userName) + '" />' +
+      '<label for="sa-pass">Contraseña</label><input id="sa-pass" name="password" type="password" autocomplete="current-password" required />' +
+      '<details><summary>Servidor</summary><label for="sa-server">Servidor de MyGeotab</label><input id="sa-server" value="' + esc((prev && prev.server) || "my.geotab.com") + '" /></details>' +
+      '<button type="submit">Ingresar</button>' +
+      (msg ? '<div class="err">' + esc(msg) + '</div>' : '') +
+      '<div class="note">La contraseña se envía solo a los servidores de Geotab. La sesión queda solo en esta pestaña (nunca la contraseña) y "Salir" la cierra.</div>' +
+      '</form>';
+    var form = root.querySelector("form");
+    (prev && prev.userName ? form.querySelector("#sa-pass") : form.querySelector("#sa-db")).focus();
+    form.addEventListener("submit", function (ev) {
+      ev.preventDefault();
+      var btn = form.querySelector("button"), db = form.querySelector("#sa-db").value.trim(), user = form.querySelector("#sa-user").value.trim();
+      var pass = form.querySelector("#sa-pass").value, server = (form.querySelector("#sa-server").value || "my.geotab.com").trim().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+      btn.disabled = true; btn.textContent = "Ingresando…";
+      var old = form.querySelector(".err"); if (old) old.remove();
+      authenticate(server, db, user, pass).then(function (sess) {
+        store(KEY, sess);
+        store(KEY + "Prev", { userName: user, server: server, database: db });
+        store(DBS, [db].concat(dbs.filter(function (d) { return d !== db; })).slice(0, 30));
+        location.reload();
+      }, function (e) {
+        btn.disabled = false; btn.textContent = "Ingresar";
+        var d = document.createElement("div"); d.className = "err";
+        d.textContent = /InvalidUser/i.test(e.name + e.message) ? "Usuario, contraseña o base incorrectos." : "No se pudo ingresar: " + e.message;
+        form.appendChild(d);
+      });
+    });
+  }
+
+  function loadScripts(done) {
+    // Los mismos scripts (y versión) que el add-in: se leen de index.html.
+    fetch("index.html", { cache: "no-store" }).then(function (r) { return r.text(); }).then(function (txt) {
+      var doc = new DOMParser().parseFromString(txt, "text/html");
+      var css = doc.querySelector('link[rel="stylesheet"]');
+      if (css) { var l = document.createElement("link"); l.rel = "stylesheet"; l.href = css.getAttribute("href"); document.head.appendChild(l); }
+      var srcs = [].slice.call(doc.querySelectorAll("script[src]")).map(function (s) { return s.getAttribute("src"); });
+      (function next(i) {
+        if (i >= srcs.length) return done();
+        var s = document.createElement("script"); s.src = srcs[i]; s.onload = function () { next(i + 1); };
+        s.onerror = function () { root.innerHTML = '<div class="sa-login"><div class="err">No se pudo cargar ' + esc(srcs[i]) + '. Recargá la página.</div></div>'; };
+        document.body.appendChild(s);
+      })(0);
+    });
+  }
+
+  function start(sess) {
+    var groups = [], sel = [];
+    var api = makeApi(sess);
+    var state = { getGroupFilter: function () { return sel.length ? sel.map(function (id) { return { id: id }; }) : [{ id: "GroupCompanyId" }]; } };
+    bar.className = "sa-bar";
+    bar.innerHTML = '<b>Geotab Insights</b><span>' + esc(sess.credentials.database) + ' · ' + esc(sess.credentials.userName) + '</span>' +
+      '<label>Grupo <select id="sa-group"><option value="">Toda la flota</option></select></label><span class="sp"></span>' +
+      '<button id="sa-mg" type="button">Abrir MyGeotab ↗</button><button id="sa-switch" type="button">Cambiar de base</button><button id="sa-out" type="button">Salir</button>';
+    document.getElementById("sa-out").onclick = function () { api.call("Logoff", {}, function () {}, function () {}); store(KEY, null); location.reload(); };
+    document.getElementById("sa-switch").onclick = function () { store(KEY, null); showLogin({ userName: sess.credentials.userName, server: sess.server }); };
+    document.getElementById("sa-mg").onclick = function () { window.open("https://" + sess.server + "/" + encodeURIComponent(sess.credentials.database) + "/", "_blank", "noopener"); };
+    root.innerHTML = '<div class="splash">Cargando…</div>';
+    loadScripts(function () {
+      window.GI.MG_BASE_URL = "https://" + sess.server + "/" + encodeURIComponent(sess.credentials.database) + "/";
+      var names = Object.keys(window.geotab && window.geotab.addin || {});
+      var addin = window.geotab.addin[names.find(function (n) { return /Beta$/.test(n); }) || names[0]]();
+      addin.initialize(api, state, function () { addin.focus(api, state); });
+      // filtro de grupos (en MyGeotab lo da la barra de la izquierda)
+      api.call("Get", { typeName: "Group", propertySelector: { fields: ["id", "name"], isIncluded: true } }, function (gs) {
+        groups = (gs || []).filter(function (g) { return g.name && !/^\*\*/.test(g.name) && g.id !== "GroupCompanyId"; }).sort(function (a, b) { return a.name.localeCompare(b.name, "es"); });
+        var s = document.getElementById("sa-group");
+        s.innerHTML = '<option value="">Toda la flota</option>' + groups.map(function (g) { return '<option value="' + esc(g.id) + '">' + esc(g.name) + '</option>'; }).join("");
+        s.onchange = function () { sel = s.value ? [s.value] : []; addin.focus(api, state); };
+      }, function () {});
+    });
+  }
+
+  var sess = load(KEY);
+  if (sess && sess.credentials) start(sess); else showLogin(load(KEY + "Prev"));
+})();
+</script>
+</body>
+</html>
