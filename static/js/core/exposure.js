@@ -18,8 +18,64 @@
   ];
   const slotOf = h => SLOTS.findIndex(s => h >= s.from && h < s.to);
   const dayIdx = d => (d.getDay() + 6) % 7; // lunes = 0
-  const isNight = h => h >= 22 || h < 6;
+  const isNight = h => h >= 22 || h < 6; // respaldo si el viaje no tiene ubicación
   const HOUR = 3600000;
+  const RAD = Math.PI / 180;
+
+  // Salida y puesta del sol (ecuación del amanecer, precisión ~2 min) para el
+  // día solar que contiene "ms" en la longitud dada. La noche real cambia con
+  // la estación y la latitud: en Neuquén el sol se pone ~18:20 en junio y
+  // ~21:00 en diciembre.
+  function sunTimes(ms, lat, lng) {
+    const Jdate = ms / 86400000 + 2440587.5;
+    const n = Math.round(Jdate - 2451545.0 - 0.0009 + lng / 360);
+    const Jstar = 2451545.0 + 0.0009 - lng / 360 + n;
+    const M = (((357.5291 + 0.98560028 * (Jstar - 2451545)) % 360) + 360) % 360;
+    const C = 1.9148 * Math.sin(M * RAD) + 0.02 * Math.sin(2 * M * RAD) + 0.0003 * Math.sin(3 * M * RAD);
+    const L = (((M + C + 180 + 102.9372) % 360) + 360) % 360;
+    const Jt = Jstar + 0.0053 * Math.sin(M * RAD) - 0.0069 * Math.sin(2 * L * RAD);
+    const d = Math.asin(Math.sin(L * RAD) * Math.sin(23.44 * RAD));
+    const cw = (Math.sin(-0.833 * RAD) - Math.sin(lat * RAD) * Math.sin(d)) / (Math.cos(lat * RAD) * Math.cos(d));
+    const toMs = J => (J - 2440587.5) * 86400000;
+    if (cw >= 1) return { rise: toMs(Jt), set: toMs(Jt) };       // noche polar
+    if (cw <= -1) return { rise: toMs(Jt - 0.5), set: toMs(Jt + 0.5) }; // día polar
+    const w = Math.acos(cw) / RAD;
+    return { rise: toMs(Jt - w / 360), set: toMs(Jt + w / 360) };
+  }
+  const sunCache = new Map();
+  function sunFor(dayMs, lat, lng) {
+    const k = Math.floor(dayMs / 86400000) + "|" + Math.round(lat * 2) + "|" + Math.round(lng * 2);
+    let v = sunCache.get(k);
+    if (!v) { v = sunTimes(dayMs, Math.round(lat * 2) / 2, Math.round(lng * 2) / 2); sunCache.set(k, v); if (sunCache.size > 50000) sunCache.clear(); }
+    return v;
+  }
+  // Fracción de [a, b] que transcurre de noche (entre la puesta y la salida del sol).
+  function darkFraction(a, b, lat, lng) {
+    if (lat == null || lng == null) return null;
+    if (b <= a) return isDark(a, lat, lng) ? 1 : 0;
+    let dark = 0;
+    const noonOf = ms => { const d = new Date(ms); return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 12).getTime(); };
+    for (let day = noonOf(a) - 86400000; day <= noonOf(b) + 86400000; day += 86400000) {
+      const prev = sunFor(day - 86400000, lat, lng), cur = sunFor(day, lat, lng);
+      const s = Math.max(a, prev.set), e = Math.min(b, cur.rise);
+      if (e > s) dark += e - s;
+    }
+    return Math.min(1, dark / (b - a));
+  }
+  function isDark(t, lat, lng) {
+    if (lat == null || lng == null) return isNight(new Date(t).getHours());
+    const day = new Date(t); const noon = new Date(day.getFullYear(), day.getMonth(), day.getDate(), 12).getTime();
+    const s = sunFor(noon, lat, lng);
+    return t < s.rise || t > s.set;
+  }
+  // Noche de un viaje: fracción oscura en su punto de llegada; si no tiene
+  // ubicación, se usa el horario fijo 22–6 h.
+  function tripDark(t) {
+    if (t.y != null && t.x != null) return darkFraction(t.s, Math.max(t.e, t.s + 1), t.y, t.x);
+    let night = 0, tot = 0;
+    spreadTrip(t, (di, h, km) => { tot += km; if (isNight(h)) night += km; });
+    return tot > 0 ? night / tot : 0;
+  }
 
   // Reparte los km de un viaje entre las horas que abarca (uniforme).
   function spreadTrip(t, fn) {
@@ -41,18 +97,27 @@
 
     // ---------- Matriz día × hora ----------
     const grid = Array.from({ length: 7 }, () => Array.from({ length: 24 }, () => ({ km: 0, n: 0, w: 0 })));
-    let totKm = 0;
+    let totKm = 0, nightKm = 0;
+    const darkOf = new Map();
     for (const [dev, trips] of model.tripsByDevice) {
       if (!ids.has(dev)) continue;
       for (const t of trips) {
         if (!(t.km > 0)) continue;
         totKm += t.km;
+        const df = tripDark(t);
+        darkOf.set(t, df);
+        nightKm += t.km * df;
         spreadTrip(t, (di, h, km) => { grid[di][h].km += km; });
       }
     }
-    let totN = 0, totW = 0;
+    let totN = 0, totW = 0, nightN = 0, nightW = 0;
     for (const e of model.events) {
       if (!(e.w > 0) || !ids.has(e.d)) continue;
+      // ¿De noche? Con la ubicación del viaje que contiene la infracción.
+      const trips = model.tripsByDevice.get(e.d);
+      const ti = trips && GI._findTrip ? GI._findTrip(trips, e.t) : -1;
+      const tp = ti >= 0 ? trips[ti] : null;
+      if (isDark(e.t, tp ? tp.y : null, tp ? tp.x : null)) { nightN++; nightW += e.w; }
       const d = new Date(e.t);
       const c = grid[dayIdx(d)][d.getHours()];
       c.n++; c.w += e.w; totN++; totW += e.w;
@@ -159,8 +224,8 @@
         if (ok(id) && drv.has(id) && t.km > 0) {
           const x = drv.get(id);
           x.tripKm += t.km;
+          x.nightKm += t.km * (darkOf.has(t) ? darkOf.get(t) : tripDark(t));
           spreadTrip(t, (di, h, km) => {
-            if (isNight(h)) x.nightKm += km;
             if (high.has(di * 24 + h)) x.riskKm += km;
           });
         }
@@ -189,8 +254,69 @@
     for (let di = 0; di < 7; di++) for (let h = 0; h < 24; h++) if (high.has(di * 24 + h)) cells.push({ di, h, ...grid[di][h] });
     cells.sort((a, b) => b.factor - a.factor);
 
-    return { grid, byHour, fleetRate, fleetIdx, totKm, totN, minKmCell, highCells: cells, routes: routeRows, drivers };
+    const dayKm = totKm - nightKm;
+    const night = {
+      km: nightKm, dayKm, n: nightN, dayN: totN - nightN,
+      idx: nightKm >= 200 ? (nightW / nightKm) * 100 : null,
+      dayIdx: dayKm >= 200 ? ((totW - nightW) / dayKm) * 100 : null,
+    };
+    night.factor = night.idx != null && night.dayIdx ? night.idx / night.dayIdx : null;
+    return { grid, byHour, fleetRate, fleetIdx, totKm, totN, minKmCell, highCells: cells, routes: routeRows, drivers, night };
   }
 
-  Object.assign(GI, { exposure, EXPO_DAYS: DAYS, EXPO_SLOTS: SLOTS, _spreadTrip: spreadTrip });
+  // Exposición de un conductor: cuándo y por dónde maneja, y cómo le va en
+  // cada caso comparado con la flota. ex = resultado de exposure().
+  function exposureDriver(model, ids, drv, ex) {
+    const hours = Array.from({ length: 24 }, (_, h) => ({ h, km: 0, n: 0, w: 0 }));
+    const highSet = new Set(ex.highCells.map(c => c.di * 24 + c.h));
+    let km = 0, highKm = 0, nightKm = 0, nightW = 0, nightN = 0, totW = 0, totN = 0;
+    const routeKm = new Map();
+    for (const [dev, trips] of model.tripsByDevice) {
+      if (!ids.has(dev)) continue;
+      for (const t of trips) {
+        if (t.r !== drv || !(t.km > 0)) continue;
+        km += t.km;
+        nightKm += t.km * tripDark(t);
+        spreadTrip(t, (di, h, k) => { hours[h].km += k; if (highSet.has(di * 24 + h)) highKm += k; });
+      }
+    }
+    for (const j of model.journeys) {
+      if (!ids.has(j.d) || j.internal || j.o === "_unknown" || !(j.drvKm && j.drvKm[drv])) continue;
+      const k = j.o + "→" + j.dest;
+      const r = routeKm.get(k) || { key: k, name: j.oName + " → " + j.destName, km: 0, trips: 0, w: 0, n: 0 };
+      r.km += j.drvKm[drv]; r.trips++;
+      const bd = (j.byDrv || {})[drv];
+      if (bd) { r.w += bd.w; r.n += bd.n; }
+      routeKm.set(k, r);
+    }
+    for (const e of model.events) {
+      if (e.drv !== drv || !(e.w > 0) || !ids.has(e.d)) continue;
+      totW += e.w; totN++;
+      const h = new Date(e.t).getHours();
+      hours[h].n++; hours[h].w += e.w;
+      const trips = model.tripsByDevice.get(e.d);
+      const ti = trips && GI._findTrip ? GI._findTrip(trips, e.t) : -1;
+      const tp = ti >= 0 ? trips[ti] : null;
+      if (isDark(e.t, tp ? tp.y : null, tp ? tp.x : null)) { nightW += e.w; nightN++; }
+    }
+    hours.forEach(x => { x.rate = x.km >= 50 ? (x.n / x.km) * 100 : null; x.fleet = ex.byHour[x.h].rate; x.high = ex.highCells.some(c => c.h === x.h); });
+    const rIdx = new Map(ex.routes.map(r => [r.key, r]));
+    const routes = [...routeKm.values()].map(r => {
+      const fr = rIdx.get(r.key);
+      const idx = r.km > 0 ? (r.w / r.km) * 100 : null;
+      return { ...r, idx, routeIdx: fr ? fr.idx : null, danger: fr ? fr.danger : null,
+        conduct: fr && fr.idx > 0 && r.km >= 100 ? idx / fr.idx : null };
+    }).sort((a, b) => b.km - a.km);
+    const dayKm = km - nightKm;
+    return {
+      km, n: totN, hours, routes,
+      highPct: km > 0 ? (highKm / km) * 100 : null,
+      fleetHighPct: ex.totKm > 0 ? (ex.highCells.reduce((s, c) => s + c.km, 0) / ex.totKm) * 100 : null,
+      night: { km: nightKm, pct: km > 0 ? (nightKm / km) * 100 : null, idx: nightKm >= 50 ? (nightW / nightKm) * 100 : null, n: nightN,
+        dayIdx: dayKm >= 50 ? ((totW - nightW) / dayKm) * 100 : null },
+      fleetNightPct: ex.totKm > 0 ? (ex.night.km / ex.totKm) * 100 : null,
+    };
+  }
+
+  Object.assign(GI, { exposure, exposureDriver, EXPO_DAYS: DAYS, EXPO_SLOTS: SLOTS, _spreadTrip: spreadTrip, sunTimes, _darkFraction: darkFraction });
 })(window.GI);

@@ -250,10 +250,22 @@
       priceOf.set(d.id, ft && ft.price > 0 ? ft.price : fuelCfg.price_per_liter || 0);
     }
 
+    // Conductores desconocidos: si la configuración los deja afuera, sus
+    // viajes no cuentan (y las infracciones que caen en ellos tampoco). Se
+    // guarda el total del día para repartir el combustible por km.
+    const exclUnknown = !!(settings.drivers && settings.drivers.exclude_unknown);
+    const dayAll = new Map(); // dev|día -> { km, ih } de todos los viajes
+    if (exclUnknown) for (const t of raw.trips) {
+      const k = t.d + "|" + GI.dayKey(t.s);
+      const x = dayAll.get(k) || { km: 0, ih: 0 };
+      x.km += t.km; x.ih += t.ih; dayAll.set(k, x);
+    }
+    let excludedUnknown = { trips: 0, km: 0, events: 0 };
     // Viajes por vehículo
     const tripsByDevice = new Map();
     for (const t of raw.trips) {
       if (!devById.has(t.d)) continue;
+      if (exclUnknown && !t.r) { excludedUnknown.trips++; excludedUnknown.km += t.km; continue; }
       if (!tripsByDevice.has(t.d)) tripsByDevice.set(t.d, []);
       tripsByDevice.get(t.d).push(t);
     }
@@ -326,8 +338,12 @@
       const fd = fuelDeltas.get(dev);
       const idd = idleDeltas.get(dev);
       for (const [dk, c] of m) {
-        if (fd && fd.has(dk)) { c.fuel = fd.get(dk); c.kmFuel = c.km; }
-        if (idd && idd.has(dk)) { c.idleL = idd.get(dk); c.idleMeasured = c.idleL; }
+        // con conductores desconocidos afuera, el combustible del día se reparte por km (y el de ralentí por horas)
+        const all = exclUnknown ? dayAll.get(dev + "|" + dk) : null;
+        const fKm = all ? (all.km > 0 ? c.km / all.km : c.km > 0 ? 1 : 0) : 1;
+        const fIh = all ? (all.ih > 0 ? c.ih / all.ih : c.ih > 0 ? 1 : 0) : 1;
+        if (fd && fd.has(dk)) { c.fuel = fd.get(dk) * fKm; c.kmFuel = c.km; }
+        if (idd && idd.has(dk)) { c.idleL = idd.get(dk) * fIh; c.idleMeasured = c.idleL; }
         else c.idleL = c.ih * (idleRate.get(vtypeOf.get(dev)) || 1.5);
         const pr = priceOf.get(dev) || 0;
         c.idleCost = c.idleL * pr;
@@ -338,6 +354,7 @@
     // Eventos
     const mapping = settings.rule_mapping;
     const weights = settings.category_weights;
+    const sev = settings.severity || {};
     const riskCats = new Set(GI.CATEGORIES.filter(c => c.kind === "riesgo").map(c => c.key));
     const events = [];
     for (const ev of raw.exceptions) {
@@ -351,8 +368,11 @@
         const trip = findContaining(tripsByDevice.get(ev.d) || [], ev.t);
         if (trip) drv = trip.r;
       }
+      if (exclUnknown && !drv) { excludedUnknown.events++; continue; }
       const j = findContaining(journeysByDevice.get(ev.d) || [], ev.t);
-      const w = riskCats.has(catKey) ? (weights[catKey] != null ? weights[catKey] : 1) : 0;
+      let w = riskCats.has(catKey) ? (weights[catKey] != null ? weights[catKey] : 1) : 0;
+      // Gravedad por duración: cada minuto suma un % del peso, con tope.
+      if (w > 0 && sev.by_duration && ev.h > 0) w *= Math.min(sev.max || 3, 1 + (sev.per_minute || 0) * ev.h * 60);
       const e = { ...ev, cat: catKey, dk, drv: drv || null, j, w };
       events.push(e);
       const c = cell(ev.d, dk);
@@ -389,7 +409,7 @@
 
     return {
       raw, cat, settings, gr, devices, devById, driverName, tripsByDevice, vtypeOf, serviceOf, serviceSource, profileOf, fuelTypeOf, priceOf,
-      exclusionImpact, excludedCount, fleetCount: withSerial.length,
+      exclusionImpact, excludedCount, fleetCount: withSerial.length, excludedUnknown: exclUnknown ? excludedUnknown : null,
       hasPrice: [...priceOf.values()].some(p => p > 0),
       dd, drvCells, events, journeys, dayKeys, hasFuel: fuelDeltas.size > 0,
       fuelDevices: new Set(fuelDeltas.keys()), idleMeasuredDevices: new Set(idleDeltas.keys()),
@@ -455,17 +475,38 @@
   // aviso) y reparte el cambio del índice entre categorías, conductores y
   // vehículos. Aporte de X = (puntos_X_2 / km_2 - puntos_X_1 / km_1) × 100:
   // los aportes de cada lista suman el cambio total.
-  function riskChange(model, deviceIds, gran, driverOk) {
-    const ser = series(model, deviceIds, gran).filter(s => !s.partial && s.km > 0);
-    if (ser.length < 2) return null;
-    const h = Math.floor(ser.length / 2);
-    const half = new Map();
-    ser.forEach((s, i) => half.set(s.key, i < h ? 0 : 1));
-    const halfOf = dk => half.get(GI.bucketKey(dk, gran));
+  // Por qué cambió el riesgo entre dos partes del período.
+  // split: null = dos mitades (períodos completos); { date, title } = antes y
+  // después de un hito (el día del hito cuenta como "después").
+  // Además de repartir el cambio por categoría, regla, conductor y vehículo,
+  // separa los efectos que no son "manejar mejor o peor":
+  //  - reglas que no registraban eventos en una de las dos partes (nuevas o
+  //    desactivadas): índice recalculado "con las mismas reglas";
+  //  - cambio de flota: vehículos que salieron o entraron vs los que siguen;
+  //  - mezcla: cuántos km hizo cada perfil de vehículo (efecto mezcla vs efecto conducta).
+  function riskChange(model, deviceIds, gran, driverOk, split) {
+    let sideOf, from, to;
+    if (split && split.date) {
+      const first = model.dayKeys[0], last = model.dayKeys[model.dayKeys.length - 1];
+      if (!(split.date > first && split.date <= last)) return null;
+      sideOf = dk => (dk < split.date ? 0 : 1);
+      from = [first, split.date]; to = [GI.dayKey(GI.addDays(GI.parseDayKey(split.date), -1)), last];
+    } else {
+      const ser = series(model, deviceIds, gran).filter(s => !s.partial && s.km > 0);
+      if (ser.length < 2) return null;
+      const h = Math.floor(ser.length / 2);
+      const half = new Map();
+      ser.forEach((s, i) => half.set(s.key, i < h ? 0 : 1));
+      sideOf = dk => half.get(GI.bucketKey(dk, gran));
+      from = [ser[0].label, ser[h].label]; to = [ser[h - 1].label, ser[ser.length - 1].label];
+    }
+    const halfOf = sideOf;
     const weights = model.settings.category_weights || {};
+    const mapping = model.settings.rule_mapping || {};
     const riskCats = new Set(GI.CATEGORIES.filter(c => c.kind === "riesgo").map(c => c.key));
+    const wOf = cat => (weights[cat] != null ? weights[cat] : 1);
     const km = [0, 0], pts = [0, 0], evs = [0, 0];
-    const cats = new Map(), devs = new Map(), drvs = new Map();
+    const cats = new Map(), devs = new Map(), drvs = new Map(), rules = new Map(), profs = new Map();
     const acc = (map, key, i, kmv, w, n) => {
       const x = map.get(key) || { key, km: [0, 0], w: [0, 0], n: [0, 0] };
       x.km[i] += kmv; x.w[i] += w; x.n[i] += n; map.set(key, x);
@@ -478,7 +519,9 @@
         if (i == null) continue;
         km[i] += c.km; pts[i] += c.w; evs[i] += c.n;
         acc(devs, dev, i, c.km, c.w, c.n);
-        for (const k in c.ev) if (riskCats.has(k)) acc(cats, k, i, 0, c.ev[k] * (weights[k] != null ? weights[k] : 1), c.ev[k]);
+        acc(profs, model.profileOf(dev), i, c.km, c.w, c.n);
+        for (const k in c.ev) if (riskCats.has(k)) acc(cats, k, i, 0, c.ev[k] * wOf(k), c.ev[k]);
+        for (const r in c.er || {}) { const cat = mapping[r]; if (riskCats.has(cat)) acc(rules, r, i, 0, c.er[r] * wOf(cat), c.er[r]); }
       }
     }
     for (const [drv, cells] of model.drvCells) {
@@ -493,16 +536,53 @@
     if (!km[0] || !km[1]) return null;
     const rate = (w, k) => (k > 0 ? (w / k) * 100 : null);
     const finish = (map, nameOf, keep) => [...map.values()].filter(x => !keep || keep(x.key)).map(x => ({
-      key: x.key, name: nameOf(x.key), n: x.n, km: x.km,
+      key: x.key, name: nameOf(x.key), n: x.n, km: x.km, w: x.w,
       rate: [rate(x.w[0], x.km[0]), rate(x.w[1], x.km[1])],
       contrib: (x.w[1] / km[1] - x.w[0] / km[0]) * 100,
     })).sort((a, b) => Math.abs(b.contrib) - Math.abs(a.contrib));
     const devName = new Map(model.devices.map(d => [d.id, d.name]));
+    const ruleName = new Map(((model.cat && model.cat.rules) || []).map(r => [r.id, r.name]));
+    const a = rate(pts[0], km[0]), b = rate(pts[1], km[1]);
+
+    // Reglas sin eventos en una de las dos partes (umbral: 3 eventos del otro lado).
+    const ruleRows = finish(rules, id => ruleName.get(id) || id).map(r => Object.assign(r, { cat: mapping[r.key] }));
+    const newRules = ruleRows.filter(r => r.n[0] === 0 && r.n[1] >= 3);
+    const goneRules = ruleRows.filter(r => r.n[1] === 0 && r.n[0] >= 3);
+    const ex = [0, 0];
+    for (const r of [...newRules, ...goneRules]) { ex[0] += r.w[0]; ex[1] += r.w[1]; }
+    const sameRules = newRules.length || goneRules.length ? { a: rate(pts[0] - ex[0], km[0]), b: rate(pts[1] - ex[1], km[1]) } : null;
+
+    // Cambio de flota: los que siguieron, los que salieron y los que entraron.
+    const fleet = { kept: { km: [0, 0], w: [0, 0], n: 0 }, left: { km: [0, 0], w: [0, 0], n: 0 }, joined: { km: [0, 0], w: [0, 0], n: 0 } };
+    for (const x of devs.values()) {
+      const g = x.km[0] > 0 && x.km[1] > 0 ? "kept" : x.km[0] > 0 ? "left" : x.km[1] > 0 ? "joined" : null;
+      if (!g) continue;
+      fleet[g].n++;
+      for (const i of [0, 1]) { fleet[g].km[i] += x.km[i]; fleet[g].w[i] += x.w[i]; }
+    }
+    for (const g of Object.values(fleet)) { g.rate = [rate(g.w[0], g.km[0]), rate(g.w[1], g.km[1])]; g.share = [km[0] ? g.km[0] / km[0] : 0, km[1] ? g.km[1] / km[1] : 0]; }
+    // efecto de la flota = cambio total − cambio de los vehículos que siguieron
+    fleet.effect = fleet.kept.rate[0] != null && fleet.kept.rate[1] != null ? (b - a) - (fleet.kept.rate[1] - fleet.kept.rate[0]) : null;
+    // Mezcla por perfil: efecto mezcla (cuántos km hace cada perfil) vs efecto conducta (riesgo dentro de cada perfil).
+    let mix = 0, within = 0;
+    const profRows = [];
+    for (const x of profs.values()) {
+      const s0 = x.km[0] / km[0], s1 = x.km[1] / km[1];
+      const r0 = x.km[0] > 0 ? (x.w[0] / x.km[0]) * 100 : null, r1 = x.km[1] > 0 ? (x.w[1] / x.km[1]) * 100 : null;
+      let m = 0, w = 0;
+      if (r0 != null && r1 != null) { m = (s1 - s0) * r0; w = s1 * (r1 - r0); }
+      else if (r1 != null) m = s1 * r1;
+      else if (r0 != null) m = -s0 * r0;
+      mix += m; within += w;
+      profRows.push({ key: x.key, name: GI.profileLabel ? GI.profileLabel(model.settings, x.key) : x.key, share: [s0, s1], rate: [r0, r1], mix: m, within: w });
+    }
+    profRows.sort((p1, p2) => Math.abs(p2.mix + p2.within) - Math.abs(p1.mix + p1.within));
+
     return {
-      a: rate(pts[0], km[0]), b: rate(pts[1], km[1]),
-      km, pts, evs,
-      from: [ser[0].label, ser[h].label], to: [ser[h - 1].label, ser[ser.length - 1].label],
+      a, b, km, pts, evs, from, to, split: split && split.date ? split : null,
       cats: finish(cats, k => (GI.CATEGORY_BY_KEY[k] || { label: k }).label),
+      rules: ruleRows, newRules, goneRules, sameRules,
+      fleet, mix, within, profiles: profRows,
       vehicles: finish(devs, id => devName.get(id) || id),
       drivers: finish(drvs, id => (id === "_unknown" ? "Sin conductor identificado" : model.driverName.get(id) || id),
         id => id === "_unknown" || !driverOk || driverOk(id)),

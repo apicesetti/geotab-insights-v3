@@ -80,7 +80,7 @@
     [/cintur|seat ?belt/i, "cinturon"],
     [/celular|tel[eé]fono|phone/i, "telefono"],
     [/distra/i, "distraccion"],
-    [/fatiga|fatigue|bostez|yawn|somnol|ojos/i, "fatiga"],
+    [/fatiga|fatigue|bostez|yawn|somnol|ojos|conducci[oó]n\s*\d|continuous driving|driving time|horas de manejo/i, "fatiga"],
     [/velocidad|speed|exceso/i, "velocidad"],
     [/fren|brak/i, "frenado_brusco"],
     [/aceler|accel/i, "aceleracion_brusca"],
@@ -199,7 +199,11 @@
       profile_targets: defaultProfileTargets(vehicleTypes),
       fuel: { price_per_liter: 0, currency: "ARS", tolerance_pct: 10, types: defaultFuelTypes(groups), default_type: "diesel" },
       journeys: { break_hours: 10, min_km_route: 300, min_journeys_route: 3, min_stop_minutes: 20, zone_type_ids: [] },
-      drivers: { min_km_ranking: 300 },
+      drivers: { min_km_ranking: 300, exclude_unknown: false },
+      // Fatiga: valores de referencia, se ajustan a la política de la empresa.
+      fatigue: { max_drive_day: 9, max_span: 12, min_rest: 8, max_continuous: 4, max_days_row: 6, rest_split: 4, fi_mod: 80, fi_high: 100 },
+      // Gravedad: ponderar cada infracción por su duración (opcional).
+      severity: { by_duration: false, per_minute: 0.5, max: 3, long_minutes: 1 },
       ui: { default_days: 90, default_granularity: "week", milestone_window_days: 28 },
       editors: [],
     };

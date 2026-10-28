@@ -2,11 +2,11 @@
     "id": "aBetaGeotabInsightsV3Cesetti",
     "name": "Geotab Insights BETA - Cesetti",
     "supportEmail": "mt@cesetti.com.ar",
-    "version": "3.9.0-beta",
+    "version": "3.10.0-beta",
     "enableViewSecurityId": true,
     "items": [
         {
-            "url": "https://raw.githack.com/apicesetti/geotab-insights-v3/exposicion/static/index.html",
+            "url": "https://raw.githack.com/apicesetti/geotab-insights-v3/beta/static/index.html",
             "path": "ActivityLink",
             "menuName": {
                 "es": "Geotab Insights BETA",

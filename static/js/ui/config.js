@@ -14,13 +14,15 @@
     ["servicio", "Corta / larga distancia"],
     ["objetivos", "Objetivos por perfil"],
     ["recorridos", "Recorridos"],
+    ["fatiga", "Fatiga y gravedad"],
+    ["referencias", "Conductores y referencias"],
     ["alcance", "Combustible y alcance"],
     ["general", "General"],
   ];
 
   function clone(o) { return JSON.parse(JSON.stringify(o)); }
 
-  function ConfigTab({ api, settings, catalogs, groups, model, isAdmin, userName, onSave }) {
+  function ConfigTab({ api, settings, catalogs, groups, model, isAdmin, userName, onSave, benchmark, onPublishBenchmark, mgGroups }) {
     const [draft, setDraft] = useState(() => clone(settings));
     const [section, setSection] = useState("categorias");
     const [saving, setSaving] = useState(false);
@@ -54,6 +56,8 @@
       objetivos: html`<${TargetsSection} draft=${draft} set=${set} ro=${ro} model=${model} />`,
       categorias: html`<${CategoriesSection} draft=${draft} set=${set} ro=${ro} />`,
       recorridos: html`<${RoutesSection} api=${api} draft=${draft} set=${set} ro=${ro} />`,
+      fatiga: html`<${FatigueSection} draft=${draft} set=${set} ro=${ro} />`,
+      referencias: html`<${ReferenceSection} draft=${draft} set=${set} ro=${ro} model=${model} benchmark=${benchmark} onPublish=${onPublishBenchmark} mgGroups=${mgGroups} groups=${groups} />`,
       alcance: html`<${ScopeSection} draft=${draft} set=${set} groups=${groups} ro=${ro} model=${model} />`,
       general: html`<${GeneralSection} draft=${draft} set=${set} ro=${ro} />`,
     }[section];
@@ -326,6 +330,75 @@
     <//>`;
   }
 
+  // ---------- Conductores y valores de referencia ----------
+  function ReferenceSection({ draft, set, ro, model, benchmark: b, onPublish, mgGroups, groups }) {
+    const [busy, setBusy] = useState(false);
+    const [msg, setMsg] = useState(null);
+    const scoped = (mgGroups && mgGroups.length) || (draft.scope_group_ids || []).length;
+    const gname = id => ((groups || []).find(g => g.id === id) || {}).name || id;
+    async function publish() {
+      setBusy(true); setMsg(null);
+      try { await onPublish(); setMsg({ tone: "ok", text: "Valores de referencia publicados." }); }
+      catch (e) { setMsg({ tone: "error", text: "No se pudieron publicar: " + (e.message || e) }); }
+      setBusy(false);
+    }
+    const age = b && b.published_at ? Math.round((Date.now() - new Date(b.published_at).getTime()) / 86400000) : null;
+    return html`<div>
+      <${Panel} title="Vista de los conductores"
+        hint="Los conductores que en MyGeotab tienen activada la opción 'Impedir que el conductor acceda a los datos compartidos' (y no son administradores ni editores) ven solo la pestaña 'Mi desempeño' con sus propios datos, comparados con los valores de referencia de la empresa. Los conductores sin esa opción, y los supervisores, ven el add-in completo con todo lo que abarca su alcance en MyGeotab.">
+        <label className="inline"><input type="checkbox" disabled=${ro} checked=${draft.driver_view !== false} onChange=${e => set(["driver_view"], e.target.checked)} />
+          Los conductores con "Impedir que el conductor acceda a los datos compartidos" (MyGeotab) ven solo "Mi desempeño"</label>
+        <p className="muted small">Si se desmarca, todos los conductores ven el add-in completo dentro de su alcance, aunque tengan esa opción activada.</p>
+      <//>
+      <${Panel} title="Valores de referencia de la empresa"
+        hint="Promedios de la flota sin nombres de conductores ni vehículos: índice de riesgo, infracciones por categoría, riesgo por hora y de noche, peligrosidad y velocidad de cada recorrido, riesgo según horas de manejo y valores por perfil. Con ellos un conductor o un supervisor se compara con la empresa sin ver los datos de otros. Se publican a mano y se calculan con los datos cargados en este momento.">
+        ${b ? html`<p>Publicados el <b>${new Date(b.published_at).toLocaleString("es-AR")}</b> (hace ${age} días), con ${GI.fmtNum(b.vehicles)} vehículos y ${GI.fmtNum(b.km)} km del ${b.from} al ${b.to}.
+          Índice de la empresa: <b>${GI.fmtNum(b.fleetIdx, 2)}</b> pts/100 km.</p>
+          ${age > 30 ? html`<${Info} tone="warn">Tienen más de un mes: conviene publicarlos de nuevo.<//>` : null}`
+          : html`<${Info} tone="warn">Todavía no se publicaron. Hasta entonces, "Mi desempeño" no puede comparar al conductor con la empresa.<//>`}
+        ${model ? html`<p className="muted">Se van a calcular con lo cargado ahora: <b>${GI.fmtNum(model.devices.length)} vehículos</b>, del ${model.dayKeys[0]} al ${model.dayKeys[model.dayKeys.length - 1]}.
+          ${scoped ? html` <span className="delta bad">Atención: hay un filtro de grupos activo${mgGroups && mgGroups.length ? " (" + mgGroups.map(gname).join(", ") + ")" : ""}; la referencia sería solo de ese alcance. Para la empresa completa, quitá el filtro y cargá "Toda la flota".</span>` : null}</p>` : null}
+        ${!ro ? html`<button className="btn primary" disabled=${busy || !model} onClick=${publish}>${busy ? "Publicando…" : b ? "Volver a publicar con los datos cargados" : "Publicar con los datos cargados"}</button>` : null}
+        ${msg ? html`<p className=${"msg " + msg.tone}>${msg.text}</p>` : null}
+      <//>
+    </div>`;
+  }
+
+  // ---------- Fatiga y gravedad ----------
+  function FatigueSection({ draft, set, ro }) {
+    const f = Object.assign({ max_drive_day: 9, max_span: 12, min_rest: 8, max_continuous: 4, max_days_row: 6, rest_split: 4, fi_mod: 80, fi_high: 100 }, draft.fatigue || {});
+    const sv = Object.assign({ by_duration: false, per_minute: 0.5, max: 3, long_minutes: 1 }, draft.severity || {});
+    const num = (path, v, props) => html`<input type="number" disabled=${ro} value=${v} onChange=${e => set(path, +e.target.value)} ...${props || {}} />`;
+    return html`<div>
+      <${Panel} title="Jornada y fatiga"
+        hint="Límites con los que se marcan las jornadas en la pestaña Fatiga. Son valores de referencia: ajustalos a la política de la empresa y a la normativa que aplique a cada operación.">
+        <div className="form two-col">
+          <label>Manejo máximo por día (h)${num(["fatigue", "max_drive_day"], f.max_drive_day, { min: 1, step: 0.5 })}</label>
+          <label>Jornada máxima, del primer arranque al último corte (h)${num(["fatigue", "max_span"], f.max_span, { min: 1, step: 0.5 })}</label>
+          <label>Descanso mínimo entre jornadas (h)${num(["fatigue", "min_rest"], f.min_rest, { min: 1, step: 0.5 })}</label>
+          <label>Manejo continuo máximo sin pausa de 15 min (h)${num(["fatigue", "max_continuous"], f.max_continuous, { min: 0.5, step: 0.5 })}</label>
+          <label>Días seguidos de trabajo como máximo${num(["fatigue", "max_days_row"], f.max_days_row, { min: 1 })}</label>
+          <label>Pausa que cierra una jornada (h)${num(["fatigue", "rest_split"], f.rest_split, { min: 1, step: 0.5 })}</label>
+          <label>Índice de fatiga: moderado desde${num(["fatigue", "fi_mod"], f.fi_mod, { min: 10, step: 5 })}</label>
+          <label>Índice de fatiga: alto desde${num(["fatigue", "fi_high"], f.fi_high, { min: 20, step: 5 })}</label>
+        </div>
+        <p className="muted small">Las jornadas se arman por pausas, no por día calendario: los viajes separados por menos de ${f.rest_split} h son una sola jornada (un turno noche de 19 a 7 h cuenta como una jornada del día en que empezó). Una pausa más larga cierra la jornada y es el descanso previo de la siguiente; si es menor al descanso mínimo, se marca.</p>
+        <p className="muted small">El índice de fatiga es una estimación propia del add-in (no es un sistema certificado como FAID): sube mientras el conductor trabaja, más rápido manejando y de madrugada, y baja mientras descansa, más rápido si descansa de noche. Una jornada diurna normal termina cerca de 50–70; turnos noche largos o descansos cortos lo llevan por encima de 100.</p>
+      <//>
+      <${Panel} title="Gravedad de las infracciones"
+        hint="Una infracción que dura más (por ejemplo un exceso de velocidad de 3 minutos) es más peligrosa que una de segundos. Si activás la ponderación, cada minuto de duración suma un porcentaje del peso de la categoría, con un tope. Las infracciones instantáneas (frenadas, giros) no cambian.">
+        <div className="form two-col">
+          <label className="inline"><input type="checkbox" disabled=${ro} checked=${!!sv.by_duration} onChange=${e => set(["severity", "by_duration"], e.target.checked)} /> Ponderar el índice de riesgo por la duración de cada infracción</label>
+          <span></span>
+          <label>Cada minuto suma (% del peso)${num(["severity", "per_minute"], GI.round(sv.per_minute * 100, 0), { min: 0, step: 5, onChange: e => set(["severity", "per_minute"], +e.target.value / 100) })}</label>
+          <label>Tope (veces el peso)${num(["severity", "max"], sv.max, { min: 1, step: 0.5 })}</label>
+          <label>Se considera prolongada desde (min)${num(["severity", "long_minutes"], sv.long_minutes, { min: 0.1, step: 0.5 })}</label>
+        </div>
+        <p className="muted small">Ejemplo con los valores actuales: una infracción de 2 minutos pesa ${GI.fmtNum(Math.min(sv.max, 1 + sv.per_minute * 2), 1)} veces lo normal.</p>
+      <//>
+    </div>`;
+  }
+
   // ---------- Alcance y combustible ----------
   function ScopeSection({ draft, set, groups, ro, model }) {
     const types = (draft.fuel.types && draft.fuel.types.length) ? draft.fuel.types : GI.defaultFuelTypes([]);
@@ -381,6 +454,9 @@
           <option value="day">Día</option><option value="week">Semana</option><option value="month">Mes</option></select></label>
         <label>Ventana de impacto de hitos (días)<input type="number" disabled=${ro} value=${draft.ui.milestone_window_days} onChange=${e => set(["ui", "milestone_window_days"], +e.target.value)} /></label>
         <label>Ranking de conductores: km mínimos<input type="number" disabled=${ro} value=${draft.drivers.min_km_ranking} onChange=${e => set(["drivers", "min_km_ranking"], +e.target.value)} /></label>
+        <label className="inline span-2"><input type="checkbox" disabled=${ro} checked=${!!draft.drivers.exclude_unknown} onChange=${e => set(["drivers", "exclude_unknown"], e.target.checked)} />
+          Dejar afuera los viajes y las infracciones sin conductor identificado
+          <${GI.Hint}>Si se marca, los viajes sin conductor (y las infracciones que ocurren en ellos) no cuentan en ningún indicador: km, riesgo, ralentí ni consumo (el combustible del día se reparte según los km que quedan). Sirve cuando muchos viajes no tienen la llave o el conductor asignado y distorsionan los índices.<//></label>
         <label>Editores adicionales (usuarios MyGeotab, separados por coma)<input disabled=${ro} value=${editors}
           onInput=${e => setEditors(e.target.value)} onBlur=${() => set(["editors"], editors.split(",").map(s => s.trim()).filter(Boolean))} /></label>
       </div>

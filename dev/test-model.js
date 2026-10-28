@@ -3,7 +3,7 @@ const fs = require("fs");
 const vm = require("vm");
 const ctx = { window: {}, console, Date, Math, Map, Set, Number, JSON, Object, Array, String, Promise, setTimeout };
 vm.createContext(ctx);
-for (const f of ["util", "catalog", "model", "exposure"]) {
+for (const f of ["util", "catalog", "model", "exposure", "riskfactors", "hotspots", "roads", "fatigue"]) {
   vm.runInContext(fs.readFileSync(require("path").join(__dirname, "../static/js/core", f + ".js"), "utf8"), ctx);
 }
 const GI = ctx.window.GI;
@@ -92,6 +92,17 @@ trips.push({ i: "x", d: "d4", r: null, s: GI.parseDayKey(fromKey).getTime() + 9 
 
 const raw = { fromKey, toKey, dayKeys, trips, exceptions, fuelDaily, idleFuelDaily: idleDaily, fuelDays };
 const model = GI.buildModel(raw, cat, settings);
+// Dejar afuera conductores desconocidos: d3 (sin conductor) no suma km; d1/d2 igual
+{
+  const s2 = JSON.parse(JSON.stringify(settings)); s2.drivers.exclude_unknown = true;
+  const m2 = GI.buildModel(raw, cat, s2);
+  const kmOf = (m, id) => GI.aggregate(m, [id]).km;
+  assert.strictEqual(kmOf(m2, "d3"), 0);
+  assert.strictEqual(kmOf(m2, "d1"), kmOf(model, "d1"));
+  assert.ok(Math.abs(GI.aggregate(m2, ["d1"]).fuel - GI.aggregate(model, ["d1"]).fuel) < 1e-6);
+  assert.ok(m2.excludedUnknown.trips > 0 && !m2.drvCells.has("_unknown"));
+  assert.strictEqual(model.excludedUnknown, null);
+}
 
 assert.ok(!model.devById.has("d4"), "excluded group");
 assert.strictEqual(model.vtypeOf.get("d1"), "bitren");
@@ -180,5 +191,208 @@ assert.strictEqual(GI.durationToHours("00:11:42.0300000").toFixed(4), (11 / 60 +
     assert.ok(d.expected >= 0 && d.actual >= 0);
     assert.ok(d.nightPct == null || (d.nightPct >= 0 && d.nightPct <= 100));
   }
+}
+// Factores de riesgo: los km de los tramos de fatiga suman los km de viajes.
+{
+  const ids = GI.filterDevices(model, {});
+  const ex = GI.exposure(model, ids, null);
+  const rmap = new Map(ex.routes.filter(r => r.stable && r.idx != null).map(r => [r.key, r.idx]));
+  const rf = GI.riskFactors(model, ids, null, rmap, ex.fleetIdx);
+  const fk = GI.sum(rf.fatigue.buckets, b => b.km);
+  assert.ok(Math.abs(fk - ex.totKm) < 1e-6 * Math.max(1, fk), "km fatiga " + fk + " vs " + ex.totKm);
+  const trips = [{ s: 0, e: 100 }, { s: 200, e: 300 }];
+  assert.strictEqual(GI._findTrip(trips, 250), 1);
+  assert.strictEqual(GI._findTrip(trips, -5), -1);
+  for (const d of rf.fatigue.drivers) assert.ok(["alta", "media", "baja"].includes(d.level));
+}
+// Sol: Neuquén 19/10/2026 sale ~06:41 y se pone ~19:55 (hora argentina).
+{
+  const st = GI.sunTimes(new Date("2026-10-19T15:00:00Z").getTime(), -38.95, -68.06);
+  const hm = ms => { const d = new Date(ms); return d.getHours() * 60 + d.getMinutes(); };
+  assert.ok(Math.abs(hm(st.rise) - (6 * 60 + 41)) <= 5, "salida " + new Date(st.rise));
+  assert.ok(Math.abs(hm(st.set) - (19 * 60 + 55)) <= 6, "puesta " + new Date(st.set));
+  // Un viaje de 18 a 22 h en junio en Neuquén es casi todo de noche (puesta ~18:18).
+  const a = new Date(2026, 5, 21, 18).getTime(), b = new Date(2026, 5, 21, 22).getTime();
+  const fJun = GI._darkFraction(a, b, -38.95, -68.06);
+  assert.ok(fJun > 0.9, "junio " + fJun);
+  // El mismo horario en diciembre (puesta ~20:58) es mitad de noche.
+  const c = new Date(2026, 11, 21, 18).getTime(), d = new Date(2026, 11, 21, 22).getTime();
+  const fDic = GI._darkFraction(c, d, -38.95, -68.06);
+  assert.ok(fDic > 0.15 && fDic < 0.4, "diciembre " + fDic);
+}
+// Por qué cambió el riesgo, antes/después de un hito: regla nueva y cambio de flota.
+{
+  const days = GI.dayRange("2026-03-01", "2026-04-30");
+  const dd = new Map();
+  const put = (dev, dk, km, ev) => {
+    if (!dd.has(dev)) dd.set(dev, new Map());
+    const er = {}, evc = {};
+    let w = 0, n = 0;
+    for (const [rule, cat, k] of ev) { er[rule] = (er[rule] || 0) + k; evc[cat] = (evc[cat] || 0) + k; w += k * (cat === "giro_brusco" ? 1.2 : 1.5); n += k; }
+    dd.get(dev).set(dk, { km, w, n, ev: evc, er });
+  };
+  for (const dk of days) {
+    const after = dk >= "2026-04-01";
+    // vA sigue igual todo el período: 100 km/día y 1 exceso
+    put("vA", dk, 100, [["rVel", "velocidad", 1]]);
+    // vB (ruta, pocos eventos) sale de la flota en abril
+    if (!after) put("vB", dk, 400, [["rVel", "velocidad", 1]]);
+    // regla nueva de giros desde abril
+    if (after) put("vA", dk, 100, [["rVel", "velocidad", 1], ["rGiro", "giro_brusco", 1]]);
+  }
+  const fm = {
+    dayKeys: days, dd, drvCells: new Map(), devices: [{ id: "vA", name: "A" }, { id: "vB", name: "B" }],
+    profileOf: id => (id === "vB" ? "camion|larga" : "liviano|corta"), driverName: new Map(),
+    settings: { category_weights: { velocidad: 1.5, giro_brusco: 1.2 }, rule_mapping: { rVel: "velocidad", rGiro: "giro_brusco" } },
+    cat: { rules: [{ id: "rVel", name: "SPEED" }, { id: "rGiro", name: "Harsh cornering" }] },
+  };
+  const rc = GI.riskChange(fm, new Set(["vA", "vB"]), "week", null, { date: "2026-04-01", title: "Bus" });
+  assert.ok(rc.b > rc.a * 3, "sube mucho: " + rc.a + " → " + rc.b);
+  assert.strictEqual(rc.newRules.length, 1);
+  assert.strictEqual(rc.newRules[0].name, "Harsh cornering");
+  // con las mismas reglas y sin el cambio de flota, vA no cambió
+  assert.ok(Math.abs(rc.fleet.kept.rate[0] - 1.5) < 1e-9);
+  assert.strictEqual(rc.fleet.left.n, 1);
+  assert.ok(rc.sameRules.b > rc.sameRules.a, "sin regla nueva igual sube por flota");
+  assert.ok(rc.fleet.effect > 0);
+  assert.ok(Math.abs(rc.mix + rc.within - (rc.b - rc.a)) < 1e-9, "mezcla + conducta = cambio total");
+}
+// Jornadas por pausas: turno noche = una jornada; el descanso real es el previo.
+{
+  const T = (d, h, m) => new Date(2026, 9, d, h, m).getTime();
+  const trips = [];
+  const add = (s, e, km) => trips.push({ d: "v1", r: "L", s, e, dh: (e - s) / 3600000 * 0.7, km });
+  // sáb 24 08:39 → dom 25 06:07 con pausas cortas
+  for (let t = T(24, 8, 39); t < T(25, 6, 7); t += 3 * 3600000) add(t, Math.min(t + 2.5 * 3600000, T(25, 6, 7)), 80);
+  // dom 25 19:09 → lun 26 07:52
+  for (let t = T(25, 19, 9); t < T(26, 7, 52); t += 2 * 3600000) add(t, Math.min(t + 1.8 * 3600000, T(26, 7, 52)), 60);
+  // lun 26 19:03 → mar 27 03:45
+  for (let t = T(26, 19, 3); t < T(27, 3, 45); t += 2 * 3600000) add(t, Math.min(t + 1.5 * 3600000, T(27, 3, 45)), 50);
+  const fm = { settings: { fatigue: {}, severity: {} }, tripsByDevice: new Map([["v1", trips]]), events: [], journeys: [], dayKeys: GI.dayRange("2026-10-20", "2026-10-27"), driverName: new Map([["L", "Leandro"]]) };
+  const rf = GI.riskFactors(fm, new Set(["v1"]), null, new Map(), 1);
+  const d = rf.fatigue.drivers.find(x => x.id === "L");
+  const days = d.dayList.map(j => [j.dk, GI.round(j.span, 1), j.restBefore == null ? null : GI.round(j.restBefore, 1)]);
+  assert.strictEqual(days.length, 3, JSON.stringify(days));
+  assert.strictEqual(days[0][0], "2026-10-24"); assert.ok(days[0][1] > 21, "sábado " + days[0][1]);
+  assert.strictEqual(days[1][0], "2026-10-25"); assert.ok(Math.abs(days[1][2] - 13) < 0.2, "descanso dom " + days[1][2]);
+  assert.strictEqual(days[2][0], "2026-10-26"); assert.ok(days[2][2] > 10 && days[2][2] < 12, "descanso lun " + days[2][2]);
+}
+// Fatiga: señales por jornada, nivel y jornada en curso.
+{
+  const T = (d, h, m) => new Date(2026, 9, d, h, m || 0).getTime();
+  const trips = [];
+  const add = (s, hrs) => { trips.push({ d: "v1", r: "L", s, e: s + hrs * 3600000, dh: hrs, km: hrs * 70 }); return s + hrs * 3600000; };
+  // 19 y 20: turno día 06–16
+  for (const d of [19, 20]) { let t = T(d, 6); t = add(t, 3) + 1800000; add(t, 3); }
+  // 20 → 21: turno noche 21–08 tras 5 h de descanso de día; 4,6 h seguidas; madrugada
+  { let t = T(20, 21); t = add(t, 4.6) + 0.4 * 3600000; t = add(t, 4) + 0.6 * 3600000; add(t, 1.8); }
+  const ev = [];
+  [0, 12, 25, 40].forEach((m, i) => ev.push({ d: "v1", drv: "L", t: T(21, 3) + m * 60000, cat: i % 2 ? "salida_carril" : "fatiga", w: 1.5 }));
+  // en curso: empezó hace 7 h
+  const now = T(26, 15);
+  { let t = now - 7 * 3600000; t = add(t, 3.4) + 0.3 * 3600000; add(t, 3.2); }
+  const fm = { settings: { fatigue: {} }, tripsByDevice: new Map([["v1", trips]]), events: ev };
+  const { shifts, limits } = GI.buildShifts(fm, new Set(["v1"]), null, { now });
+  const night = shifts.find(j => j.dk === "2026-10-20" && j.type === "noche");
+  assert.ok(night, JSON.stringify(shifts.map(j => [j.dk, j.type])));
+  const keys = night.signals.map(x => x.key).sort().join(",");
+  for (const k of ["camara", "cambio", "continuo", "descanso", "madrugada", "manejo"]) assert.ok(keys.includes(k), k + " en " + keys);
+  assert.strictEqual(night.level, "alto");
+  assert.strictEqual(night.camCluster, 4);
+  assert.ok(Math.abs(night.low - 3) < 0.01, "02–05 " + night.low);
+  const day = shifts.find(j => j.dk === "2026-10-19");
+  assert.strictEqual(day.level, "bajo", JSON.stringify(day.signals));
+  const open = shifts.filter(j => j.open);
+  assert.strictEqual(open.length, 1);
+  const pr = GI.shiftProgress(open[0], limits, now);
+  const drive = pr.items.find(x => x.key === "drive"), stint = pr.items.find(x => x.key === "stint");
+  assert.ok(Math.abs(drive.v - 6.6) < 0.01 && drive.level === "ok");
+  assert.ok(stint.v > 3.1 && stint.level === "amarillo", "continuo " + stint.v + " " + stint.level);
+  assert.ok(drive.at > now && drive.at < now + 4 * 3600000);
+  // índice de fatiga: el turno noche tras descansar de día termina alto; el diurno, bajo
+  assert.ok(night.fiPeak >= 100 && night.signals.some(x => x.key === "indice"), "índice noche " + night.fiPeak);
+  assert.ok(day.fiPeak < 80, "índice día " + day.fiPeak);
+  const oi = GI.openShiftIndex(open[0], shifts.filter(j => j.drv === "L").reverse(), open[0].sim, limits, now);
+  assert.ok(oi.Fnow > 30 && oi.peak >= oi.Fnow);
+  // próximo turno: después de un turno noche, descanso recomendado razonable
+  const fm3 = { settings: { fatigue: {} }, tripsByDevice: new Map([["v1", trips.filter(t => t.s < T(22, 0))]]), events: [] };
+  const r3 = GI.buildShifts(fm3, new Set(["v1"]), null, { now: T(21, 14) });
+  const nx = r3.sims.get("L").next;
+  assert.ok(nx && nx.start > T(21, 14) && nx.needRest >= 8 && nx.needRest <= 30, JSON.stringify(nx && { s: new Date(nx.start).toString(), r: nx.needRest, p: nx.peak }));
+  // en vivo: el vehículo está manejando hace 4 min (todavía no hay viaje registrado)
+  const lt = GI.liveTrips(fm, trips, [{ d: "v1", r: null, driving: true, since: now - 4 * 60000 }], 36, now);
+  const live = GI.buildShifts(fm, new Set(["v1"]), null, { now, tripsByDevice: lt }).shifts.find(j => j.open);
+  assert.ok(live.live && GI.shiftProgress(live, limits, now).driving);
+}
+// Corredores v2: riesgo del camino ajustado por conductor.
+{
+  const RD = GI._road;
+  // aggregateWindow: histograma, anda y para y tiempo sobre el límite
+  const t0 = new Date(2026, 9, 10, 17, 0, 0).getTime();
+  const recs = [];
+  for (let i = 0; i <= 30; i++) recs.push({ device: { id: "dA" }, dateTime: new Date(t0 + i * 10000).toISOString(), latitude: -38.9 + i * 0.2 / 111.2, longitude: -68.0, speed: i === 15 ? 40 : 72 });
+  const acc = new Map(), rep = new Map();
+  RD.aggregateWindow(recs, acc, { limitAt: () => 60, rep });
+  let sg = 0, over = 0, limSec = 0, hsum = 0;
+  for (const r of acc.values()) { sg += r[8]; over += r[9]; limSec += r[10]; hsum += r[7].reduce((a, b) => a + b, 0); }
+  assert.strictEqual(sg, 1, "anda y para " + sg);
+  assert.ok(limSec === 300 && over > 250, "sobre el límite " + over);
+  assert.ok(Math.abs(hsum - 300) < 1e-6);
+  assert.ok(rep.size >= 6);
+  assert.strictEqual(RD.normRoad("Tramo 3 Ruta 7 110kmh"), "RP7");
+  assert.strictEqual(RD.normRoad("RN 22"), "RN22");
+  assert.ok(RD.isControlName("RP7 - Chañar a Picada 11 - 110kmh") && !RD.isControlName("#IMSEGZONE"));
+  // Tramos con GetAddresses: urbano (número), geocerca de control, ruta sin geocerca
+  const cells = new Map([["c1", 10], ["c2", 10], ["c3", 5], ["c4", 1]]);
+  const addr = new Map([
+    ["c1", { city: "", street: "RP7", num: "", zones: ["zIm", "zA"] }],
+    ["c2", { city: "", street: "RP7", num: "", zones: ["zA", "zRad"] }],
+    ["c3", { city: "Añelo", street: "RP7", num: "120", zones: [] }],
+    ["c4", { city: "", street: "RP17", num: "", zones: [] }],
+  ]);
+  const names = new Map([["zIm", "#IMSEGZONE"], ["zA", "RP7 - Chañar a Picada 11 - 110kmh"], ["zRad", "Ruta 7: Zona Radar El Cruce 60kmh"]]);
+  // celdas reales para los centros
+  const real = ["-3890:-5292", "-3889:-5292", "-3888:-5292", "-3887:-5292"];
+  const cells2 = new Map(real.map((k, i) => [k, [...cells.values()][i]]));
+  const addr2 = new Map(real.map((k, i) => [k, addr.get("c" + (i + 1))]));
+  const built = GI.buildTramos(cells2, addr2, names);
+  const tr = [...built.tramos.values()];
+  const zA = tr.find(t => t.zoneId === "zA");
+  assert.ok(zA && zA.cells.length === 2 && zA.limit === 110 && zA.route === "RP7", JSON.stringify(tr));
+  assert.ok(tr.find(t => t.kind === "urbano" && t.name === "RP7 (Añelo)"));
+  assert.ok(tr.find(t => t.kind === "ruta" && t.route === "RP17"));
+  // Modelo: el conductor A (infractor) siempre maneja a las 17 h; B a las 10 h.
+  const d0 = GI.parseDayKey("2026-10-10").getTime();
+  const fakeModel = {
+    vtypeOf: new Map([["dA", "liviano"], ["dB", "liviano"]]),
+    tripsByDevice: new Map([["dA", [{ s: d0 + 17 * 3600000, e: d0 + 18 * 3600000, r: "A" }]], ["dB", [{ s: d0 + 10 * 3600000, e: d0 + 11 * 3600000, r: "B" }]]]),
+  };
+  const hist = new Array(16).fill(0); hist[7] = 600;
+  const days = new Map([["2026-10-10", { devs: ["dA", "dB"], scale: 6, rows: [
+    [0, real[0], 17, 10, 600, 72 * 600, 72 * 72 * 600, hist, 0, 0, 0, 0],
+    [1, real[0], 10, 10, 600, 72 * 600, 72 * 72 * 600, hist, 0, 0, 0, 0],
+  ] }]]);
+  const evs = [], locs = new Map();
+  for (let i = 0; i < 12; i++) { evs.push({ i: "a" + i, d: "dA", drv: "A", t: d0 + 17 * 3600000 + i * 60000, cat: "frenado_brusco", w: 1.3 }); locs.set("a" + i, GI._road.cellCenter(real[0])); }
+  evs.push({ i: "b0", d: "dB", drv: "B", t: d0 + 10 * 3600000 + 60000, cat: "frenado_brusco", w: 1.3 }); locs.set("b0", GI._road.cellCenter(real[0]));
+  const rm = GI.roadModel(fakeModel, days, new Set(["dA", "dB"]), built, evs, locs, {});
+  const x = rm.tramos.find(t => t.zoneId === "zA");
+  const f17 = x.franjas.find(f => f.key === "17-21"), f10 = x.franjas.find(f => f.key === "10-17");
+  // Sin ajustar sería 12 contra 1 (×12). Ajustado por conductor, las dos franjas quedan parecidas.
+  assert.ok(f17.envIdx / f10.envIdx < 1.6, "17h " + f17.envIdx + " vs 10h " + f10.envIdx);
+  // Si B (prudente) también frena mucho a las 17 h, ahí sí la franja es riesgosa.
+  const days2 = new Map([["2026-10-10", { devs: ["dA", "dB"], scale: 6, rows: [
+    [1, real[0], 17, 10, 600, 72 * 600, 72 * 72 * 600, hist, 0, 0, 0, 0],
+    [1, real[0], 10, 10, 600, 72 * 600, 72 * 72 * 600, hist, 0, 0, 0, 0],
+  ] }]]);
+  const fm2 = { vtypeOf: fakeModel.vtypeOf, tripsByDevice: new Map([["dB", [{ s: d0 + 10 * 3600000, e: d0 + 11 * 3600000, r: "B" }, { s: d0 + 17 * 3600000, e: d0 + 18 * 3600000, r: "B" }]]]) };
+  const evs2 = [], locs2 = new Map();
+  for (let i = 0; i < 8; i++) { evs2.push({ i: "c" + i, d: "dB", drv: "B", t: d0 + 17 * 3600000 + i * 60000, cat: "frenado_brusco", w: 1.3 }); locs2.set("c" + i, GI._road.cellCenter(real[0])); }
+  evs2.push({ i: "c9", d: "dB", drv: "B", t: d0 + 10 * 3600000, cat: "frenado_brusco", w: 1.3 }); locs2.set("c9", GI._road.cellCenter(real[0]));
+  const rm2 = GI.roadModel(fm2, days2, new Set(["dB"]), built, evs2, locs2, {});
+  const y = rm2.tramos.find(t => t.zoneId === "zA");
+  const g17 = y.franjas.find(f => f.key === "17-21"), g10 = y.franjas.find(f => f.key === "10-17");
+  assert.ok(g17.envIdx / g10.envIdx > 2, "mismo conductor: 17h " + g17.envIdx + " vs 10h " + g10.envIdx);
+  assert.ok(rm.routes.find(r => r.name === "RP7"));
 }
 console.log("OK");

@@ -101,48 +101,69 @@
   async function loadShared(api) {
     const all = await getAll(api);
     const settingsParts = [];
+    const benchParts = [];
     const milestones = [];
+    const fcases = [];
     for (const rec of all) {
       const d = parseDetails(rec);
       if (!d) continue;
       if (d.kind === "settings") settingsParts.push({ id: rec.id, groups: rec.groups || [], ...d });
+      else if (d.kind === "benchmark") benchParts.push({ id: rec.id, ...d });
       else if (d.kind === "milestone") milestones.push({ ...d, id: rec.id });
+      else if (d.kind === "fcase") fcases.push({ ...d, id: rec.id });
     }
-    let settings = null;
-    const byRev = GI.groupBy(settingsParts, p => p.rev);
-    const revs = [...byRev.keys()].sort((a, b) => b - a);
-    for (const rev of revs) {
-      const parts = byRev.get(rev).sort((a, b) => a.part - b.part);
-      if (parts.length !== parts[0].parts) continue; // rev incompleto
-      try {
-        settings = JSON.parse(parts.map(p => p.chunk).join(""));
-        settings._rev = rev;
-        break;
-      } catch (e) { /* siguiente rev */ }
-    }
+    // Arma el último rev completo de un objeto guardado en partes.
+    const assemble = list => {
+      const byRev = GI.groupBy(list, p => p.rev);
+      for (const rev of [...byRev.keys()].sort((a, b) => b - a)) {
+        const parts = byRev.get(rev).sort((a, b) => a.part - b.part);
+        if (parts.length !== parts[0].parts) continue; // rev incompleto
+        try { const o = JSON.parse(parts.map(p => p.chunk).join("")); o._rev = rev; return o; } catch (e) { /* siguiente rev */ }
+      }
+      return null;
+    };
+    const settings = assemble(settingsParts);
+    const benchmark = assemble(benchParts);
     milestones.sort((a, b) => (a.date < b.date ? -1 : 1));
-    return { settings, milestones, _settingsRecords: settingsParts };
+    return { settings, milestones, benchmark, fcases, _settingsRecords: settingsParts };
+  }
+
+  // Guarda un objeto grande en partes (kind = "settings" | "benchmark"):
+  // primero las partes nuevas y recién después se borran las anteriores.
+  async function saveChunked(api, kind, obj) {
+    const text = JSON.stringify(obj);
+    const chunks = [];
+    for (let i = 0; i < text.length; i += CHUNK_SIZE) chunks.push(text.slice(i, i + CHUNK_SIZE));
+    const rev = Date.now();
+    const before = (await getAll(api)).filter(r => (parseDetails(r) || {}).kind === kind);
+    const groups = await shareGroups(api);
+    for (let i = 0; i < chunks.length; i += 50) {
+      await api.multiCall(chunks.slice(i, i + 50).map((chunk, k) => ["Add", {
+        typeName: "AddInData",
+        entity: { addInId: ADDIN_ID, groups, details: { kind, rev, part: i + k, parts: chunks.length, chunk } },
+      }]));
+    }
+    if (before.length) {
+      await api.multiCall(before.map(r => ["Remove", { typeName: "AddInData", entity: { id: r.id } }]));
+    }
+    return rev;
   }
 
   async function saveSettings(api, settings) {
     const clean = { ...settings };
     delete clean._rev;
     clean.updated_at = new Date().toISOString();
-    const text = JSON.stringify(clean);
-    const chunks = [];
-    for (let i = 0; i < text.length; i += CHUNK_SIZE) chunks.push(text.slice(i, i + CHUNK_SIZE));
-    const rev = Date.now();
-    const before = (await getAll(api)).filter(r => (parseDetails(r) || {}).kind === "settings");
-    const groups = await shareGroups(api);
-    await api.multiCall(chunks.map((chunk, part) => ["Add", {
-      typeName: "AddInData",
-      entity: { addInId: ADDIN_ID, groups, details: { kind: "settings", rev, part, parts: chunks.length, chunk } },
-    }]));
-    if (before.length) {
-      await api.multiCall(before.map(r => ["Remove", { typeName: "AddInData", entity: { id: r.id } }]));
-    }
-    clean._rev = rev;
+    clean._rev = await saveChunked(api, "settings", clean);
     return clean;
+  }
+
+  // Valores de referencia de la flota (sin nombres): los publica un
+  // administrador para que supervisores y conductores comparen contra la
+  // empresa sin ver los datos de otros.
+  async function saveBenchmark(api, bench) {
+    const b = { ...bench, published_at: new Date().toISOString() };
+    await saveChunked(api, "benchmark", b);
+    return b;
   }
 
   async function addMilestone(api, m) {
@@ -161,6 +182,38 @@
 
   async function removeMilestone(api, id) {
     await api.call("Remove", { typeName: "AddInData", entity: { id } });
+  }
+
+  // Seguimiento de casos de fatiga: un registro por jornada revisada
+  // ({kind:"fcase", key: "conductor|inicio", status, owner, action, notes}).
+  async function saveFatigueCase(api, c) {
+    const details = { kind: "fcase", ...c, updated_at: new Date().toISOString() };
+    delete details.id;
+    const entity = { addInId: ADDIN_ID, groups: await shareGroups(api), details };
+    if (c.id) { await api.call("Set", { typeName: "AddInData", entity: { id: c.id, ...entity } }); return { ...details, id: c.id }; }
+    const id = await api.call("Add", { typeName: "AddInData", entity });
+    return { ...details, id };
+  }
+
+  async function loadFatigueCases(api) {
+    const out = [];
+    for (const rec of await getAll(api)) {
+      const d = parseDetails(rec);
+      if (d && d.kind === "fcase") out.push({ ...d, id: rec.id });
+    }
+    return out;
+  }
+
+  // Datos del usuario actual (id, si es conductor). null si no se pudo.
+  async function currentUser(api, userName) {
+    try {
+      const users = await api.call("Get", { typeName: "User", search: { name: userName } });
+      const u = users && users[0];
+      return u ? { id: u.id, name: [u.firstName, u.lastName].filter(Boolean).join(" ") || u.name, isDriver: !!u.isDriver,
+        // MyGeotab: "Impedir que el conductor acceda a los datos compartidos"
+        ownDataOnly: !!u.viewDriversOwnDataOnly,
+        everything: (u.securityGroups || []).some(g => GI.idOf(g) === "GroupEverythingSecurityId") } : null;
+    } catch (e) { return null; }
   }
 
   // Administrador = clearance "Everything" de MyGeotab, o usuario listado
@@ -184,5 +237,5 @@
     return saved;
   }
 
-  Object.assign(GI, { _deepestOnly: deepestOnly, ADDIN_ID, loadShared, saveSettings, sharingStatus, shareWithAll, addMilestone, updateMilestone, removeMilestone, resolveIsAdmin });
+  Object.assign(GI, { _deepestOnly: deepestOnly, shareGroups, ADDIN_ID, loadShared, saveSettings, saveBenchmark, currentUser, sharingStatus, shareWithAll, addMilestone, updateMilestone, removeMilestone, resolveIsAdmin, saveFatigueCase, loadFatigueCases });
 })(window.GI);

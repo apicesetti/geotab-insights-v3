@@ -632,6 +632,23 @@
 
   // Ubicación de eventos (para el mapa de calor): el LogRecord más cercano a
   // activeFrom. Se pide solo al abrir el mapa y se cachea por id de evento.
+  // Trazado GPS de un recorrido (un vehículo entre dos instantes), reducido a
+  // ~1500 puntos. Se guarda en este navegador para no volver a pedirlo.
+  async function loadTrace(api, deviceId, from, to) {
+    const k = "trace|" + deviceId + "|" + from + "|" + to;
+    const hit = (await idbGetMany("locs", [k])).get(k);
+    if (hit && hit.pts) return hit.pts;
+    const recs = (await api.call("Get", {
+      typeName: "LogRecord", resultsLimit: 50000,
+      search: { deviceSearch: { id: deviceId }, fromDate: new Date(from).toISOString(), toDate: new Date(to).toISOString() },
+    })) || [];
+    const all = recs.filter(r => r.latitude || r.longitude).sort((a, b) => (a.dateTime < b.dateTime ? -1 : 1)).map(r => [GI.round(r.latitude, 5), GI.round(r.longitude, 5)]);
+    const step = Math.max(1, Math.ceil(all.length / 1500));
+    const pts = all.filter((_, i) => i % step === 0 || i === all.length - 1);
+    await idbPutMany("locs", [{ k, pts }]);
+    return pts;
+  }
+
   async function loadEventLocations(api, events, onProgress) {
     const keys = events.map(e => "loc|" + e.i);
     const cached = await idbGetMany("locs", keys);
@@ -671,8 +688,31 @@
     return out;
   }
 
+  // Fatiga "Ahora": viajes de las últimas horas (sin caché, toda la flota
+  // visible) y estado en vivo de cada vehículo (¿está manejando? ¿desde cuándo?).
+  async function loadRecentTrips(api, hours) {
+    const to = new Date(), from = new Date(to.getTime() - hours * 3600000);
+    const res = await getRangeMulti(api, [{ key: "t", typeName: "Trip", search: {},
+      fields: ["id", "device", "driver", "start", "stop", "distance", "drivingDuration", "idlingDuration", "stopPoint"],
+      dateOf: r => new Date(r.start) }], from, to);
+    const seen = new Set();
+    return compactTrips(res.get("t").filter(r => !seen.has(r.id) && seen.add(r.id)));
+  }
+
+  async function loadDriveStatus(api) {
+    const recs = (await api.call("Get", { typeName: "DeviceStatusInfo",
+      propertySelector: { fields: ["device", "driver", "isDriving", "currentStateDuration", "dateTime"], isIncluded: true } })) || [];
+    return recs.map(r => {
+      const drv = GI.idOf(r.driver);
+      return { d: GI.idOf(r.device), r: drv && drv !== "UnknownDriverId" && drv !== "NoDriverId" ? drv : null,
+        driving: !!r.isDriving, since: Date.now() - GI.durationToHours(r.currentStateDuration) * 3600000, at: r.dateTime ? new Date(r.dateTime).getTime() : null };
+    });
+  }
+
   Object.assign(GI, {
-    loadCatalogs, loadZones, loadZoneTypes, loadPeriod, loadFuel, loadEventLocations, clearCache,
+    loadRecentTrips, loadDriveStatus,
+    loadCatalogs, loadZones, loadZoneTypes, loadPeriod, loadFuel, loadEventLocations, loadTrace, clearCache,
+    _idbGetMany: idbGetMany, _idbPutMany: idbPutMany,
     _compactTrips: compactTrips, _compactExceptions: compactExceptions, _compactCounter: compactCounter, _loadFuelBoundaries: loadFuelBoundaries, _missingRuns: missingRuns,
   });
 })(window.GI);

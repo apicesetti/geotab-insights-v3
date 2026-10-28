@@ -12,16 +12,22 @@
     ["seguridad", "Seguridad"],
     ["conductores", "Conductores"],
     ["recorridos", "Recorridos"],
+    ["fatiga", "Fatiga"],
     ["exposicion", "Exposición"],
+    ["corredores", "Corredores"],
     ["hitos", "Hitos"],
     ["config", "Configuración"],
   ];
+
+  // Pestañas que por ahora solo se publican en la BETA (en la versión normal no aparecen).
+  const BETA_ONLY = new Set(["corredores"]);
+  const showBetaTabs = () => GI.BUILD === "beta" || /\/dev\//.test(window.location.pathname);
 
   // Config guardada + campos nuevos que pudieran faltar (versiones futuras).
   function mergeDefaults(saved, defaults) {
     if (!saved) return defaults;
     const out = { ...defaults, ...saved };
-    for (const k of ["service", "fuel", "journeys", "drivers", "ui"]) out[k] = { ...defaults[k], ...(saved[k] || {}) };
+    for (const k of ["service", "fuel", "journeys", "drivers", "ui", "fatigue", "severity"]) out[k] = { ...defaults[k], ...(saved[k] || {}) };
     out.service.group_ids = { ...defaults.service.group_ids, ...((saved.service || {}).group_ids || {}) };
     out.category_weights = { ...defaults.category_weights, ...(saved.category_weights || {}) };
     out.categories = saved.categories && saved.categories.length ? saved.categories : defaults.categories;
@@ -44,6 +50,9 @@
     const [settings, setSettings] = useState(null);
     const [milestones, setMilestones] = useState([]);
     const [isAdmin, setIsAdmin] = useState(false);
+    // Conductor (no administrador): ve solo "Mi desempeño" con sus datos.
+    const [me, setMe] = useState(null);
+    const [benchmark, setBenchmark] = useState(null);
     const [period, setPeriod] = useState({ preset: 90, ...rangeFor(90) });
     const [customDraft, setCustomDraft] = useState(null);
     const [gran, setGran] = useState("week");
@@ -82,7 +91,8 @@
           const defaults = GI.defaultSettings(cat.groups, cat.rules);
           const s = mergeDefaults(shared.settings, defaults);
           GI.applyCategories(s.categories);
-          const admin = await GI.resolveIsAdmin(api, userName, s);
+          const [admin, user] = await Promise.all([GI.resolveIsAdmin(api, userName, s), GI.currentUser(api, userName)]);
+          setMe(user); setBenchmark(shared.benchmark || null);
           setCatalogs(cat); setSettings(s); setMilestones(shared.milestones); setIsAdmin(admin);
           setNoShared(!shared.settings);
           // El administrador ve si hay usuarios que todavía no reciben su configuración.
@@ -97,6 +107,7 @@
           setPeriod(p);
           setPhase("ready");
           if (!s.configured && admin) setTab("config");
+          if (!admin && user && user.isDriver && s.driver_view !== false) setTab("mi");
           load(s, p, cat);
         } catch (e) {
           setError("No se pudo iniciar: " + (e.message || e)); setPhase("error");
@@ -166,9 +177,21 @@
     }, [raw, catalogs, settings]);
     const groupsFlat = useMemo(() => (catalogs ? GI.flattenGroups(catalogs.groups) : []), [catalogs]);
 
+    // Solo los conductores con "Impedir que el conductor acceda a los datos compartidos"
+    // activado en MyGeotab ven únicamente su desempeño; el resto ve lo que abarca su alcance.
+    const driverMode = !!(me && me.isDriver && me.ownDataOnly && !isAdmin && settings && settings.driver_view !== false);
     const view = useMemo(() => {
       if (!model) return null;
       try {
+      if (driverMode) {
+        // Solo los vehículos que manejó y solo él como conductor.
+        const own = new Set();
+        for (const [ck] of model.drvCells.get(me.id) || []) own.add(ck.split("|")[0]);
+        const ids = new Set([...own].filter(id => model.devById.has(id)));
+        const driverOk = id => id === me.id;
+        return { model, ids, gran, settings, milestones, driverOk, me, benchmark, driverMode: true,
+          series: GI.series(model, ids, gran), total: GI.kpis(GI.aggregate(model, ids)), events: model.events.filter(e => e.drv === me.id) };
+      }
       const ids = GI.filterDevices(model, { groupIds: mgGroups, vtype: filter.vtype, stype: filter.stype });
       const series = GI.series(model, ids, gran);
       const total = GI.kpis(GI.aggregate(model, ids));
@@ -187,7 +210,13 @@
         savings: GI.savings(vRows),
       };
       } catch (e) { console.error("[Geotab Insights] view", e); setTimeout(() => setCalcError(e), 0); return null; }
-    }, [model, filter, mgGroups, gran, milestones]);
+    }, [model, filter, mgGroups, gran, milestones, driverMode, benchmark]);
+
+    async function publishBenchmark() {
+      const b = GI.buildBenchmark(model);
+      const saved = await GI.saveBenchmark(api, b);
+      setBenchmark(saved);
+    }
 
     async function saveSettings(next) {
       const saved = await GI.saveSettings(api, next);
@@ -248,7 +277,7 @@
           </span>` : null}
           <label className="ctl">Agrupar
             <${Segmented} value=${gran} onChange=${setGran} options=${[{ value: "day", label: "Día" }, { value: "week", label: "Semana" }, { value: "month", label: "Mes" }]} /></label>
-          <div className="ctl">Grupos
+          ${driverMode ? null : html`<div className="ctl">Grupos
             <span className="mg-groups" title="Se toma del filtro de grupos de MyGeotab (arriba a la izquierda). Cambialo ahí y el tablero se actualiza solo.">${mgLabel}</span></div>
           <label className="ctl">Tipo
             <select value=${filter.vtype} onChange=${e => setFilter(f => ({ ...f, vtype: e.target.value }))}>
@@ -257,7 +286,7 @@
           <label className="ctl">Servicio
             <select value=${filter.stype} onChange=${e => setFilter(f => ({ ...f, stype: e.target.value }))}>
               <option value="">Todos</option><option value="corta">Corta distancia</option><option value="larga">Larga distancia</option>
-            </select></label>
+            </select></label>`}
           <button className="btn" disabled=${loading != null} title="Vuelve a consultar los días recientes y los catálogos"
             onClick=${() => load(settings, period, catalogs, true)}>↻ Actualizar</button>
         </div>
@@ -268,10 +297,10 @@
         <button className="btn link small" onClick=${() => setFilter({ vtype: "", stype: "" })}>Quitar filtros</button>
       </div>` : null}
       ${loading != null ? html`<${Progress} value=${loading} label=${loadingLabel || "Descargando datos"} />` : null}
-      <nav className="tabs">${TABS.map(([k, l]) => html`<button key=${k} className=${tab === k ? "on" : ""} onClick=${() => setTab(k)}>${l}</button>`)}</nav>
+      <nav className="tabs">${(driverMode ? [["mi", "Mi desempeño"]] : TABS.filter(([k]) => !BETA_ONLY.has(k) || showBetaTabs())).map(([k, l]) => html`<button key=${k} className=${tab === k ? "on" : ""} onClick=${() => setTab(k)}>${l}</button>`)}</nav>
       <div className="gi-main">
         ${error ? html`<${Info} tone="error">${error}<//>` : null}
-        ${noShared && !isAdmin ? html`<${Info} tone="warn">Estás viendo la configuración por defecto: un administrador todavía no la configuró, o la guardó antes de que se compartiera con tu grupo. Pedile que abra el add-in y guarde la configuración (o use "Compartir con todos").<//>` : null}
+        ${noShared && !isAdmin && !driverMode ? html`<${Info} tone="warn">Estás viendo la configuración por defecto: un administrador todavía no la configuró, o la guardó antes de que se compartiera con tu grupo. Pedile que abra el add-in y guarde la configuración (o use "Compartir con todos").<//>` : null}
         ${isAdmin && sharing && sharing.missingUsers.length ? html`<${Info} tone="warn">
           <b>${GI.fmtNum(sharing.missingUsers.length)} usuarios no ven tu configuración</b> porque su acceso a datos es un grupo con el que todavía no está compartida
           (${sharing.missingUsers.slice(0, 3).join(", ")}${sharing.missingUsers.length > 3 ? "…" : ""}). Hasta entonces ven los valores por defecto.
@@ -279,33 +308,37 @@
         ${calcError ? html`<${Info} tone="error"><b>Error al calcular el tablero:</b> ${String(calcError.message || calcError)}
           <details><summary>Detalle técnico</summary><pre style=${{ whiteSpace: "pre-wrap", fontSize: "12px" }}>${String(calcError.stack || "")}</pre></details><//>` : null}
         ${raw && raw.fuelPending && (tab === "combustible" || tab === "resumen") ? html`<${Info}>Los datos de combustible se están cargando; los litros y costos se completan en unos segundos.<//>` : null}
-        ${largeFleet && !mgGroups.length && !(settings.scope_group_ids || []).length && tab !== "config" ? html`<${Info} tone="warn">
+        ${largeFleet && !driverMode && !mgGroups.length && !(settings.scope_group_ids || []).length && tab !== "config" ? html`<${Info} tone="warn">
           Esta base tiene ${GI.fmtNum(catalogs.devices.length)} vehículos. Para que cargue rápido, elegí uno o más grupos en el <b>filtro de grupos de MyGeotab</b> (arriba a la izquierda): se consulta solo ese alcance.
           ${isAdmin ? " También podés fijar el alcance para todos en Configuración → Combustible y alcance." : ""}<//>` : null}
-        ${model && model.fleetCount && model.excludedCount / model.fleetCount > 0.3 && tab !== "config" ? html`<${Info} tone="warn">
+        ${model && !driverMode && model.fleetCount && model.excludedCount / model.fleetCount > 0.3 && tab !== "config" ? html`<${Info} tone="warn">
           Los grupos excluidos dejan afuera <b>${GI.fmtNum(model.excludedCount)} de ${GI.fmtNum(model.fleetCount)} vehículos</b>
           (${model.exclusionImpact.slice(0, 3).map(x => `${x.name}: ${GI.fmtNum(x.devices)}`).join(" · ")}).
           ${isAdmin ? " Revisalo en Configuración → Combustible y alcance → Excluir siempre estos grupos." : " Pedile a un administrador que revise los grupos excluidos."}<//>` : null}
         <${ErrorBoundary} key=${tab}>
         ${tab === "config" ? html`<${GI.ConfigTab} api=${api} settings=${settings} catalogs=${catalogs} groups=${groupsFlat}
-            model=${model} isAdmin=${isAdmin} userName=${userName} onSave=${saveSettings} />`
+            model=${model} isAdmin=${isAdmin} userName=${userName} onSave=${saveSettings}
+            benchmark=${benchmark} onPublishBenchmark=${publishBenchmark} mgGroups=${mgGroups} />`
           : !view ? html`<div className="splash small"><div className="spinner"></div>Preparando el tablero…</div>`
-          : tab === "resumen" ? html`<${GI.SummaryTab} view=${view} onGo=${setTab} />`
+          : driverMode || tab === "mi" ? html`<${GI.MyPerformanceTab} view=${view} />`
+          : tab === "resumen" ? html`<${GI.SummaryTab} view=${view} onGo=${setTab} onDriver=${(id, mode) => setDetail({ type: "d", id, mode: mode || "safety" })} />`
           : tab === "combustible" ? html`<${GI.FuelTab} view=${view} onVehicle=${id => setDetail({ type: "v", id })} />`
-          : tab === "seguridad" ? html`<${GI.SafetyTab} view=${view} onVehicle=${id => setDetail({ type: "v", id })} onDriver=${id => setDetail({ type: "d", id })} />`
+          : tab === "seguridad" ? html`<${GI.SafetyTab} view=${view} onVehicle=${id => setDetail({ type: "v", id })} onDriver=${(id, mode) => setDetail({ type: "d", id, mode: mode || "safety" })} />`
           : tab === "conductores" ? html`<${GI.DriversTab} view=${view} onDriver=${id => setDetail({ type: "d", id })} />`
           : tab === "recorridos" ? html`<${GI.RoutesTab} view=${view} api=${api} />`
+          : tab === "fatiga" ? (GI.FatigueTab ? html`<${GI.FatigueTab} view=${view} api=${api} userName=${userName} onDriver=${id => setDetail({ type: "d", id, mode: "safety" })} />` : html`<${Info} tone="warn">Se está terminando de cargar la nueva versión. Recargá la página (Ctrl + F5).<//>`)
           : tab === "exposicion" ? html`<${GI.ExposureTab} view=${view} onDriver=${id => setDetail({ type: "d", id })} />`
+          : tab === "corredores" && showBetaTabs() ? (GI.RoadsTab ? html`<${GI.RoadsTab} view=${view} api=${api} database=${database} />` : html`<${Info} tone="warn">Se está terminando de cargar la nueva versión de Corredores. Recargá la página (Ctrl + F5).<//>`)
           : tab === "hitos" ? html`<${GI.MilestonesTab} view=${view} milestones=${milestones} isAdmin=${isAdmin} groups=${groupsFlat}
               onAdd=${async m => { const r = await GI.addMilestone(api, m); setMilestones(ms => [...ms, r]); }}
               onUpdate=${async m => { await GI.updateMilestone(api, m); setMilestones(ms => ms.map(x => (x.id === m.id ? m : x))); }}
               onDelete=${async id => { await GI.removeMilestone(api, id); setMilestones(ms => ms.filter(x => x.id !== id)); }} />`
           : null}
         <//>
-        ${raw ? html`<footer className="foot">Datos del ${raw.fromKey} al ${raw.toKey}${raw.complete ? "" : " (completando el resto del período)"}: ${GI.fmtNum(raw.trips.length)} viajes y ${GI.fmtNum(raw.exceptions.length)} eventos, cargados en ${GI.fmtNum(raw.loadedMs / 1000, 1)} s.</footer>` : null}
+        ${raw ? html`<footer className="foot">Datos del ${raw.fromKey} al ${raw.toKey}${raw.complete ? "" : " (completando el resto del período)"}: ${GI.fmtNum(raw.trips.length)} viajes y ${GI.fmtNum(raw.exceptions.length)} eventos, cargados en ${GI.fmtNum(raw.loadedMs / 1000, 1)} s.${model && model.excludedUnknown ? " Sin conductor identificado (excluidos por configuración): " + GI.fmtNum(model.excludedUnknown.trips) + " viajes, " + GI.fmtNum(model.excludedUnknown.km, 0) + " km y " + GI.fmtNum(model.excludedUnknown.events) + " eventos." : ""}</footer>` : null}
       </div>
       ${detail && view && detail.type === "v" ? html`<${GI.VehicleDetail} view=${view} id=${detail.id} onClose=${() => setDetail(null)} />` : null}
-      ${detail && view && detail.type === "d" ? html`<${GI.DriverDetail} view=${view} id=${detail.id} onClose=${() => setDetail(null)} />` : null}
+      ${detail && view && detail.type === "d" ? html`<${GI.DriverDetail} view=${view} id=${detail.id} mode=${detail.mode} onClose=${() => setDetail(null)} />` : null}
     </div>`;
   }
 

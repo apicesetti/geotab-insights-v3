@@ -36,6 +36,21 @@
     return html`<span className="hint"><button type="button" aria-label="Cómo se calcula">?</button><span className="hint-body" role="tooltip">${children}</span></span>`;
   }
 
+  // "?" de encabezado de tabla: la explicación se posiciona fija en pantalla
+  // para que no la corte el scroll horizontal de la tabla.
+  function HeadHint({ text }) {
+    const [pos, setPos] = useState(null);
+    const ref = useRef(null);
+    const show = () => {
+      const r = ref.current.getBoundingClientRect();
+      setPos({ top: r.bottom + 6, left: Math.max(8, Math.min(window.innerWidth - 328, r.left - 150)) });
+    };
+    const hide = () => setPos(null);
+    return html`<span className="th-hint" onClick=${e => e.stopPropagation()}>
+      <button ref=${ref} type="button" aria-label="Qué mide esta columna" onMouseEnter=${show} onMouseLeave=${hide} onFocus=${show} onBlur=${hide}>?</button>
+      ${pos ? html`<span className="th-hint-body" role="tooltip" style=${{ top: pos.top + "px", left: pos.left + "px" }}>${text}</span>` : null}</span>`;
+  }
+
   // ---------- Indicador (va dentro de un contenedor .readouts) ----------
   function Kpi({ label, value, unit, sub, tone, hint }) {
     return html`<div className=${"readout" + (tone ? " " + tone : "")}>
@@ -109,9 +124,9 @@
     const shown = limit && !showAll ? sorted.slice(0, limit) : sorted;
     if (!rows.length) return html`<div className="empty">${empty || "Sin datos para los filtros elegidos."}</div>`;
     return html`<div className="table-wrap"><table className="tbl">
-      <thead><tr>${columns.map(c => html`<th key=${c.key} className=${(c.align || "") + (sort.key === c.key ? " sorted" : "")} title=${c.title || ""}
+      <thead><tr>${columns.map(c => { const help = c.help || GI.columnHelp(c.label) || c.title; return html`<th key=${c.key} className=${(c.align || "") + (sort.key === c.key ? " sorted" : "")}
         onClick=${() => setSort(s => ({ key: c.key, dir: s.key === c.key && s.dir === "desc" ? "asc" : "desc" }))}>
-        ${c.label}${sort.key === c.key ? (sort.dir === "desc" ? " ▾" : " ▴") : ""}</th>`)}</tr></thead>
+        ${c.label}${sort.key === c.key ? (sort.dir === "desc" ? " ▾" : " ▴") : ""}${help ? html`<${HeadHint} text=${help} />` : null}</th>`; })}</tr></thead>
       <tbody>${shown.map((r, i) => html`<tr key=${rowKey ? rowKey(r) : i} className=${(onRowClick ? "clickable " : "") + (rowClass ? rowClass(r) : "")} onClick=${onRowClick ? () => onRowClick(r) : null}>
         ${columns.map(c => html`<td key=${c.key} className=${c.align || ""}>${c.fmt ? c.fmt(r) : r[c.key]}</td>`)}</tr>`)}</tbody>
     </table>
