@@ -246,13 +246,26 @@
     for (const e of model.idle || []) {
       if (!ids.has(e.d)) continue;
       if (!idleByDev.has(e.d)) idleByDev.set(e.d, []);
-      idleByDev.get(e.d).push([e.t, e.t + e.h * H]);
+      idleByDev.get(e.d).push([e.t, e.t + e.h * H, e.r || null]);
     }
     for (const l of idleByDev.values()) l.sort((a, b) => a[0] - b[0]);
-    const idleIn = (dev, a, b) => {
+    // ralentí del vehículo entre a y b; si se pasa drv, no cuenta el ralentí registrado a nombre de otro conductor
+    const idleIn = (dev, a, b, drv) => {
       const out = [];
-      for (const [x, y] of idleByDev.get(dev) || []) { if (x >= b) break; if (y > a) out.push([Math.max(a, x), Math.min(b, y)]); }
+      for (const [x, y, r] of idleByDev.get(dev) || []) { if (x >= b) break; if (y > a && !(drv && r && r !== drv)) out.push([Math.max(a, x), Math.min(b, y)]); }
       return out;
+    };
+    // Vehículos que trabajan las 24 h con relevo: mientras un conductor descansa, el
+    // camión puede seguir andando con otro. Primer uso del vehículo por otro
+    // conductor (o sin conductor identificado, moviéndose) dentro de [a, b].
+    const devTrips = new Map();
+    for (const [dev, trips] of (o.tripsByDevice || model.tripsByDevice)) if (ids.has(dev)) devTrips.set(dev, trips);
+    const otherUse = (dev, a, b, drv) => {
+      for (const t of devTrips.get(dev) || []) {
+        if (t.s >= b) break;
+        if (t.s > a && t.r !== drv && (t.r ? !isMicro(t, fz) : (t.km || 0) >= (fz.micro_km != null ? fz.micro_km : 0.5))) return t;
+      }
+      return null;
     };
     const microByDrv = new Map();
     const byDrv = tripsByDriver(o.tripsByDevice || model.tripsByDevice, ids, driverOk, o.now, idleByDev, fz, microByDrv);
@@ -316,7 +329,10 @@
           const lt = prev.trips[prev.trips.length - 1];
           j.restPlace = placeAt(lt.x, lt.y);
           j.restMicro = (microByDrv.get(drv) || []).filter(t => t.s >= prev.e && t.e <= j.s);
-          j.restIdle = j.restBefore < 48 ? idleIn(lt.d, prev.e, j.s) : [];
+          // el motor en marcha cuenta solo mientras el vehículo siguió con él (si lo tomó otro conductor, no es su descanso en la cabina)
+          const ou = j.restBefore < 48 ? otherUse(lt.d, prev.e, j.s, drv) : null;
+          j.restHandover = ou ? { drv: ou.r || null, at: ou.s, d: lt.d } : null;
+          j.restIdle = j.restBefore < 48 ? idleIn(lt.d, prev.e, ou ? ou.s : j.s, drv) : [];
           // un movimiento mínimo de más de 5 min también es motor en marcha durante el descanso
           for (const t of j.restMicro) if (t.e - t.s >= 5 * MIN && !j.restIdle.some(([a, b]) => a < t.e && b > t.s)) j.restIdle.push([t.s, t.e]);
           j.restIdle.sort((a, b) => a[0] - b[0]);

@@ -415,6 +415,21 @@ assert.strictEqual(GI.durationToHours("00:11:42.0300000").toFixed(4), (11 / 60 +
   const r2 = GI.buildShifts({ settings: { fatigue: { micro_km: 0, micro_min: 0 } }, tripsByDevice: new Map([["v1", trips]]), events: [] }, new Set(["v1"]), null, { now: T(30, 0) });
   assert.ok(r2.sims.get("L").list.length === 1 || r2.sims.get("L").list[1].restBefore < 12);
 }
+// Relevo: el camión trabaja 24 h con dos conductores; el ralentí mientras maneja el otro no es "descanso con motor".
+{
+  const T = (d, h, m) => new Date(2026, 9, d, h, m || 0).getTime();
+  const trips = [], idle = [];
+  for (const d of [23, 24, 25]) {
+    trips.push({ d: "v1", r: "A", s: T(d - 1, 17), e: T(d, 5, 50), dh: 9, km: 500 });  // A de noche
+    trips.push({ d: "v1", r: "B", s: T(d, 6), e: T(d, 16, 40), dh: 8, km: 400 });      // B de día
+    idle.push({ d: "v1", t: T(d, 9), h: 1.5, r: "B" }, { d: "v1", t: T(d, 12), h: 1.5, r: null });
+  }
+  const r = GI.buildShifts({ settings: { fatigue: {} }, tripsByDevice: new Map([["v1", trips.sort((a, b) => a.s - b.s)]]), events: [], idle }, new Set(["v1"]), null, { now: T(28, 0) });
+  for (const drv of ["A", "B"]) for (const j of r.sims.get(drv).list.slice(1)) {
+    assert.ok(!j.restEngine, drv + " " + new Date(j.s) + " idle " + j.restIdleH);
+    assert.ok(j.restHandover && j.restHandover.drv === (drv === "A" ? "B" : "A"));
+  }
+}
 // Validación del índice: el ajuste de Poisson recupera la pendiente.
 {
   const bins = [];

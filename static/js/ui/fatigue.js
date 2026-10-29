@@ -86,7 +86,7 @@
 
         ${rests.filter(r => r.b > t0).map((r, i) => html`<g key=${"r" + i}><rect x=${x(r.a)} y=${BY} width=${Math.max(1.5, x(r.b) - x(r.a))} height=${BH} fill=${restColor(r.k)} />
           ${label(r.a, r.b, (r.k === "curso" ? "descansa " : "") + dur(r.h))}
-          <title>${(r.k === "curso" ? "Descansando desde " + when(r.a) + " (" + dur(r.h) + " hasta ahora)" : GAP[r.k].label.split(" (")[0] + ": " + dur(r.h) + " · " + when(r.a) + " → " + when(r.b)) + (r.j && r.j.restPlace ? " · " + placeTxt(r.j.restPlace) : "") + (r.j && r.j.restMicro && r.j.restMicro.length ? " · " + r.j.restMicro.length + " movimiento(s) mínimo(s) ignorado(s): " + r.j.restMicro.map(t => hm(t.s)).join(", ") : "")}</title></g>`)}
+          <title>${(r.k === "curso" ? "Descansando desde " + when(r.a) + " (" + dur(r.h) + " hasta ahora)" : GAP[r.k].label.split(" (")[0] + ": " + dur(r.h) + " · " + when(r.a) + " → " + when(r.b)) + (r.j && r.j.restPlace ? " · " + placeTxt(r.j.restPlace) : "") + (r.j && r.j.restHandover ? " · el vehículo siguió con " + (r.j.restHandover.drv ? (GI.__drvName ? GI.__drvName(r.j.restHandover.drv) : r.j.restHandover.drv) : "otro conductor") + " desde las " + hm(r.j.restHandover.at) : "") + (r.j && r.j.restMicro && r.j.restMicro.length ? " · " + r.j.restMicro.length + " movimiento(s) mínimo(s) ignorado(s): " + r.j.restMicro.map(t => hm(t.s)).join(", ") : "")}</title></g>`)}
         ${shifts.map(j => html`<g key=${j.key} style=${{ cursor: "pointer" }} onClick=${() => onCase && onCase(j)}>
           <rect x=${x(j.s)} y=${BY} width=${Math.max(2, x(j.e) - x(j.s))} height=${BH} fill=${FI_COLORS[GI.fiLevel(j.fiPeak, fz)] || "#1f2a37"} />
           ${label(j.s, j.e, (j.open ? "en curso " : "") + dur(j.open ? (now - j.s) / H : j.span), GI.fiLevel(j.fiPeak, fz) !== "moderado")}
@@ -225,6 +225,7 @@
     if (j.span > fz.max_span && j.span > 0 && j.dh / j.span < 0.45) parts.push(html`Mucha jornada con poco manejo suele ser espera (carga, descarga, cola): el conductor sigue en servicio y no descansa. `);
     if (j.waits && j.waits.length) parts.push(html`Esperas de 1 h o más: ${j.waits.map(w => dur(w.h) + " en " + placeTxt(w.place) + (w.idleH >= 0.5 ? " (" + dur(w.idleH) + " con motor en marcha)" : "")).join(", ")}. `);
     if (j.restMicro && j.restMicro.length) parts.push(html`Durante el descanso previo hubo ${j.restMicro.length === 1 ? "un movimiento mínimo" : j.restMicro.length + " movimientos mínimos"} (${j.restMicro.map(t => hm(t.s) + ", " + dur((t.e - t.s) / H) + ", " + GI.fmtNum(t.km || 0, 1) + " km").join("; ")}): se ignoran, no cortan el descanso. `);
+    if (j.restHandover) parts.push(html`Mientras descansaba, el vehículo siguió trabajando ${j.restHandover.drv ? "con " + (GI.__drvName ? GI.__drvName(j.restHandover.drv) : j.restHandover.drv) : "sin conductor identificado"} desde las ${hm(j.restHandover.at)}: ese tiempo no cuenta como motor en marcha de su descanso. `);
     if (j.restBefore != null) parts.push(html`Antes había descansado <b>${dur(j.restBefore)}</b>${j.restPlace ? " " + (j.restPlace.kind === "ruta" ? "fuera de geocercas (en ruta)" : "en " + j.restPlace.name) : ""}${j.restEngine ? html`, <b>${dur(j.restIdleH)} con el motor en marcha</b>` : ""}. `);
     if (j.fiPeak != null) parts.push(html`Índice de fatiga: empezó en ${fiTag(j.fiStart, fz)} y llegó a ${fiTag(j.fiPeak, fz)} a las ${hm(j.fiPeakAt)}.`);
     return parts;
@@ -1001,6 +1002,7 @@ ${restFrom != null && restFrom < j.s ? (() => { const g = GAP[restKind(j, fz)]; 
     const [live, setLive] = useState({ loading: true, now: Date.now() });
     const [rosters, setRosters] = useState(new Map()); // diagramas fijados a mano
     const rmap = useMemo(() => new Map([...rosters.values()].map(r => [r.drv, r])), [rosters]);
+    GI.__drvName = id => drvName(view, id);
     const period = useMemo(() => GI.buildShifts(view.model, view.ids, view.driverOk, { rosters: rmap }), [view, rmap]);
     async function refresh() {
       setLive(l => ({ ...l, loading: true }));

@@ -364,7 +364,7 @@
       if (!devById.has(ev.d)) continue;
       const catKey = mapping[ev.rule];
       if (!catKey) continue;
-      if (!riskCats.has(catKey)) { if (catKey === "ralenti" && ev.h > 0) idle.push({ d: ev.d, t: ev.t, h: ev.h }); continue; }
+      if (!riskCats.has(catKey)) { if (catKey === "ralenti" && ev.h > 0) idle.push({ d: ev.d, t: ev.t, h: ev.h, r: ev.r || null }); continue; }
       const dk = GI.dayKey(ev.t);
       if (!daySet.has(dk)) continue;
       let drv = ev.r;
