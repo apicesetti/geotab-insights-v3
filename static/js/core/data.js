@@ -260,21 +260,19 @@
         const arr = out.get(c.key);
         for (const r of page) arr.push(r);
         // El servidor puede cortar antes del resultsLimit pedido (Trip: 25.000),
-        // así que una página "redonda" se toma como cortada. Se sigue desde la
-        // fecha del último registro (los duplicados se descartan por id).
+        // así que una página "redonda" se toma como cortada. Se parte el rango
+        // en tramos de tiempo y se vuelven a pedir (los duplicados se
+        // descartan por id). No se sigue "desde el último registro": sin
+        // filtro de vehículo la API ordena por vehículo y no por fecha, y
+        // seguir desde esa fecha perdía los datos de los demás vehículos.
         const cut = page.length >= LIMIT || (page.length >= CAP_STEP() && page.length % CAP_STEP() === 0);
-        if (!cut) return;
-        const lastT = c.dateOf ? (c.dateOf(page[page.length - 1]) || new Date(NaN)).getTime() : NaN;
-        if (lastT > c.from.getTime() && lastT < c.to.getTime()) {
-          pending.push({ ...c, from: new Date(lastT) });
-        } else if (c.to - c.from > 60000) {
-          // Sin avance posible: se parte en 4 tramos.
-          const step = Math.floor((c.to - c.from) / 4);
-          for (let q = 0; q < 4; q++) {
-            const f = new Date(c.from.getTime() + q * step);
-            const t = q === 3 ? c.to : new Date(c.from.getTime() + (q + 1) * step);
-            pending.push({ ...c, from: f, to: t });
-          }
+        if (!cut || c.to - c.from <= 60000) return;
+        const parts = c.to - c.from > 6 * 3600000 ? 4 : 2;
+        const step = Math.floor((c.to - c.from) / parts);
+        for (let q = 0; q < parts; q++) {
+          const f = new Date(c.from.getTime() + q * step);
+          const t = q === parts - 1 ? c.to : new Date(c.from.getTime() + (q + 1) * step);
+          pending.push({ ...c, from: f, to: t });
         }
       });
       if (onProgress) onProgress();
@@ -307,7 +305,7 @@
   // Genérico: datasets = [{scope, typeName, search, dateOf(rec)->Date, compact(recs)->value}]
   // Devuelve { [scope]: Map(dayKey -> compact value) }.
   async function fetchDaily(api, database, datasets, dayKeys, progress) {
-    const keyOf = (scope, dk) => database + "|v3|" + scope + "|" + dk;
+    const keyOf = (scope, dk) => database + "|v4|" + scope + "|" + dk;
     const allKeys = [];
     for (const ds of datasets) for (const dk of dayKeys) allKeys.push(keyOf(ds.scope, dk));
     const cached = await idbGetMany("days", allKeys);
@@ -722,6 +720,6 @@
     loadRecentTrips, loadDriveStatus, loadDriverChanges,
     loadCatalogs, loadZones, loadZoneTypes, loadPeriod, loadFuel, loadEventLocations, loadTrace, clearCache,
     _idbGetMany: idbGetMany, _idbPutMany: idbPutMany,
-    _compactTrips: compactTrips, _compactExceptions: compactExceptions, _compactCounter: compactCounter, _loadFuelBoundaries: loadFuelBoundaries, _missingRuns: missingRuns,
+    _compactTrips: compactTrips, _compactExceptions: compactExceptions, _compactCounter: compactCounter, _loadFuelBoundaries: loadFuelBoundaries, _missingRuns: missingRuns, _getRangeMulti: getRangeMulti,
   });
 })(window.GI);

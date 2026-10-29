@@ -524,4 +524,18 @@ assert.strictEqual(GI.durationToHours("00:11:42.0300000").toFixed(4), (11 / 60 +
   assert.ok(g17.envIdx / g10.envIdx > 2, "mismo conductor: 17h " + g17.envIdx + " vs 10h " + g10.envIdx);
   assert.ok(rm.routes.find(r => r.name === "RP7"));
 }
+
+// Contador de combustible con días sin lecturas: el consumo del hueco cae
+// en el día siguiente y los km del hueco tienen que contar también.
+{
+  const cd = GI.counterDeltas;
+  const daily = new Map([
+    ["2026-10-01", { v1: { fv: 100, lv: 110 } }],
+    ["2026-10-04", { v1: { fv: 150, lv: 160 } }],
+  ]);
+  const days = ["2026-10-01", "2026-10-02", "2026-10-03", "2026-10-04"];
+  const out = cd(daily, days, days);
+  assert.strictEqual(out.get("v1").get("2026-10-04"), 50);
+  assert.deepStrictEqual(out.gaps.get("v1").get("2026-10-04"), ["2026-10-02", "2026-10-03"]);
+}
 console.log("OK");

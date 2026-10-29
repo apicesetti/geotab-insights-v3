@@ -149,24 +149,36 @@
   // ---------- Combustible: deltas diarios de un contador acumulado ----------
   // dailyMap: Map(dayKey -> {device: {ft,fv,lt,lv}}). Devuelve
   // Map(device -> Map(dayKey -> litros)) solo para vehículos con medición real.
+  // Diferencia diaria de un contador acumulado (primera/última lectura de
+  // cada día). Si al vehículo le faltan lecturas algunos días, la diferencia
+  // del día siguiente incluye lo de esos días: out.gaps los anota para que
+  // sus km también cuenten en el L/100 km (si no, el consumo se infla).
   function counterDeltas(dailyMap, allDays, keepDays) {
     const keep = new Set(keepDays);
     const last = {};
+    const lastIdx = {};
     const nonZero = {};
     const out = new Map();
-    for (const dk of allDays) {
+    out.gaps = new Map();
+    allDays.forEach((dk, idx) => {
       const day = dailyMap.get(dk);
-      if (!day) continue;
+      if (!day) return;
       for (const [dev, c] of Object.entries(day)) {
         if (c.lv > 0) nonZero[dev] = true;
         const start = last[dev] != null ? last[dev] : c.fv;
         const delta = c.lv - start;
+        const prevIdx = lastIdx[dev];
         last[dev] = c.lv;
+        lastIdx[dev] = idx;
         if (!keep.has(dk) || delta < 0 || delta > MAX_DAILY_LITERS) continue;
         if (!out.has(dev)) out.set(dev, new Map());
         out.get(dev).set(dk, delta);
+        if (prevIdx != null && idx - prevIdx > 1) {
+          if (!out.gaps.has(dev)) out.gaps.set(dev, new Map());
+          out.gaps.get(dev).set(dk, allDays.slice(prevIdx + 1, idx).filter(k => keep.has(k)));
+        }
       }
-    }
+    });
     for (const dev of [...out.keys()]) if (!nonZero[dev]) out.delete(dev);
     return out;
   }
@@ -344,7 +356,12 @@
         const all = exclUnknown ? dayAll.get(dev + "|" + dk) : null;
         const fKm = all ? (all.km > 0 ? c.km / all.km : c.km > 0 ? 1 : 0) : 1;
         const fIh = all ? (all.ih > 0 ? c.ih / all.ih : c.ih > 0 ? 1 : 0) : 1;
-        if (fd && fd.has(dk)) { c.fuel = fd.get(dk) * fKm; c.kmFuel = c.km; }
+        if (fd && fd.has(dk)) {
+          c.fuel = fd.get(dk) * fKm; c.kmFuel = c.km;
+          // días sin lecturas antes de este: su consumo viene acá, sus km también
+          const gap = fuelDeltas.gaps.get(dev) && fuelDeltas.gaps.get(dev).get(dk);
+          if (gap) for (const g of gap) { const gc = m.get(g); if (gc && !(fd.has(g))) c.kmFuel += gc.km; }
+        }
         if (idd && idd.has(dk)) { c.idleL = idd.get(dk) * fIh; c.idleMeasured = c.idleL; }
         else c.idleL = c.ih * (idleRate.get(vtypeOf.get(dev)) || 1.5);
         const pr = priceOf.get(dev) || 0;
