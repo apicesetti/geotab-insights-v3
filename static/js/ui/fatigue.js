@@ -86,7 +86,7 @@
 
         ${rests.filter(r => r.b > t0).map((r, i) => html`<g key=${"r" + i}><rect x=${x(r.a)} y=${BY} width=${Math.max(1.5, x(r.b) - x(r.a))} height=${BH} fill=${restColor(r.k)} />
           ${label(r.a, r.b, (r.k === "curso" ? "descansa " : "") + dur(r.h))}
-          <title>${(r.k === "curso" ? "Descansando desde " + when(r.a) + " (" + dur(r.h) + " hasta ahora)" : GAP[r.k].label.split(" (")[0] + ": " + dur(r.h) + " · " + when(r.a) + " → " + when(r.b)) + (r.j && r.j.restPlace ? " · " + placeTxt(r.j.restPlace) : "")}</title></g>`)}
+          <title>${(r.k === "curso" ? "Descansando desde " + when(r.a) + " (" + dur(r.h) + " hasta ahora)" : GAP[r.k].label.split(" (")[0] + ": " + dur(r.h) + " · " + when(r.a) + " → " + when(r.b)) + (r.j && r.j.restPlace ? " · " + placeTxt(r.j.restPlace) : "") + (r.j && r.j.restMicro && r.j.restMicro.length ? " · " + r.j.restMicro.length + " movimiento(s) mínimo(s) ignorado(s): " + r.j.restMicro.map(t => hm(t.s)).join(", ") : "")}</title></g>`)}
         ${shifts.map(j => html`<g key=${j.key} style=${{ cursor: "pointer" }} onClick=${() => onCase && onCase(j)}>
           <rect x=${x(j.s)} y=${BY} width=${Math.max(2, x(j.e) - x(j.s))} height=${BH} fill=${FI_COLORS[GI.fiLevel(j.fiPeak, fz)] || "#1f2a37"} />
           ${label(j.s, j.e, (j.open ? "en curso " : "") + dur(j.open ? (now - j.s) / H : j.span), GI.fiLevel(j.fiPeak, fz) !== "moderado")}
@@ -224,6 +224,7 @@
     if (pz.some(([a, b]) => b - a >= 3 * H)) parts.push(html`Una pausa de menos de ${fz.SPLIT / H} h no corta la jornada (Configuración → Fatiga y gravedad → Pausa que cierra una jornada). `);
     if (j.span > fz.max_span && j.span > 0 && j.dh / j.span < 0.45) parts.push(html`Mucha jornada con poco manejo suele ser espera (carga, descarga, cola): el conductor sigue en servicio y no descansa. `);
     if (j.waits && j.waits.length) parts.push(html`Esperas de 1 h o más: ${j.waits.map(w => dur(w.h) + " en " + placeTxt(w.place) + (w.idleH >= 0.5 ? " (" + dur(w.idleH) + " con motor en marcha)" : "")).join(", ")}. `);
+    if (j.restMicro && j.restMicro.length) parts.push(html`Durante el descanso previo hubo ${j.restMicro.length === 1 ? "un movimiento mínimo" : j.restMicro.length + " movimientos mínimos"} (${j.restMicro.map(t => hm(t.s) + ", " + dur((t.e - t.s) / H) + ", " + GI.fmtNum(t.km || 0, 1) + " km").join("; ")}): se ignoran, no cortan el descanso. `);
     if (j.restBefore != null) parts.push(html`Antes había descansado <b>${dur(j.restBefore)}</b>${j.restPlace ? " " + (j.restPlace.kind === "ruta" ? "fuera de geocercas (en ruta)" : "en " + j.restPlace.name) : ""}${j.restEngine ? html`, <b>${dur(j.restIdleH)} con el motor en marcha</b>` : ""}. `);
     if (j.fiPeak != null) parts.push(html`Índice de fatiga: empezó en ${fiTag(j.fiStart, fz)} y llegó a ${fiTag(j.fiPeak, fz)} a las ${hm(j.fiPeakAt)}.`);
     return parts;
@@ -288,6 +289,8 @@ ${restFrom != null && restFrom < j.s ? (() => { const g = GAP[restKind(j, fz)]; 
           <rect x=${x(g.a)} y=${Y.drv} width=${Math.max(1.5, w)} height=${Y.drvH} fill=${G.color} />
           ${w > 64 ? html`<text x=${x(g.a) + w / 2} y=${Y.drv + 15} textAnchor="middle" className="ft-tl-gap">${G.word + " " + dur((g.b - g.a) / H)}</text>` : null}
           <title>${G.label.split(" (")[0] + ": " + dur((g.b - g.a) / H) + " (" + hm(g.a) + "–" + hm(g.b) + ")"}</title></g>`; })}
+        ${(j.restMicro || []).filter(t => t.e > t0).map((t, i) => html`<g key=${"m" + i}><rect x=${x(Math.max(t.s, t0)) - 1} y=${Y.drv - 3} width=${Math.max(2, x(t.e) - x(Math.max(t.s, t0)))} height=${Y.drvH + 6} fill="#5b6472" opacity="0.55" />
+          <title>${"Movimiento mínimo ignorado: " + hm(t.s) + "–" + hm(t.e) + " · " + dur(t.dh) + " de manejo · " + GI.fmtNum(t.km || 0, 1) + " km (no corta el descanso)"}</title></g>`)}
         ${j.trips.map((t, i) => html`<rect key=${"t" + i} x=${x(t.s)} y=${Y.drv} width=${Math.max(2, x(t.e) - x(t.s))} height=${Y.drvH} rx="3" fill=${t.live ? "#2a78d6" : "#1f2a37"}><title>${"Viaje " + hm(t.s) + "–" + hm(t.e) + " · " + dur(t.dh) + " de manejo · " + n0(t.km) + " km"}</title></rect>`)}
 
         ${other.map((e, i) => html`<line key=${"o" + i} x1=${x(e.t)} x2=${x(e.t)} y1=${Y.ev - 6} y2=${Y.ev + 6} stroke="#7b8492" strokeWidth="2"><title>${hm(e.t) + " " + GI.catLabel(e.cat)}</title></line>`)}
@@ -311,6 +314,7 @@ ${restFrom != null && restFrom < j.s ? (() => { const g = GAP[restKind(j, fz)]; 
         <span><i className="tri" style=${{ borderBottomColor: CAM_COLORS.distraccion }}></i>Distracción</span>
         <span><i className="tri" style=${{ borderBottomColor: CAM_COLORS.salida_carril }}></i>Salida de carril</span>
         <span><i style=${{ background: "#7b8492", width: "3px" }}></i>Otras infracciones</span>
+        ${(j.restMicro || []).length ? html`<span><i style=${{ background: "#5b6472", opacity: 0.55, width: "3px" }}></i>Movimiento mínimo ignorado (no corta el descanso)</span>` : null}
       </div>
     </div>`;
   }

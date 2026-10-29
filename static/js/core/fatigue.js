@@ -181,7 +181,7 @@
   }
 
   function fatigueLimits(settings) {
-    const fz = Object.assign({ max_drive_day: 9, max_span: 12, min_rest: 8, max_continuous: 4, max_days_row: 6, rest_split: 4, fi_mod: 80, fi_high: 100 }, (settings && settings.fatigue) || {});
+    const fz = Object.assign({ max_drive_day: 9, max_span: 12, min_rest: 8, max_continuous: 4, max_days_row: 6, rest_split: 4, fi_mod: 80, fi_high: 100, micro_km: 0.5, micro_min: 10 }, (settings && settings.fatigue) || {});
     fz.SPLIT = Math.max(1, Math.min(fz.rest_split || 4, fz.min_rest || 8)) * H;
     fz.P = Object.assign({}, FI_DEFAULT, fz.fi_params || {}, { start: FI_DEFAULT.start, step: FI_DEFAULT.step });
     return fz;
@@ -203,12 +203,21 @@
     return segs.map(([a, b], i) => { const f = (b - a) / tot; return { ...t, s: a, e: b, dh: t.dh * f, km: t.km * f, ih: Math.max(0, t.ih - idleH) * f, x: i < segs.length - 1 ? null : t.x, y: i < segs.length - 1 ? null : t.y }; });
   }
 
-  function tripsByDriver(tripsByDevice, ids, driverOk, now, idleByDev) {
+  // Movimientos mínimos: menos de micro_km y menos de micro_min minutos de
+  // manejo (encender el camión durante el descanso por frío o calor, la
+  // dispersión del GPS, acomodar el vehículo). No son trabajo: no cortan ni
+  // alargan un descanso. Se guardan aparte para mostrarlos y, si duran, para
+  // contar ese tiempo como motor en marcha durante el descanso.
+  function isMicro(t, fz) {
+    return !t.live && (t.km || 0) < (fz.micro_km != null ? fz.micro_km : 0.5) && (t.dh || 0) * 60 < (fz.micro_min != null ? fz.micro_min : 10);
+  }
+  function tripsByDriver(tripsByDevice, ids, driverOk, now, idleByDev, fz, micro) {
     const by = new Map();
     for (const [dev, trips] of tripsByDevice) {
       if (!ids.has(dev)) continue;
       for (const t of trips) {
         if (!t.r || t.r === "_unknown" || (driverOk && !driverOk(t.r)) || (now && t.s > now)) continue;
+        if (fz && micro && isMicro(t, fz)) { if (!micro.has(t.r)) micro.set(t.r, []); micro.get(t.r).push(t); continue; }
         if (!by.has(t.r)) by.set(t.r, []);
         for (const p of splitIdle(t, idleByDev)) by.get(t.r).push(p);
       }
@@ -245,7 +254,9 @@
       for (const [x, y] of idleByDev.get(dev) || []) { if (x >= b) break; if (y > a) out.push([Math.max(a, x), Math.min(b, y)]); }
       return out;
     };
-    const byDrv = tripsByDriver(o.tripsByDevice || model.tripsByDevice, ids, driverOk, o.now, idleByDev);
+    const microByDrv = new Map();
+    const byDrv = tripsByDriver(o.tripsByDevice || model.tripsByDevice, ids, driverOk, o.now, idleByDev, fz, microByDrv);
+    for (const l of microByDrv.values()) l.sort((a, b) => a.s - b.s);
     const camByDrv = new Map(), evByDrv = new Map();
     for (const e of model.events) {
       if (!ids.has(e.d) || !e.drv || e.drv === "_unknown") continue;
@@ -304,7 +315,11 @@
           // dónde descansó y si fue con el motor en marcha
           const lt = prev.trips[prev.trips.length - 1];
           j.restPlace = placeAt(lt.x, lt.y);
+          j.restMicro = (microByDrv.get(drv) || []).filter(t => t.s >= prev.e && t.e <= j.s);
           j.restIdle = j.restBefore < 48 ? idleIn(lt.d, prev.e, j.s) : [];
+          // un movimiento mínimo de más de 5 min también es motor en marcha durante el descanso
+          for (const t of j.restMicro) if (t.e - t.s >= 5 * MIN && !j.restIdle.some(([a, b]) => a < t.e && b > t.s)) j.restIdle.push([t.s, t.e]);
+          j.restIdle.sort((a, b) => a[0] - b[0]);
           j.restIdleH = GI.sum(j.restIdle, ([a, b]) => (b - a) / H);
           j.restEngine = j.restIdleH >= 1 && j.restIdleH >= 0.25 * j.restBefore;
           away = j.restPlace && j.restPlace.kind !== "base" && j.restBefore < 48 ? away + 1 : 0;
@@ -631,5 +646,5 @@
     return { current, best, tried: grid.length };
   }
 
-  Object.assign(GI, { rosterOf, projectIndex, FI_DEFAULT, FI_BANDS, fiExposure, poissonFit, calibrateIndex, FATIGUE_SIGNALS: SIGNALS, FATIGUE_CAM_CATS: CAM_CATS, buildShifts, shiftProgress, liveTrips, fatigueLimits, fiLevel, openShiftIndex, nextShiftRisk, _fat: { overlapHours, nightFrac, circ, fiWork, fiRest, simulateDriver, habitual } });
+  Object.assign(GI, { rosterOf, projectIndex, FI_DEFAULT, FI_BANDS, fiExposure, poissonFit, calibrateIndex, FATIGUE_SIGNALS: SIGNALS, FATIGUE_CAM_CATS: CAM_CATS, buildShifts, isMicro, shiftProgress, liveTrips, fatigueLimits, fiLevel, openShiftIndex, nextShiftRisk, _fat: { overlapHours, nightFrac, circ, fiWork, fiRest, simulateDriver, habitual } });
 })(window.GI);

@@ -396,6 +396,25 @@ assert.strictEqual(GI.durationToHours("00:11:42.0300000").toFixed(4), (11 / 60 +
   const r2 = GI.buildShifts({ settings: { fatigue: {} }, tripsByDevice: new Map([["v1", trips]]), events: [] }, new Set(["v1"]), null, { now, rosters: new Map([["L", { work: 7, off: 7 }]]) });
   assert.strictEqual(r2.sims.get("L").rs.label, "7x7");
 }
+// Movimiento mínimo durante el descanso (encendió el camión a la 01:20, 3 min, 0 km): no corta el descanso.
+{
+  const T = (d, h, m) => new Date(2026, 9, d, h, m || 0).getTime();
+  const trips = [
+    { d: "v1", r: "L", s: T(28, 8), e: T(28, 18), dh: 8, km: 500, x: 1, y: 1 },
+    { d: "v1", r: "L", s: T(28, 22, 0), e: T(28, 22, 3), dh: 0.05, km: 0.1, x: 1, y: 1 },
+    { d: "v1", r: "L", s: T(29, 1, 20), e: T(29, 1, 30), dh: 0.05, km: 0, x: 1, y: 1 },
+    { d: "v1", r: "L", s: T(29, 6), e: T(29, 16), dh: 8, km: 500, x: 1, y: 1 },
+  ];
+  const r = GI.buildShifts({ settings: { fatigue: {} }, tripsByDevice: new Map([["v1", trips]]), events: [] }, new Set(["v1"]), null, { now: T(30, 0) });
+  const L = r.sims.get("L").list;
+  assert.strictEqual(L.length, 2, L.map(j => new Date(j.s) + " " + j.span).join(" | "));
+  assert.ok(Math.abs(L[1].restBefore - 12) < 1e-6);
+  assert.strictEqual(L[1].restMicro.length, 2);
+  assert.ok(L[1].restIdle.length === 1, "la de 10 min cuenta como motor en marcha");
+  // con el control desactivado, el movimiento corta el descanso
+  const r2 = GI.buildShifts({ settings: { fatigue: { micro_km: 0, micro_min: 0 } }, tripsByDevice: new Map([["v1", trips]]), events: [] }, new Set(["v1"]), null, { now: T(30, 0) });
+  assert.ok(r2.sims.get("L").list.length === 1 || r2.sims.get("L").list[1].restBefore < 12);
+}
 // Validación del índice: el ajuste de Poisson recupera la pendiente.
 {
   const bins = [];

@@ -186,6 +186,8 @@
       } else { // turno noche 21–08 hasta anoche: tirada larga y madrugada
         let t = base.getTime() + (day === 14 ? -2 : 21) * H; // el primero, 6 h después del último turno día
         t = addTrip(dev, nd, t, 4.6) + 0.4 * H; t = addTrip(dev, nd, t, 4) + 0.6 * H; t = addTrip(dev, nd, t, 1.8, { x: -60.2, y: -33.6 }); // termina en un parador de la ruta
+        if (day % 4 === 1) trips.push({ id: "t" + (++tid), device: { id: dev.id }, driver: { id: nd.id }, start: new Date(t + 4 * H).toISOString(), stop: new Date(t + 4 * H + 180000).toISOString(),
+          distance: 0, drivingDuration: dur(0.05), idlingDuration: dur(0.02), stopPoint: { x: -60.2, y: -33.6 }, _a: zc.zCam }); // encendió el camión durante el descanso
         if (day % 3 !== 0) exceptions.push({ id: "e" + (++eid), rule: { id: "RuleIdlingId" }, device: { id: dev.id }, driver: { id: nd.id }, activeFrom: new Date(t + 0.3 * H).toISOString(), duration: dur(5.5), state: "ExceptionEventStateValidId" });
         if (day % 2 === 0) { const c = base.getTime() + 27.2 * H; ["aYawn", "aLane", "aYawn", "aYawn"].forEach((r, i) => addEv(dev, nd, c + i * 13 * 60000, r)); }
       }
