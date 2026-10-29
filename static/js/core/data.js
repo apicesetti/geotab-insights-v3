@@ -699,6 +699,15 @@
     return compactTrips(res.get("t").filter(r => !seen.has(r.id) && seen.add(r.id)));
   }
 
+  // Identificaciones de conductor (llave, NFC, app) de unos vehículos en un rango.
+  async function loadDriverChanges(api, devIds, from, to) {
+    const calls = devIds.map(d => ["Get", { typeName: "DriverChange", resultsLimit: 5000, search: { deviceSearch: { id: d }, fromDate: new Date(from).toISOString(), toDate: new Date(to).toISOString() } }]);
+    const res = calls.length ? await api.multiCall(calls) : [];
+    const out = [];
+    res.forEach(list => { for (const c of list || []) { const r = GI.idOf(c.driver); out.push({ t: new Date(c.dateTime).getTime(), d: GI.idOf(c.device), r: r && r !== "UnknownDriverId" && r !== "NoDriverId" ? r : null, type: c.type }); } });
+    return out.sort((a, b) => a.t - b.t);
+  }
+
   async function loadDriveStatus(api) {
     const recs = (await api.call("Get", { typeName: "DeviceStatusInfo",
       propertySelector: { fields: ["device", "driver", "isDriving", "currentStateDuration", "dateTime"], isIncluded: true } })) || [];
@@ -710,7 +719,7 @@
   }
 
   Object.assign(GI, {
-    loadRecentTrips, loadDriveStatus,
+    loadRecentTrips, loadDriveStatus, loadDriverChanges,
     loadCatalogs, loadZones, loadZoneTypes, loadPeriod, loadFuel, loadEventLocations, loadTrace, clearCache,
     _idbGetMany: idbGetMany, _idbPutMany: idbPutMany,
     _compactTrips: compactTrips, _compactExceptions: compactExceptions, _compactCounter: compactCounter, _loadFuelBoundaries: loadFuelBoundaries, _missingRuns: missingRuns,

@@ -430,6 +430,21 @@ assert.strictEqual(GI.durationToHours("00:11:42.0300000").toFixed(4), (11 / 60 +
     assert.ok(j.restHandover && j.restHandover.drv === (drv === "A" ? "B" : "A"));
   }
 }
+// Revisar identificación: jornada de 25 h por un relevo sin llave; confirmado el relevo, se parte.
+{
+  const T = (d, h, m) => new Date(2026, 9, d, h, m || 0).getTime();
+  const trips = [];
+  const block = (r, s, hrs) => { for (let t = s; t < s + hrs * 3600000 - 1800000; t += 3600000) trips.push({ d: "v1", r, s: t, e: t + 3000000, dh: 0.8, km: 50 }); };
+  block("A", T(22, 17), 6.5); block("A", T(23, 4, 16), 13); block("A", T(23, 17, 29), 12.4); block("B", T(24, 6), 10.7); block("A", T(24, 17), 12.8);
+  trips.sort((a, b) => a.s - b.s);
+  const fm = { settings: { fatigue: {} }, tripsByDevice: new Map([["v1", trips]]), events: [] };
+  const r = GI.buildShifts(fm, new Set(["v1"]), null, { now: T(27, 0) });
+  const long = r.sims.get("A").list.find(j => j.span > 20);
+  assert.ok(long && long.signals.some(x => x.key === "ident"), JSON.stringify(r.sims.get("A").list.map(j => j.span)));
+  const r2 = GI.buildShifts(fm, new Set(["v1"]), null, { now: T(27, 0), identFixes: [{ drv: "A", d: "v1", from: long.s, to: T(23, 17, 29), other: "B" }] });
+  assert.ok(r2.sims.get("A").list.every(j => j.span < 20), "partida");
+  assert.ok(r2.sims.get("B").list.some(j => GI.dayKey(j.s) === GI.dayKey(T(23, 4))), "el tramo pasó a B");
+}
 // Validación del índice: el ajuste de Poisson recupera la pendiente.
 {
   const bins = [];

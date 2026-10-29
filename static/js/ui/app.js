@@ -76,6 +76,7 @@
     const [raw, setRaw] = useState(null);
     const [loading, setLoading] = useState(null);
     const [tab, setTab] = useState("resumen");
+    const [fatigueDrv, setFatigueDrv] = useState(null); // conductor a abrir en Fatiga
     const [detail, setDetail] = useState(null);
     const loadId = useRef(0);
     const zonesAreaRef = useRef(false);
@@ -340,7 +341,7 @@
           : tab === "seguridad" ? html`<${GI.SafetyTab} view=${view} onVehicle=${id => setDetail({ type: "v", id })} onDriver=${(id, mode) => setDetail({ type: "d", id, mode: mode || "safety" })} />`
           : tab === "conductores" ? html`<${GI.DriversTab} view=${view} onDriver=${id => setDetail({ type: "d", id })} />`
           : tab === "recorridos" ? html`<${GI.RoutesTab} view=${view} api=${api} />`
-          : tab === "fatiga" ? (GI.FatigueTab ? html`<${GI.FatigueTab} view=${view} api=${api} userName=${userName} isAdmin=${isAdmin} onSaveSettings=${saveSettings} onDriver=${id => setDetail({ type: "d", id, mode: "safety" })} />` : html`<${Info} tone="warn">Se está terminando de cargar la nueva versión. Recargá la página (Ctrl + F5).<//>`)
+          : tab === "fatiga" ? (GI.FatigueTab ? html`<${GI.FatigueTab} view=${view} api=${api} userName=${userName} isAdmin=${isAdmin} onSaveSettings=${saveSettings} openDriverId=${fatigueDrv} onOpened=${() => setFatigueDrv(null)} onDriver=${id => setDetail({ type: "d", id, mode: "safety" })} />` : html`<${Info} tone="warn">Se está terminando de cargar la nueva versión. Recargá la página (Ctrl + F5).<//>`)
           : tab === "exposicion" ? html`<${GI.ExposureTab} view=${view} onDriver=${id => setDetail({ type: "d", id })} />`
           : tab === "corredores" && showBetaTabs() ? (GI.RoadsTab ? html`<${GI.RoadsTab} view=${view} api=${api} database=${database} />` : html`<${Info} tone="warn">Se está terminando de cargar la nueva versión de Corredores. Recargá la página (Ctrl + F5).<//>`)
           : tab === "hitos" ? html`<${GI.MilestonesTab} view=${view} milestones=${milestones} isAdmin=${isAdmin} groups=${groupsFlat}
@@ -352,7 +353,8 @@
         ${raw ? html`<footer className="foot">Datos del ${raw.fromKey} al ${raw.toKey}${raw.complete ? "" : " (completando el resto del período)"}: ${GI.fmtNum(raw.trips.length)} viajes y ${GI.fmtNum(raw.exceptions.length)} eventos, cargados en ${GI.fmtNum(raw.loadedMs / 1000, 1)} s.${model && model.excludedUnknown ? " Sin conductor identificado (excluidos por configuración): " + GI.fmtNum(model.excludedUnknown.trips) + " viajes, " + GI.fmtNum(model.excludedUnknown.km, 0) + " km y " + GI.fmtNum(model.excludedUnknown.events) + " eventos." : ""}</footer>` : null}
       </div>
       ${detail && view && detail.type === "v" ? html`<${GI.VehicleDetail} view=${view} id=${detail.id} onClose=${() => setDetail(null)} />` : null}
-      ${detail && view && detail.type === "d" ? html`<${GI.DriverDetail} view=${view} id=${detail.id} mode=${detail.mode} onClose=${() => setDetail(null)} />` : null}
+      ${detail && view && detail.type === "d" ? html`<${GI.DriverDetail} view=${view} id=${detail.id} mode=${detail.mode} onClose=${() => setDetail(null)}
+        onFatigue=${GI.FatigueTab && !driverMode ? id => { setDetail(null); setFatigueDrv(id); setTab("fatiga"); } : null} />` : null}
     </div>`;
   }
 

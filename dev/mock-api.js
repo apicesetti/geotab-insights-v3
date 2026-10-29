@@ -78,7 +78,7 @@
   }
   devices.push({ id: "bOut", name: "OUT-99", serialNumber: "G99999", groups: [{ id: "gOut" }], _type: "camion", _svc: "corta", _l100: 30, _fuel: true, _idleL: 2, _drivers: [drivers[0]] });
 
-  const trips = [], exceptions = [], status = [], logs = new Map();
+  const trips = [], exceptions = [], status = [], logs = new Map(), driverChanges = [];
   const today = new Date(); today.setHours(0, 0, 0, 0);
   const DAYS = 200;
   const MILESTONE_DAY = 45; // hace 45 días: capacitación cinturón + ralentí
@@ -192,6 +192,23 @@
         if (day % 2 === 0) { const c = base.getTime() + 27.2 * H; ["aYawn", "aLane", "aYawn", "aYawn"].forEach((r, i) => addEv(dev, nd, c + i * 13 * 60000, r)); }
       }
     }
+    // Relevo 24 h (como el 1871 de tsbsa): Marchan de noche (17 → 06) y Vejar de día (06 → 17).
+    // Hace 5 días Vejar no pasó su llave: todo el día quedó a nombre de Marchan (jornada de ~25 h).
+    const dm = { id: "u52", name: "chofer52", firstName: "MARCHAN VICTOR", lastName: "ALEJANDRO", isDriver: true, viewDriversOwnDataOnly: true, risk: 1, idleBias: 1, driverGroups: [{ id: "gCond" }], companyGroups: [{ id: "GroupCompanyId" }] };
+    const dv = { id: "u53", name: "chofer53", firstName: "VEJAR NELSON", lastName: "ORLANDO", isDriver: true, viewDriversOwnDataOnly: true, risk: 1, idleBias: 1, driverGroups: [{ id: "gCond" }], companyGroups: [{ id: "GroupCompanyId" }] };
+    drivers.push(dm, dv);
+    const dev3 = { id: "b302", name: "1871", serialNumber: "G9302", groups: [{ id: "gPes" }, { id: "GroupDieselId" }], _type: "camion", _svc: "corta", _l100: 33, _fuel: false, _idleL: 2.6, _drivers: [dm, dv] };
+    devices.push(dev3);
+    const block = (drv, s, hours) => { let t = s; const end = s + hours * H; while (t < end - 0.5 * H) { const du = Math.min(0.9, (end - t) / H - 0.1); t = addTrip(dev3, drv, t, du) + 0.15 * H; } };
+    for (let day = 12; day >= 1; day--) {
+      const base = new Date(today); base.setDate(base.getDate() - day);
+      const swap = day === 5; // Vejar sin llave
+      block(swap ? dm : dv, base.getTime() + 6 * H, 10.7);           // día
+      block(dm, base.getTime() + 17 * H, 12.8);                      // noche hasta 05:50 del día siguiente
+      driverChanges.push({ t: base.getTime() + 6 * H - 60000, d: dev3.id, r: swap ? dm.id : dv.id });
+      driverChanges.push({ t: base.getTime() + (swap ? 17.48 : 17) * H - 60000, d: dev3.id, r: dm.id });
+    }
+
     // jornada en curso
     const now = Date.now();
     let t = now - 7 * H;
@@ -295,6 +312,8 @@
             break;
           }
           out = status.filter(r => inRange(r.dateTime, s) && inGroups(r.device, s) && (!s.diagnosticSearch || r.diagnostic.id === s.diagnosticSearch.id)); break;
+        case "DriverChange": { const f0 = s.fromDate ? new Date(s.fromDate).getTime() : 0, f1 = s.toDate ? new Date(s.toDate).getTime() : Infinity;
+          out = driverChanges.filter(c => c.t >= f0 && c.t <= f1 && (!s.deviceSearch || c.d === s.deviceSearch.id)).map(c => ({ dateTime: new Date(c.t).toISOString(), device: { id: c.d }, driver: c.r ? { id: c.r } : "UnknownDriverId", type: "DriverKey" })); break; }
         case "DeviceStatusInfo": out = devices.map(d => ({ device: { id: d.id }, driver: d.id === "b301" ? { id: "u51" } : "UnknownDriverId",
           isDriving: d.id === "b301", currentStateDuration: d.id === "b301" ? "00:08:00" : "05:00:00", dateTime: new Date().toISOString() })); break;
         case "AddInData": out = addInData.filter(a => a.addInId === s.addInId); break;

@@ -219,6 +219,22 @@
     return out;
   }
 
+  // Revisión de identificación de una jornada dudosa (relevo sin identificar / doble turno).
+  // {kind:"ident", key, drv, d, s, e, outcome: "relevo"|"doble"|"nose", other, at, by}
+  async function saveIdent(api, r) {
+    const details = { kind: "ident", ...r, updated_at: new Date().toISOString() };
+    delete details.id;
+    const entity = { addInId: ADDIN_ID, groups: await shareGroups(api), details };
+    if (r.id) { await api.call("Set", { typeName: "AddInData", entity: { id: r.id, ...entity } }); return { ...details, id: r.id }; }
+    const id = await api.call("Add", { typeName: "AddInData", entity });
+    return { ...details, id };
+  }
+  async function loadIdents(api) {
+    const out = [];
+    for (const rec of await getAll(api)) { const d = parseDetails(rec); if (d && d.kind === "ident") out.push({ ...d, id: rec.id }); }
+    return out;
+  }
+
   // Datos del usuario actual (id, si es conductor). null si no se pudo.
   async function currentUser(api, userName) {
     try {
@@ -252,5 +268,5 @@
     return saved;
   }
 
-  Object.assign(GI, { _deepestOnly: deepestOnly, shareGroups, ADDIN_ID, loadShared, saveSettings, saveBenchmark, currentUser, sharingStatus, shareWithAll, addMilestone, updateMilestone, removeMilestone, resolveIsAdmin, saveFatigueCase, loadFatigueCases, saveRoster, removeRoster, loadRosters });
+  Object.assign(GI, { _deepestOnly: deepestOnly, shareGroups, ADDIN_ID, loadShared, saveSettings, saveBenchmark, currentUser, sharingStatus, shareWithAll, addMilestone, updateMilestone, removeMilestone, resolveIsAdmin, saveFatigueCase, loadFatigueCases, saveRoster, removeRoster, loadRosters, saveIdent, loadIdents });
 })(window.GI);

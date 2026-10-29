@@ -338,9 +338,11 @@
 
   // ======================= SEGURIDAD =======================
   // Evolución de eventos: selector de categorías + 3 vistas.
-  function EventsEvolution({ view, riskCats, onDriver }) {
+  function EventsEvolution({ view, riskCats, onDriver, sel: selP, setSel: setSelP }) {
     const allKeys = riskCats.map(c => c.key);
-    const [sel, setSel] = useState(allKeys);
+    const [selL, setSelL] = useState(allKeys);
+    // la selección la puede manejar la pestaña (para filtrar el resto de los cuadros)
+    const sel = selP || selL, setSel = setSelP || setSelL;
     const [mode, setMode] = useState("count");
     const [showKm, setShowKm] = useState(true);
     const [why, setWhy] = useState(false);
@@ -410,8 +412,8 @@
         <button className="btn small" onClick=${() => setSel([])}>Ninguna</button>
         <span className="sep"></span>
         ${riskCats.map(c => html`<button key=${c.key} className=${"catchip" + (sel.includes(c.key) ? " on" : "")} aria-pressed=${sel.includes(c.key)}
-          onClick=${e => (e.altKey ? only(c.key) : toggle(c.key))} onDoubleClick=${() => only(c.key)}
-          title="Click: mostrar u ocultar. Doble click: ver solo esta."><span className="dot" style=${{ background: GI.CHART_SLOTS.includes(c.key) ? c.color : GI.OTHER_COLOR }}></span>${c.label}</button>`)}
+          onClick=${e => (e.altKey || sel.length === allKeys.length ? only(c.key) : toggle(c.key))} onDoubleClick=${() => only(c.key)}
+          title="Con todas visibles, un click deja solo esta. Después, cada click suma o quita una. Doble click: solo esta."><span className="dot" style=${{ background: GI.CHART_SLOTS.includes(c.key) ? c.color : GI.OTHER_COLOR }}></span>${c.label}</button>`)}
       </div>
       ${active.length ? html`
         <div className="readouts compact inset">
@@ -438,11 +440,11 @@
   }
 
   // Conductores: tasa por período (pts/100 km) y tendencia lineal.
-  function driverTrendMap(view) {
+  function driverTrendMap(view, wOf) {
     const out = new Map();
     for (const [drv, cells] of view.model.drvCells) {
       if (drv === "_unknown" || (view.driverOk && !view.driverOk(drv))) continue;
-      const ser = GI.rateSeries(view.model, view.ids, view.gran, c => c.w, cells).filter(x => !x.partial);
+      const ser = GI.rateSeries(view.model, view.ids, view.gran, wOf || (c => c.w), cells).filter(x => !x.partial);
       out.set(drv, { tr: GI.linearTrend(ser.map(x => (x.km >= 50 ? x.rate : null))), ser });
     }
     return out;
@@ -498,11 +500,11 @@
   }
 
   // ---------- Pronóstico y objetivos por regla ----------
-  function ForecastPanel({ view, driverTrends }) {
+  function ForecastPanel({ view, driverTrends, cats, wOf }) {
     const unit = GRAN_WORD[view.gran];
     const horizon = view.gran === "day" ? 14 : view.gran === "week" ? 4 : 2;
     const targets = view.settings.rule_targets || {};
-    const rules = riskRuleRows(view);
+    const rules = riskRuleRows(view).filter(r => !cats || cats.includes(r.cat));
     const rows = rules.map(r => {
       const ser = GI.rateSeries(view.model, view.ids, view.gran, c => c.er[r.id] || 0).filter(x => !x.partial);
       const tr = GI.linearTrend(ser.map(x => (x.km >= 100 ? x.rate : null)));
@@ -517,7 +519,7 @@
     }).filter(r => r.n > 0 || r.target);
     const warn = rows.filter(r => r.status === "va a superar" || r.status === "sobre y subiendo");
     // Índice de riesgo total proyectado
-    const riskSer = GI.rateSeries(view.model, view.ids, view.gran, c => c.w).filter(x => !x.partial);
+    const riskSer = GI.rateSeries(view.model, view.ids, view.gran, wOf || (c => c.w)).filter(x => !x.partial);
     const riskTr = GI.linearTrend(riskSer.map(x => (x.km >= 100 ? x.rate : null)));
     const rising = [...driverTrends.values()].filter(d => d.tr && d.tr.slopePct > 15 && d.tr.current > 0).length;
     const statusCell = r => {
@@ -529,7 +531,7 @@
     return html`<${Panel} title="Pronóstico"
       hint=${"Proyección lineal con los últimos " + GRAN_PLURAL[view.gran] + " completos (hasta 8). Indica hacia dónde va cada regla si nada cambia. Los objetivos por regla se definen en Configuración → Reglas (eventos cada 100 km)."}>
       <div className="readouts compact inset">
-        <${Kpi} label=${"Índice de riesgo en " + horizon + " " + GRAN_PLURAL[view.gran]} value=${riskTr ? n2(riskTr.at(horizon)) : "–"} unit="pts/100 km"
+        <${Kpi} label=${(cats ? "Índice de lo elegido en " : "Índice de riesgo en ") + horizon + " " + GRAN_PLURAL[view.gran]} value=${riskTr ? n2(riskTr.at(horizon)) : "–"} unit="pts/100 km"
           sub=${riskTr ? html`hoy ${n2(riskTr.current)} <${TrendCell} tr=${riskTr} unit=${unit} />` : "pocos datos"} />
         <${Kpi} label="Reglas que van a superar su objetivo" value=${n0(warn.length)} sub=${rows.filter(r => r.target).length ? "de " + rows.filter(r => r.target).length + " con objetivo" : "Cargá objetivos en Configuración → Reglas"} />
         <${Kpi} label="Conductores con riesgo en aumento" value=${n0(rising)} sub="tendencia de más de 15% por período" />
@@ -552,6 +554,15 @@
     const slotIdx = k => (GI.CHART_SLOTS.includes(k) ? GI.CHART_SLOTS.indexOf(k) : 99);
     const riskCats = GI.CATEGORIES.filter(c => c.kind === "riesgo" && view.series.some(s => (s.evByCat[c.key] || 0) > 0))
       .sort((a, b) => slotIdx(a.key) - slotIdx(b.key));
+    const allKeys = riskCats.map(c => c.key);
+    // Categorías elegidas en "Evolución de las infracciones": filtran el resto de la pestaña.
+    const [sel, setSel] = useState(allKeys);
+    useEffect(() => { setSel(s => (s.length ? s.filter(k => allKeys.includes(k)) : allKeys)); }, [allKeys.join()]);
+    const selKeys = sel.filter(k => allKeys.includes(k));
+    const filtered = selKeys.length > 0 && selKeys.length < allKeys.length;
+    const W = view.settings.category_weights || {};
+    const wOf = filtered ? (c => GI.sum(selKeys, k => (c.ev[k] || 0) * (W[k] != null ? W[k] : 1))) : null;
+    const nOf = c => (filtered ? GI.sum(selKeys, k => c.ev[k] || 0) : c.n);
     const total = view.total;
     const unit = GRAN_WORD[view.gran];
     const ruleRows = riskRuleRows(view);
@@ -560,44 +571,56 @@
       const w = n * (view.settings.category_weights[c.key] || 0);
       const tr = halves(view, s => (s.evByCat[c.key] || 0) * 100, s => s.km);
       return { key: c.key, label: c.label, n, per100: total.km ? (n / total.km) * 100 : null,
-        share: total.weighted ? (w / total.weighted) * 100 : 0, trend: tr.ch };
+        share: total.weighted ? (w / total.weighted) * 100 : 0, trend: tr.ch, on: !filtered || selKeys.includes(c.key) };
     });
-    const driverTrends = useMemo(() => driverTrendMap(view), [view]);
+    const driverTrends = useMemo(() => driverTrendMap(view, wOf), [view, filtered ? selKeys.join() : ""]);
     const minKm = view.settings.drivers.min_km_ranking;
-    const drivers = view.dRows.filter(r => !r.unknown && r.km >= minKm).map(r => ({ ...r, tr: (driverTrends.get(r.id) || {}).tr }));
+    // conductores y vehículos con el riesgo de las categorías elegidas
+    const drivers = useMemo(() => {
+      const base = view.dRows.filter(r => !r.unknown && r.km >= minKm);
+      if (!filtered) return base.map(r => ({ ...r, tr: (driverTrends.get(r.id) || {}).tr }));
+      return base.map(r => {
+        let n = 0, w = 0, km = 0;
+        for (const [ck, c] of view.model.drvCells.get(r.id) || []) { if (!view.ids.has(ck.split("|")[0])) continue; km += c.km; n += nOf(c); w += wOf(c); }
+        return { ...r, events: n, risk: km > 0 ? (w / km) * 100 : null, tr: (driverTrends.get(r.id) || {}).tr };
+      });
+    }, [view, driverTrends]);
+    const vehicles = useMemo(() => {
+      const base = view.vRows.filter(r => r.km >= 100);
+      if (!filtered) return base;
+      return base.map(r => {
+        let n = 0, w = 0, km = 0;
+        for (const c of (view.model.dd.get(r.id) || new Map()).values()) { km += c.km; n += nOf(c); w += wOf(c); }
+        return { ...r, events: n, risk: km > 0 ? (w / km) * 100 : null, riskMax: null };
+      });
+    }, [view, filtered ? selKeys.join() : ""]);
     const risingDrivers = drivers.filter(d => d.tr && d.tr.slopePct > 15 && d.tr.current > 0);
     const lastValue = r => { const t = driverTrends.get(r.id); const x = t && [...t.ser].reverse().find(p => p.km >= 50); return x ? x.rate : null; };
     if (!GI.riskRuleIds(view.settings.rule_mapping).length) return html`<${Info} tone="warn">Todavía no hay reglas asignadas a categorías de riesgo, así que no hay infracciones para analizar. Un administrador las asigna en Configuración → Reglas y objetivos.<//>`;
+    const what = filtered ? (selKeys.length <= 3 ? selKeys.map(k => GI.catLabel(k)).join(", ") : selKeys.length + " categorías") : null;
+    const riskLabel = filtered ? "Riesgo (lo elegido)" : "Riesgo";
+    const sub = t => (filtered ? t + " · solo " + what : t);
     return html`<div>
-      <${EventsEvolution} view=${view} riskCats=${riskCats} onDriver=${onDriver} />
-      <${ForecastPanel} view=${view} driverTrends=${driverTrends} />
+      <${EventsEvolution} view=${view} riskCats=${riskCats} onDriver=${onDriver} sel=${sel} setSel=${setSel} />
+      ${filtered ? html`<div className="filterbar sf-filter" role="status"><span>Los cuadros de abajo muestran solo:</span>
+        ${selKeys.map(k => html`<span key=${k} className="fchip"><span className="dot" style=${{ background: GI.CHART_SLOTS.includes(k) ? GI.catColor(k) : GI.OTHER_COLOR }}></span>${GI.catLabel(k)}<button aria-label=${"Quitar " + GI.catLabel(k)} onClick=${() => setSel(s => (s.length > 1 ? s.filter(x => x !== k) : allKeys))}>×</button></span>`)}
+        <button className="btn link small" onClick=${() => setSel(allKeys)}>Ver todas</button></div>` : null}
+      <${Panel} title=${sub("Conductores con más infracciones por km")} hint=${"Índice de riesgo de cada conductor con al menos " + minKm + " km" + (filtered ? ", contando solo las categorías elegidas en Evolución" : "") + ". La tendencia es la pendiente de su índice en los últimos " + GRAN_PLURAL[view.gran] + ". Click para ver el detalle."}>
+        <${DataTable} rowKey=${r => r.id} rows=${drivers} limit=${10} onRowClick=${r => onDriver(r.id)} defaultSort=${{ key: "risk", dir: "desc" }} columns=${[
+          { key: "name", label: "Conductor" },
+          { key: "km", label: "Km", align: "num", fmt: r => n0(r.km) },
+          { key: "events", label: filtered ? "Eventos" : "Infracciones", align: "num", fmt: r => n0(r.events) },
+          { key: "risk", label: riskLabel, align: "num", fmt: r => n2(r.risk), title: "Puntos cada 100 km" },
+          { key: "trend", label: "Tendencia", value: r => (r.tr ? r.tr.slopePct : null), fmt: r => html`<${TrendCell} tr=${r.tr} unit=${unit} />` },
+        ]} empty="No hay conductores identificados con suficientes km." />
+      <//>
+      <${ForecastPanel} view=${view} driverTrends=${driverTrends} cats=${filtered ? selKeys : null} wOf=${wOf} />
       <div className="grid-2">
-        <${Panel} title="Qué infracciones pesan más" hint="'% del riesgo' es cuánto aporta cada categoría al índice (cantidad × peso). Click en una categoría para ver qué conductores la generan; click en el número de eventos para verlos en MyGeotab.">
-          <${DataTable} rowKey=${r => r.key} rows=${catRows} defaultSort=${{ key: "share", dir: "desc" }} onRowClick=${r => setCatDetail(r.key)} columns=${[
-            { key: "label", label: "Categoría", fmt: r => html`<span className="dot" style=${{ background: GI.CHART_SLOTS.includes(r.key) ? GI.catColor(r.key) : GI.OTHER_COLOR }}></span>${r.label}` },
-            { key: "n", label: "Eventos", align: "num",
-              fmt: r => html`<button className="btn link" title="Ver estos eventos en MyGeotab" onClick=${e => { e.stopPropagation(); openEvents(view, { ruleIds: ruleRows.filter(x => x.cat === r.key).map(x => x.id), deviceIds: [...view.ids] }); }}>${n0(r.n)}</button>` },
-            { key: "per100", label: "Cada 100 km", align: "num", fmt: r => n2(r.per100) },
-            { key: "share", label: "% del riesgo", align: "num", fmt: r => n0(r.share) + "%" },
-            { key: "trend", label: "Tendencia", align: "num", fmt: r => html`<${Delta} value=${r.trend} goodWhenDown />` },
-          ]} />
-        <//>
-        <${Panel} title="Conductores con más infracciones por km" hint=${"Índice de riesgo de cada conductor con al menos " + minKm + " km. La tendencia es la pendiente de su índice en los últimos " + GRAN_PLURAL[view.gran] + ". Click para ver el detalle."}>
-          <${DataTable} rowKey=${r => r.id} rows=${drivers} limit=${10} onRowClick=${r => onDriver(r.id)} defaultSort=${{ key: "risk", dir: "desc" }} columns=${[
-            { key: "name", label: "Conductor" },
-            { key: "km", label: "Km", align: "num", fmt: r => n0(r.km) },
-            { key: "events", label: "Infracciones", align: "num" },
-            { key: "risk", label: "Riesgo", align: "num", fmt: r => n2(r.risk), title: "Puntos cada 100 km" },
-            { key: "trend", label: "Tendencia", value: r => (r.tr ? r.tr.slopePct : null), fmt: r => html`<${TrendCell} tr=${r.tr} unit=${unit} />` },
-          ]} empty="No hay conductores identificados con suficientes km." />
-        <//>
-      </div>
-      <div className="grid-2">
-        <${Panel} title="Conductores con riesgo en aumento" hint="Alerta temprana: conductores cuyo índice de riesgo viene subiendo más de 15% por período. Conviene intervenir antes de que lleguen al tope del ranking.">
+        <${Panel} title=${sub("Conductores con riesgo en aumento")} hint="Alerta temprana: conductores cuyo índice de riesgo viene subiendo más de 15% por período. Conviene intervenir antes de que lleguen al tope del ranking.">
           <${DataTable} rowKey=${r => r.id} rows=${risingDrivers} limit=${10} onRowClick=${r => onDriver(r.id)} defaultSort=${{ key: "proj", dir: "desc" }} columns=${[
             { key: "name", label: "Conductor" },
             { key: "avg", label: "Período", align: "num", value: r => r.risk, fmt: r => n2(r.risk),
-              help: "Índice de riesgo promedio del conductor en todo el período cargado (el mismo que muestra su ficha)." },
+              help: "Índice de riesgo promedio del conductor en todo el período cargado" + (filtered ? ", con las categorías elegidas." : " (el mismo que muestra su ficha).") },
             { key: "last", label: (unit === "semana" ? "Última " : "Último ") + unit, align: "num", value: r => lastValue(r), fmt: r => n2(lastValue(r)),
               help: "Índice de riesgo real del conductor en " + (unit === "semana" ? "la última semana completa" : "el último " + unit + " completo") + " con al menos 50 km (sin contar " + (unit === "semana" ? "la semana" : "el " + unit) + " en curso)." },
             { key: "proj", label: "Proyectado", align: "num", value: r => r.tr.at(view.gran === "day" ? 14 : view.gran === "week" ? 4 : 2), fmt: r => n2(r.tr.at(view.gran === "day" ? 14 : view.gran === "week" ? 4 : 2)),
@@ -605,17 +628,27 @@
             { key: "trend", label: "Tendencia", value: r => r.tr.slopePct, fmt: r => html`<${TrendCell} tr=${r.tr} unit=${unit} />` },
           ]} empty="Ningún conductor muestra una tendencia de aumento clara." />
         <//>
-        <${Panel} title="Vehículos con más infracciones por km" hint="Índice de riesgo de cada vehículo con al menos 100 km en el período. Click para ver el detalle.">
-          <${DataTable} rowKey=${r => r.id} rows=${view.vRows.filter(r => r.km >= 100)} limit=${10} onRowClick=${r => onVehicle(r.id)}
+        <${Panel} title=${sub("Vehículos con más infracciones por km")} hint="Índice de riesgo de cada vehículo con al menos 100 km en el período. Click para ver el detalle.">
+          <${DataTable} rowKey=${r => r.id} rows=${vehicles} limit=${10} onRowClick=${r => onVehicle(r.id)}
             defaultSort=${{ key: "risk", dir: "desc" }} columns=${[
             { key: "name", label: "Vehículo" },
             { key: "profile", label: "Perfil", fmt: r => GI.profileLabel(view.settings, r.profile) },
             { key: "km", label: "Km", align: "num", fmt: r => n0(r.km) },
-            { key: "events", label: "Infracciones", align: "num" },
-            { key: "risk", label: "Riesgo", align: "num", fmt: r => html`<${TargetCell} value=${r.risk} max=${r.riskMax} fmt=${n2} />` },
+            { key: "events", label: filtered ? "Eventos" : "Infracciones", align: "num", fmt: r => n0(r.events) },
+            { key: "risk", label: riskLabel, align: "num", fmt: r => (filtered ? n2(r.risk) : html`<${TargetCell} value=${r.risk} max=${r.riskMax} fmt=${n2} />`) },
           ]} />
         <//>
       </div>
+      <${Panel} title="Qué infracciones pesan más" hint="'% del riesgo' es cuánto aporta cada categoría al índice (cantidad × peso). Click en una categoría para ver qué conductores la generan; click en el número de eventos para verlos en MyGeotab.">
+        <${DataTable} rowKey=${r => r.key} rows=${catRows} defaultSort=${{ key: "share", dir: "desc" }} onRowClick=${r => setCatDetail(r.key)} rowClass=${r => (r.on ? "" : "sf-off")} columns=${[
+          { key: "label", label: "Categoría", fmt: r => html`<span className="dot" style=${{ background: GI.CHART_SLOTS.includes(r.key) ? GI.catColor(r.key) : GI.OTHER_COLOR }}></span>${r.label}` },
+          { key: "n", label: "Eventos", align: "num",
+            fmt: r => html`<button className="btn link" title="Ver estos eventos en MyGeotab" onClick=${e => { e.stopPropagation(); openEvents(view, { ruleIds: ruleRows.filter(x => x.cat === r.key).map(x => x.id), deviceIds: [...view.ids] }); }}>${n0(r.n)}</button>` },
+          { key: "per100", label: "Cada 100 km", align: "num", fmt: r => n2(r.per100) },
+          { key: "share", label: "% del riesgo", align: "num", fmt: r => n0(r.share) + "%" },
+          { key: "trend", label: "Tendencia", align: "num", fmt: r => html`<${Delta} value=${r.trend} goodWhenDown />` },
+        ]} />
+      <//>
       ${catDetail ? html`<${CategoryDetail} view=${view} cat=${catDetail} onClose=${() => setCatDetail(null)} onDriver=${id => { setCatDetail(null); onDriver(id); }} />` : null}
     </div>`;
   }
@@ -948,7 +981,40 @@
     <//>`;
   }
 
-  function DriverDetail({ view, id, onClose, mode }) {
+  // Resumen de fatiga del conductor para su ficha (con acceso a la pestaña Fatiga).
+  function DriverFatigue({ view, id, onFatigue }) {
+    const d = useMemo(() => {
+      if (!GI.buildShifts || id === "_unknown") return null;
+      try {
+        const now = Date.now();
+        const res = GI.buildShifts(view.model, view.ids, x => x === id, { now });
+        const e = res.sims.get(id);
+        if (!e || !e.list.length) return null;
+        return { e, fz: res.limits, now, proj: GI.projectIndex ? GI.projectIndex(e, res.limits, now, 16) : null };
+      } catch (err) { console.warn("[Geotab Insights] fatiga en ficha", err); return null; }
+    }, [id, view]);
+    if (!d) return null;
+    const { e, fz, proj, now } = d, L = e.list;
+    const rests = L.map(j => j.restBefore).filter(v => v != null && v < 48);
+    const hi = L.filter(j => j.level === "alto").length, low = GI.sum(L, j => j.low);
+    const peak = Math.max(...L.map(j => j.fiPeak || 0));
+    const fiTxt = v => (v == null ? "–" : String(Math.round(v)));
+    const lvl = v => (v == null ? "" : v >= fz.fi_high ? "bad" : v >= fz.fi_mod ? "warn" : "");
+    return html`<div className="drv-fat">
+      <div className="drv-fat-head"><h3>Fatiga</h3>${onFatigue ? html`<button className="btn small" onClick=${() => onFatigue(id)}>Ver en la pestaña Fatiga →</button>` : null}</div>
+      ${proj ? html`<div className=${"verdict-line " + (proj.level === "rojo" ? "bad" : "")}><span className="vtag">${proj.open ? "En jornada" : "Próximo turno"}</span><span><b>${proj.action}.</b> Índice de fatiga ahora: <b className=${"delta " + lvl(proj.Fnow)}>${fiTxt(proj.Fnow)}</b>.</span></div>` : null}
+      <div className="readouts compact inset">
+        <${Kpi} label="Jornadas" value=${n0(L.length)} sub=${html`<span>${n0(L.filter(j => j.type === "noche").length)} de noche</span>`} />
+        <${Kpi} label="Jornadas de nivel alto" value=${n0(hi)} tone=${hi ? "bad" : null} />
+        <${Kpi} label="Índice máximo" value=${fiTxt(peak)} tone=${peak >= fz.fi_high ? "bad" : null} sub=${html`<span>alto desde ${fz.fi_high}</span>`} />
+        <${Kpi} label="Descanso más corto" value=${rests.length ? GI.fmtNum(Math.min(...rests), 1) : "–"} unit="h" sub=${html`<span>${rests.filter(r => r < fz.min_rest).length} de menos de ${fz.min_rest} h</span>`} />
+        <${Kpi} label="Manejo entre 02 y 05 h" value=${GI.fmtNum(low, 1)} unit="h" />
+      </div>
+      ${GI.FatigueSpark && e.sim ? html`<div className="drv-fat-spark"><span className="muted small">Índice de fatiga: últimas 72 h y próximas 16 h</span><${GI.FatigueSpark} entry=${e} proj=${proj} fz=${fz} now=${now} /></div>` : null}
+    </div>`;
+  }
+
+  function DriverDetail({ view, id, onClose, mode, onFatigue }) {
     const safety = mode === "safety";
     const r = view.dRows.find(x => x.id === id);
     const s = useMemo(() => {
@@ -1002,6 +1068,7 @@
         <div><h3>Vehículos que manejó</h3><${DataTable} rows=${vehicles} rowKey=${x => x.name} defaultSort=${{ key: "km", dir: "desc" }} columns=${[
           { key: "name", label: "Vehículo" }, { key: "km", label: "Km", align: "num", fmt: x => n0(x.km) }, { key: "n", label: "Infracciones", align: "num" }]} /></div>
       </div>
+      ${safety ? html`<${DriverFatigue} view=${view} id=${id} onFatigue=${onFatigue} />` : null}
     <//>`;
   }
 

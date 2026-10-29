@@ -32,6 +32,7 @@
     { key: "motor", label: "Descanso con motor en marcha" },
     { key: "lejos", label: "Descansos fuera de base" },
     { key: "indice", label: "Índice de fatiga alto" },
+    { key: "ident", label: "Revisar identificación" },
   ];
 
   // ---------- Índice de fatiga estimado ----------
@@ -211,11 +212,13 @@
   function isMicro(t, fz) {
     return !t.live && (t.km || 0) < (fz.micro_km != null ? fz.micro_km : 0.5) && (t.dh || 0) * 60 < (fz.micro_min != null ? fz.micro_min : 10);
   }
-  function tripsByDriver(tripsByDevice, ids, driverOk, now, idleByDev, fz, micro) {
+  function tripsByDriver(tripsByDevice, ids, driverOk, now, idleByDev, fz, micro, fixes) {
     const by = new Map();
     for (const [dev, trips] of tripsByDevice) {
       if (!ids.has(dev)) continue;
-      for (const t of trips) {
+      for (let t of trips) {
+        // relevos confirmados: el tramo se le asigna al conductor que manejó de verdad
+        if (fixes && fixes.length && t.r) { const fx = fixes.find(f => f.drv === t.r && f.d === t.d && t.s >= f.from && t.s < f.to); if (fx) t = { ...t, r: fx.other || null }; }
         if (!t.r || t.r === "_unknown" || (driverOk && !driverOk(t.r)) || (now && t.s > now)) continue;
         if (fz && micro && isMicro(t, fz)) { if (!micro.has(t.r)) micro.set(t.r, []); micro.get(t.r).push(t); continue; }
         if (!by.has(t.r)) by.set(t.r, []);
@@ -268,7 +271,7 @@
       return null;
     };
     const microByDrv = new Map();
-    const byDrv = tripsByDriver(o.tripsByDevice || model.tripsByDevice, ids, driverOk, o.now, idleByDev, fz, microByDrv);
+    const byDrv = tripsByDriver(o.tripsByDevice || model.tripsByDevice, ids, driverOk, o.now, idleByDev, fz, microByDrv, o.identFixes);
     for (const l of microByDrv.values()) l.sort((a, b) => a.s - b.s);
     const camByDrv = new Map(), evByDrv = new Map();
     for (const e of model.events) {
@@ -363,6 +366,7 @@
         // señales
         const sg = [];
         const add = (key, w, text) => sg.push({ key, w, text, label: SIGNALS.find(x => x.key === key).label });
+        if (j.span > (fz.ident_span || 20)) add("ident", 0, "jornada de " + GI.fmtNum(j.span, 1) + " h sin un corte de " + (fz.SPLIT / H) + " h: puede ser un relevo sin identificar (el turno del otro chofer quedó a su nombre) o un doble turno real");
         if (j.span > fz.max_span) add("larga", 1, GI.fmtNum(j.span, 1) + " h de jornada (límite " + fz.max_span + " h)");
         if (j.dh > fz.max_drive_day) add("manejo", 1, GI.fmtNum(j.dh, 1) + " h de manejo (límite " + fz.max_drive_day + " h)");
         if (j.maxStint > fz.max_continuous) add("continuo", 1, GI.fmtNum(j.maxStint, 1) + " h de manejo sin una pausa de 15 min (límite " + fz.max_continuous + " h)");
