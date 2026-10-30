@@ -315,7 +315,9 @@
         case "DriverChange": { const f0 = s.fromDate ? new Date(s.fromDate).getTime() : 0, f1 = s.toDate ? new Date(s.toDate).getTime() : Infinity;
           out = driverChanges.filter(c => c.t >= f0 && c.t <= f1 && (!s.deviceSearch || c.d === s.deviceSearch.id)).map(c => ({ dateTime: new Date(c.t).toISOString(), device: { id: c.d }, driver: c.r ? { id: c.r } : "UnknownDriverId", type: "DriverKey" })); break; }
         case "DeviceStatusInfo": out = devices.map(d => ({ device: { id: d.id }, driver: d.id === "b301" ? { id: "u51" } : "UnknownDriverId",
-          isDriving: d.id === "b301", currentStateDuration: d.id === "b301" ? "00:08:00" : "05:00:00", dateTime: new Date().toISOString() })); break;
+          isDriving: d.id === "b301", currentStateDuration: d.id === "b301" ? "00:08:00" : "05:00:00", dateTime: new Date().toISOString(),
+          // BIT-NOC dejó de comunicar al terminar su último viaje (como el AA409BH de tsbsa)
+          ...(d.id === "b300" ? { isDeviceCommunicating: false, dateTime: trips.filter(t => t.device.id === "b300" && t.stop <= new Date().toISOString()).map(t => t.stop).sort().pop() } : { isDeviceCommunicating: true }) })); break;
         case "AddInData": out = addInData.filter(a => a.addInId === s.addInId); break;
         case "LogRecord": {
           // Sin deviceSearch (muestreo de corredores): un punto cada 10 s de

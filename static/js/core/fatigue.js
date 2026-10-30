@@ -472,7 +472,8 @@
     for (const t of recent || []) if (t.s >= cut) push(t);
     for (const arr of by.values()) arr.sort((a, b) => a.s - b.s);
     for (const st of status || []) {
-      if (!st.driving || !(st.since < now)) continue;
+      // Equipo sin comunicación: su último estado puede ser viejo (no inventar un viaje)
+      if (st.comm === false || !st.driving || !(st.since < now)) continue;
       const arr = by.get(st.d) || [];
       const last = arr[arr.length - 1];
       if (last && last.e > st.since) continue; // el viaje ya está registrado
@@ -481,6 +482,24 @@
       push({ d: st.d, r, s: st.since, e: now, dh: (now - st.since) / H, km: 0, live: true });
     }
     return by;
+  }
+
+
+  // Vehículo sin comunicación: si el último vehículo del conductor dejó de
+  // comunicar con MyGeotab después (o cerca) del fin de su último viaje, no
+  // se sabe si descansa o sigue manejando: los viajes llegan cuando vuelva a
+  // comunicar. Devuelve { d, at } (vehículo y última comunicación) o null.
+  function commGap(entry, status, now) {
+    const last = entry && entry.list && entry.list[entry.list.length - 1];
+    if (!last || !last.trips || !last.trips.length || !status) return null;
+    const lt = last.trips[last.trips.length - 1];
+    const st = status.find(x => x.d === lt.d);
+    if (!st || st.comm !== false) return null;
+    // si el vehículo ya lo usa otro conductor, no es su descanso el que falta
+    if (st.r && st.r !== lt.r) return null;
+    const at = st.at != null ? Math.max(st.at, lt.e) : lt.e;
+    if (at >= now) return null;
+    return { d: lt.d, at, h: (now - at) / H };
   }
 
   // Avance de una jornada abierta contra los límites, con proyección.
@@ -666,5 +685,5 @@
     return { current, best, tried: grid.length };
   }
 
-  Object.assign(GI, { rosterOf, projectIndex, FI_DEFAULT, FI_BANDS, fiExposure, poissonFit, calibrateIndex, FATIGUE_SIGNALS: SIGNALS, FATIGUE_CAM_CATS: CAM_CATS, buildShifts, isMicro, shiftProgress, liveTrips, fatigueLimits, fiLevel, openShiftIndex, nextShiftRisk, _fat: { overlapHours, nightFrac, circ, fiWork, fiRest, simulateDriver, habitual } });
+  Object.assign(GI, { commGap, rosterOf, projectIndex, FI_DEFAULT, FI_BANDS, fiExposure, poissonFit, calibrateIndex, FATIGUE_SIGNALS: SIGNALS, FATIGUE_CAM_CATS: CAM_CATS, buildShifts, isMicro, shiftProgress, liveTrips, fatigueLimits, fiLevel, openShiftIndex, nextShiftRisk, _fat: { overlapHours, nightFrac, circ, fiWork, fiRest, simulateDriver, habitual } });
 })(window.GI);

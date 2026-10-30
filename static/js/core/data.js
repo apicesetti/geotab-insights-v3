@@ -708,11 +708,12 @@
 
   async function loadDriveStatus(api) {
     const recs = (await api.call("Get", { typeName: "DeviceStatusInfo",
-      propertySelector: { fields: ["device", "driver", "isDriving", "currentStateDuration", "dateTime"], isIncluded: true } })) || [];
+      propertySelector: { fields: ["device", "driver", "isDriving", "isDeviceCommunicating", "currentStateDuration", "dateTime"], isIncluded: true } })) || [];
     return recs.map(r => {
       const drv = GI.idOf(r.driver);
       return { d: GI.idOf(r.device), r: drv && drv !== "UnknownDriverId" && drv !== "NoDriverId" ? drv : null,
-        driving: !!r.isDriving, since: Date.now() - GI.durationToHours(r.currentStateDuration) * 3600000, at: r.dateTime ? new Date(r.dateTime).getTime() : null };
+        driving: !!r.isDriving, since: Date.now() - GI.durationToHours(r.currentStateDuration) * 3600000, at: r.dateTime ? new Date(r.dateTime).getTime() : null,
+        comm: r.isDeviceCommunicating !== false };
     });
   }
 

@@ -538,4 +538,19 @@ assert.strictEqual(GI.durationToHours("00:11:42.0300000").toFixed(4), (11 / 60 +
   assert.strictEqual(out.get("v1").get("2026-10-04"), 50);
   assert.deepStrictEqual(out.gaps.get("v1").get("2026-10-04"), ["2026-10-02", "2026-10-03"]);
 }
+
+// Vehículo sin comunicación: el descanso desde la última comunicación no se confirma.
+{
+  const now = Date.parse("2026-10-30T12:00:00Z");
+  const lt = { d: "v9", r: "c9", s: now - 14 * 3600000, e: now - 10 * 3600000 };
+  const entry = { list: [{ trips: [lt] }] };
+  assert.strictEqual(GI.commGap(entry, [{ d: "v9", comm: true, at: now - 10 * 3600000 }], now), null);
+  const g = GI.commGap(entry, [{ d: "v9", comm: false, at: now - 10 * 3600000 }], now);
+  assert.ok(g && g.d === "v9" && Math.abs(g.h - 10) < 0.01);
+  assert.strictEqual(GI.commGap(entry, [{ d: "v9", comm: false, r: "otro", at: now - 9 * 3600000 }], now), null);
+  // un estado viejo "manejando" de un equipo sin comunicación no crea un viaje en vivo
+  const fake = { tripsByDevice: new Map() };
+  const tb = GI.liveTrips(fake, [], [{ d: "v9", r: "c9", driving: true, comm: false, since: now - 3600000 }], 24, now);
+  assert.ok(!(tb.get("v9") || []).length);
+}
 console.log("OK");

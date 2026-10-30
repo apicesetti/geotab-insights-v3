@@ -577,3 +577,7 @@ tr.ft-row-ident td { background: #fffbea; }
 .ft-ident-form { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid #f2d27a; padding-top: 10px; }
 .ft-ident-btns, .ft-ident-fields { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: end; }
 .ft-ident-fields label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 600; }
+.verdict-line.warn { background: #fff6d6; border-left-color: #c99400; }
+.verdict-line.warn .vtag { color: #7a5a00; }
+.ft-nocom { font-weight: 600; color: #6b7280; }
+.ft-nocom::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #9aa1ab; margin-right: 5px; vertical-align: 1px; }

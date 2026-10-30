@@ -45,21 +45,31 @@
   // Gráfico del índice: la curva de los últimos días (sólida), la proyección de
   // las próximas horas (punteada), las jornadas abajo y los eventos de cámara
   // como contexto sobre la curva.
-  function IndexChart({ entry, proj, fz, now, days, onCase, height }) {
+  function IndexChart({ entry, proj, fz, now, days, onCase, height, off }) {
     const W = 1000, Hh = height || 250, L = 40, R = 990, T = 20, B = Hh - 62;
     const t0 = now - days * 86400000, t1 = now + 16 * H;
     const x = t => L + ((Math.max(t0, Math.min(t1, t)) - t0) / (t1 - t0)) * (R - L);
     const yMax = 160, y = v => B - (Math.min(yMax, Math.max(0, v)) / yMax) * (B - T);
     const sim = entry.sim;
     const pts = [];
-    for (let t = Math.max(t0, sim.t0); t <= now; t += 30 * MIN) pts.push(x(t).toFixed(1) + "," + y(sim.at(t)).toFixed(1));
+    // sin comunicación: desde la última comunicación la curva es un supuesto (punteada gris)
+    const tOff = off ? Math.max(t0, off.at) : null, ptsOff = [];
+    for (let t = Math.max(t0, sim.t0); t <= now; t += 30 * MIN) {
+      const p = x(t).toFixed(1) + "," + y(sim.at(t)).toFixed(1);
+      if (tOff != null && t > tOff) ptsOff.push(p); else pts.push(p);
+    }
+    if (tOff != null && ptsOff.length) { const p = x(tOff).toFixed(1) + "," + y(sim.at(tOff)).toFixed(1); pts.push(p); ptsOff.unshift(p); }
     const proP = proj ? proj.pts.filter((p, i) => i % 2 === 0 || i === proj.pts.length - 1).map(([t, v]) => x(t).toFixed(1) + "," + y(v).toFixed(1)) : [];
     const shifts = entry.list.filter(j => j.e > t0);
     // descansos entre jornadas (y el que está en curso si no está en jornada)
     const rests = [];
     for (const j of entry.list) if (j.prevE != null && j.s > t0 && j.restBefore < 48) rests.push({ a: j.prevE, b: j.s, h: j.restBefore, k: restKind(j, fz), j });
     const last = entry.list[entry.list.length - 1];
-    if (last && !last.open && last.e < now) rests.push({ a: last.e, b: now, h: (now - last.e) / H, k: "curso", j: null });
+    if (last && !last.open && last.e < now) {
+      const cut = off ? Math.max(last.e, off.at) : now;
+      if (cut > last.e + MIN) rests.push({ a: last.e, b: cut, h: (cut - last.e) / H, k: "curso", j: null });
+      if (off) rests.push({ a: cut, b: now, h: (now - cut) / H, k: "sincom", j: null });
+    }
     const cams = [];
     for (const j of shifts) for (const e of j.cam || []) if (e.t >= t0) cams.push(e);
     const ticks = [];
@@ -75,7 +85,7 @@
       const t = w > txt.length * 6.2 + 6 ? txt : short && w > short.length * 6.2 + 4 ? short : null;
       return t ? html`<text x=${(x(a) + x(b)) / 2} y=${BY + 13} textAnchor="middle" className=${"ft-tl-bar" + (dark ? " on-dark" : "")}>${t}</text>` : null;
     };
-    const restColor = k => (k === "curso" ? "#a9dcbf" : GAP[k].color);
+    const restColor = k => (k === "curso" ? "#a9dcbf" : k === "sincom" ? "#b8bec8" : GAP[k].color);
     return html`<div className="ft-tl">
       <svg viewBox=${"0 0 " + W + " " + Hh} role="img" aria-label="Evolución del índice de fatiga">
         ${rests.filter(r => r.b > t0).map((r, i) => html`<rect key=${"rb" + i} x=${x(r.a)} y=${T} width=${Math.max(0, x(r.b) - x(r.a))} height=${B - T} fill=${restColor(r.k)} opacity="0.16" />`)}
@@ -85,8 +95,8 @@
         ${[fz.fi_mod, fz.fi_high].map((v, i) => html`<g key=${"th" + v}><line x1=${L} x2=${R} y1=${y(v)} y2=${y(v)} stroke=${i ? "#d4561e" : "#c99400"} strokeDasharray="5 4" /><text x=${L + 4} y=${y(v) - 4} className="ft-tl-lab">${(i ? "alto " : "moderado ") + v}</text></g>`)}
 
         ${rests.filter(r => r.b > t0).map((r, i) => html`<g key=${"r" + i}><rect x=${x(r.a)} y=${BY} width=${Math.max(1.5, x(r.b) - x(r.a))} height=${BH} fill=${restColor(r.k)} />
-          ${label(r.a, r.b, (r.k === "curso" ? "descansa " : "") + dur(r.h))}
-          <title>${(r.k === "curso" ? "Descansando desde " + when(r.a) + " (" + dur(r.h) + " hasta ahora)" : GAP[r.k].label.split(" (")[0] + ": " + dur(r.h) + " · " + when(r.a) + " → " + when(r.b)) + (r.j && r.j.restPlace ? " · " + placeTxt(r.j.restPlace) : "") + (r.j && r.j.restHandover ? " · el vehículo siguió con " + (r.j.restHandover.drv ? (GI.__drvName ? GI.__drvName(r.j.restHandover.drv) : r.j.restHandover.drv) : "otro conductor") + " desde las " + hm(r.j.restHandover.at) : "") + (r.j && r.j.restMicro && r.j.restMicro.length ? " · " + r.j.restMicro.length + " movimiento(s) mínimo(s) ignorado(s): " + r.j.restMicro.map(t => hm(t.s)).join(", ") : "")}</title></g>`)}
+          ${label(r.a, r.b, (r.k === "curso" ? "descansa " : r.k === "sincom" ? "sin datos " : "") + dur(r.h), r.k === "sincom")}
+          <title>${(r.k === "sincom" ? "Sin comunicación del vehículo desde " + when(r.a) + " (" + dur(r.h) + "): no se sabe si descansa o sigue manejando" : r.k === "curso" ? "Descansando desde " + when(r.a) + " (" + dur(r.h) + " hasta ahora)" : GAP[r.k].label.split(" (")[0] + ": " + dur(r.h) + " · " + when(r.a) + " → " + when(r.b)) + (r.j && r.j.restPlace ? " · " + placeTxt(r.j.restPlace) : "") + (r.j && r.j.restHandover ? " · el vehículo siguió con " + (r.j.restHandover.drv ? (GI.__drvName ? GI.__drvName(r.j.restHandover.drv) : r.j.restHandover.drv) : "otro conductor") + " desde las " + hm(r.j.restHandover.at) : "") + (r.j && r.j.restMicro && r.j.restMicro.length ? " · " + r.j.restMicro.length + " movimiento(s) mínimo(s) ignorado(s): " + r.j.restMicro.map(t => hm(t.s)).join(", ") : "")}</title></g>`)}
         ${shifts.map(j => html`<g key=${j.key} style=${{ cursor: "pointer" }} onClick=${() => onCase && onCase(j)}>
           <rect x=${x(j.s)} y=${BY} width=${Math.max(2, x(j.e) - x(j.s))} height=${BH} fill=${FI_COLORS[GI.fiLevel(j.fiPeak, fz)] || "#1f2a37"} />
           ${label(j.s, j.e, (j.open ? "en curso " : "") + dur(j.open ? (now - j.s) / H : j.span), GI.fiLevel(j.fiPeak, fz) !== "moderado")}
@@ -95,16 +105,18 @@
           ${label(proj.nextStart, proj.nextStart + proj.hb.span * H, "próximo " + dur(proj.hb.span))}<title>${"Próximo turno habitual: " + when(proj.nextStart) + " (" + dur(proj.hb.span) + ")"}</title></g>` : null}
 
         <path d=${"M" + pts.join("L")} fill="none" stroke="#1f2a37" strokeWidth="2.2" />
+        ${ptsOff.length ? html`<path d=${"M" + ptsOff.join("L")} fill="none" stroke="#8a929e" strokeWidth="2" strokeDasharray="2 4"><title>Sin datos: supone que descansa</title></path>` : null}
         ${proP.length ? html`<path d=${"M" + proP.join("L")} fill="none" stroke="#1f2a37" strokeWidth="2" strokeDasharray="5 4" opacity="0.7" />` : null}
         ${cams.map((e, i) => html`<path key=${"c" + i} d=${"M" + x(e.t) + " " + (y(sim.at(e.t)) - 5) + " l-5 -9 h10 z"} fill=${CAM_COLORS[e.cat] || "#b93a0f"} opacity="0.85"><title>${when(e.t) + " · " + GI.catLabel(e.cat) + " · índice " + Math.round(sim.at(e.t))}</title></path>`)}
         <line x1=${x(now)} x2=${x(now)} y1=${T} y2=${BY + BH} stroke="#2a78d6" strokeWidth="1.5" />
-        <text x=${x(now) + 4} y=${T + 10} className="ft-tl-lab b" fill="#2a78d6">ahora ${proj ? Math.round(proj.Fnow) : ""}</text>
+        <text x=${x(now) + 4} y=${T + 10} className="ft-tl-lab b" fill="#2a78d6">ahora ${proj ? Math.round(proj.Fnow) + (off ? "?" : "") : ""}</text>
         ${proj && proj.crossAt && proj.crossAt > now ? html`<g><circle cx=${x(proj.crossAt)} cy=${y(fz.fi_high)} r="4.5" fill="#d4561e" /><text x=${x(proj.crossAt) + (x(proj.crossAt) > R - 60 ? -6 : 6)} y=${y(fz.fi_high) - 6} textAnchor=${x(proj.crossAt) > R - 60 ? "end" : "start"} className="ft-tl-lab b">${(GI.dayKey(proj.crossAt) !== GI.dayKey(now) ? dshort(proj.crossAt) + " " : "") + hm(proj.crossAt)}</text></g>` : null}
         ${ticks.map(t => html`<g key=${"k" + t}><line x1=${x(t)} x2=${x(t)} y1=${BY + BH} y2=${BY + BH + 5} stroke="#7b8492" /><text x=${x(t)} y=${Hh - 8} textAnchor="middle" className="ft-tl-tick">${dshort(t)}</text></g>`)}
       </svg>
       <div className="ft-tl-legend small">
         <span><i style=${{ background: "#1f2a37" }}></i>Índice estimado</span>
         <span><i style=${{ background: "repeating-linear-gradient(90deg,#1f2a37 0 4px,transparent 4px 7px)" }}></i>Proyección con su horario habitual</span>
+        ${off ? html`<span><i style=${{ background: "#b8bec8" }}></i>Sin comunicación del vehículo (supone descanso)</span>` : null}
         <span><i style=${{ background: "#c9cfe3", height: "5px" }}></i>00–06 h</span>
         <span>· Barra inferior, jornadas por índice máximo:</span>
         <span><i style=${{ background: FI_COLORS.bajo }}></i>bajo</span>
@@ -125,7 +137,7 @@
     </div>`;
   }
   // Mini curva para la lista: últimas 72 h + proyección.
-  function Spark({ entry, proj, fz, now }) {
+  function Spark({ entry, proj, fz, now, off }) {
     const W = 220, Hh = 44, t0 = now - 72 * H, t1 = now + 16 * H;
     const x = t => ((t - t0) / (t1 - t0)) * W, y = v => Hh - 3 - (Math.min(160, Math.max(0, v)) / 160) * (Hh - 6);
     const sim = entry.sim, pts = [];
@@ -133,6 +145,7 @@
     const pp = proj ? proj.pts.filter((p, i) => i % 4 === 0 || i === proj.pts.length - 1).map(([t, v]) => x(t).toFixed(1) + "," + y(v).toFixed(1)) : [];
     return html`<svg className="ft-spark" viewBox=${"0 0 " + W + " " + Hh} width="220" height="44" aria-hidden="true">
       <rect x=${x(now)} y="0" width=${W - x(now)} height=${Hh} fill="#f4f6f9" />
+      ${off && off.at < now ? html`<rect x=${x(Math.max(t0, off.at))} y="0" width=${x(now) - x(Math.max(t0, off.at))} height=${Hh} fill="#b8bec8" opacity="0.35"><title>Sin comunicación del vehículo</title></rect>` : null}
       <line x1="0" x2=${W} y1=${y(fz.fi_high)} y2=${y(fz.fi_high)} stroke="#d4561e" strokeDasharray="3 3" />
       <line x1="0" x2=${W} y1=${y(fz.fi_mod)} y2=${y(fz.fi_mod)} stroke="#c99400" strokeDasharray="2 3" opacity="0.6" />
       ${pts.length ? html`<path d=${"M" + pts.join("L")} fill="none" stroke="#1f2a37" strokeWidth="1.6" />` : null}
@@ -143,6 +156,7 @@
 
   // ---------- Seguimiento: quién se acerca a un índice alto ----------
   function TrackSection({ view, res, live, onRefresh, onDriver }) {
+    const status = live.status;
     const fz = res.limits, now = live.now;
     const [all, setAll] = useState(false);
     const rows = useMemo(() => {
@@ -153,18 +167,20 @@
         const proj = GI.projectIndex(entry, fz, now, 16);
         if (!proj) continue;
         const prog = proj.open ? GI.shiftProgress(proj.open, fz, now) : null;
-        out.push({ id, entry, proj, prog, last });
+        out.push({ id, entry, proj, prog, last, off: GI.commGap(entry, status, now) });
       }
       const ord = { rojo: 2, amarillo: 1, ok: 0 };
       return out.sort((a, b) => ord[b.proj.level] - ord[a.proj.level] || b.proj.risk - a.proj.risk);
-    }, [res, now]);
-    const show = all ? rows : rows.filter(r => r.proj.level !== "ok");
+    }, [res, now, status]);
+    const show = all ? rows : rows.filter(r => r.proj.level !== "ok" || r.off);
+    const offRows = rows.filter(r => r.off);
     const red = rows.filter(r => r.proj.level === "rojo"), soon = rows.filter(r => r.proj.open && r.proj.crossAt && r.proj.crossAt > now);
     const nextHigh = rows.filter(r => !r.proj.open && r.proj.next && r.proj.next.peak >= fz.fi_high);
     return html`<${Panel} title="¿Quién se acerca a un índice de fatiga alto?"
       hint=${"Conductores que trabajaron en las últimas 72 h o están en jornada. La curva muestra su índice de fatiga estimado de los últimos 3 días y, punteada, la proyección de las próximas 16 h: si está en jornada, sigue al ritmo que lleva hasta completar su jornada habitual; si descansa, arranca a su hora habitual (la mediana de sus últimas jornadas) y hace su jornada habitual. Alto desde " + fz.fi_high + ", moderado desde " + fz.fi_mod + " (Configuración → Fatiga y gravedad)."}
       actions=${html`<span className="muted small">${live.at ? "Datos de las " + hm(live.at) : ""}</span> <button className="btn small" disabled=${live.loading} onClick=${onRefresh}>${live.loading ? "Actualizando…" : "↻ Actualizar"}</button>`}>
       ${live.err ? html`<${Info} tone="warn">No se pudieron traer los viajes de las últimas horas (${live.err}); se usa lo cargado del período.<//>` : null}
+      ${offRows.length ? html`<${Info} tone="warn"><b>${offRows.length === 1 ? "1 conductor tiene" : offRows.length + " conductores tienen"} el vehículo sin comunicación</b> (${offRows.map(r => drvName(view, r.id) + " desde " + (GI.dayKey(r.off.at) !== GI.dayKey(now) ? dshort(r.off.at) + " " : "") + hm(r.off.at)).join("; ")}). No se puede confirmar si descansan o siguen manejando: si manejaron, esos viajes aparecen cuando el equipo vuelva a comunicar. Su índice supone que descansan.<//>` : null}
       <div className="readouts compact inset">
         <${Kpi} label="Actuar ahora" value=${n0(red.length)} tone=${red.length ? "bad" : null} sub=${html`<span>en jornada con índice alto, o próximo turno que no llega a descansar lo necesario</span>`} />
         <${Kpi} label=${"En jornada y llegan a " + fz.fi_high} value=${n0(soon.length)} sub=${html`<span>${soon.length ? "el primero a las " + hm(Math.min(...soon.map(r => r.proj.crossAt))) : "en las próximas horas"}</span>`} />
@@ -179,12 +195,14 @@
           <td className="small">${p.open ? html`${r.prog && r.prog.driving ? html`<span className="ft-live">● Manejando</span>` : "En jornada, parado hace " + dur(r.prog ? r.prog.sinceLast / 60 : 0)}
               <div className="muted">desde las ${hm(p.open.s)} · ${r.prog ? r.prog.items.map(it => html`<span key=${it.key} className=${"ft-lim " + it.level}>${it.label.replace("Manejo continuo", "Continuo")} ${dur(it.v)}/${it.max} h</span>`) : null}</div>`
             : p.franco ? html`De franco <span className="tag">${p.rs.label}</span><div className="muted">vuelve ${p.rs.backAt ? dshort(p.rs.backAt) : "–"}</div>`
+            : r.off ? html`<span className="ft-nocom">Sin comunicación</span><div className="muted">desde ${(GI.dayKey(r.off.at) !== GI.dayKey(now) ? dshort(r.off.at) + " " : "") + hm(r.off.at)} (${dur(r.off.h)}) · no se sabe si descansa</div>`
             : html`Descansando hace ${dur((now - r.last.e) / H)}<div className="muted">${p.nextStart ? "arranque habitual " + when(p.nextStart) : ""}</div>`}
+            ${r.off && p.open ? html`<div><span className="ft-nocom">Sin comunicación</span> <span className="muted">desde ${hm(r.off.at)}</span></div>` : null}
             ${p.rs && p.rs.work && !p.franco ? html`<div className="muted">día ${p.rs.curDay} de ${p.rs.work} <span className="tag" title=${p.rs.source === "auto" ? "Detectado de sus vueltas" : "Fijado a mano"}>${p.rs.label}</span></div>` : null}</td>
-          <td className="num">${fiTag(p.Fnow, fz)}</td>
-          <td><${Spark} entry=${r.entry} proj=${p} fz=${fz} now=${now} /></td>
+          <td className="num">${fiTag(p.Fnow, fz)}${r.off ? html`<div className="small muted" title="Supone que descansa desde la última comunicación">sin datos</div>` : null}</td>
+          <td><${Spark} entry=${r.entry} proj=${p} fz=${fz} now=${now} off=${r.off} /></td>
           <td className="num">${p.crossAt && p.crossAt > now ? html`<b>${(GI.dayKey(p.crossAt) !== GI.dayKey(now) ? dshort(p.crossAt) + " " : "") + hm(p.crossAt)}</b>${p.open ? "" : html`<div className="small muted">en su próximo turno</div>`}` : p.open && p.Fnow >= fz.fi_high ? html`<b className="delta bad">ya</b>` : html`<span className="muted">–</span>`}</td>
-          <td><span className=${"ft-act " + p.level}>${p.action}</span></td>
+          <td><span className=${"ft-act " + p.level}>${p.action}</span>${r.off ? html`<div className="small">Confirmar con el conductor o la base si descansó</div>` : null}</td>
         </tr>`; })}</tbody></table></div>`}
     <//>`;
   }
@@ -606,7 +624,7 @@ ${restFrom != null && restFrom < j.s ? (() => { const g = GAP[restKind(j, fz)]; 
     </div>`;
   }
 
-  function FatigueDriver({ view, id, res, cases, now, onClose, onCase, onSafety, api, isAdmin, userName, roster, onRoster }) {
+  function FatigueDriver({ view, id, res, cases, now, status, onClose, onCase, onSafety, api, isAdmin, userName, roster, onRoster }) {
     const fz = res.limits;
     const [days, setDays] = useState(14);
     const s = res.sims.get(id);
@@ -633,22 +651,25 @@ ${restFrom != null && restFrom < j.s ? (() => { const g = GAP[restKind(j, fz)]; 
       ["Variación de la hora de inicio", s && s.rot && s.rot.startSd != null ? "± " + dur(s.rot.startSd) : "–", !!(s && s.rot && s.rot.startSd > 3)],
     ];
     const proj = s && s.sim ? GI.projectIndex(s, fz, now, 16) : null;
+    const off = s ? GI.commGap(s, status, now) : null;
     const [cdays, setCdays] = useState(7);
     return html`<${Modal} wide title=${"Fatiga · " + drvName(view, id)} onClose=${onClose}>
       <div className="ft-case-head">
-        ${proj ? html`<span>Índice de fatiga ahora: ${fiTag(proj.Fnow, fz)} <span className="muted">(${GI.fiLevel(proj.Fnow, fz)})</span></span>` : null}
+        ${proj ? html`<span>Índice de fatiga ahora: ${fiTag(proj.Fnow, fz)} <span className="muted">(${GI.fiLevel(proj.Fnow, fz)}${off && !proj.open ? ", si descansó" : off ? ", con lo último recibido" : ""})</span></span>` : null}
         <span className="ft-case-links">
           <button className="btn small" onClick=${() => onSafety(id)}>Ficha de seguridad</button>
           <button className="btn small" onClick=${() => GI.openEventsPage({ driverIds: [id], from: view.model.dayKeys[0], to: view.model.dayKeys[view.model.dayKeys.length - 1] })}>Eventos en MyGeotab ↗</button>
         </span>
       </div>
+      ${off ? html`<div className="verdict-line warn"><span className="vtag">Sin datos</span><span>
+        <b>${proj && proj.open ? "No se sabe si sigue manejando." : "No se sabe si está descansando."}</b> El vehículo ${devName(view, off.d)} no comunica con MyGeotab desde el ${when(off.at)} (${dur(off.h)}). Si siguió manejando, esos viajes van a aparecer cuando el equipo vuelva a comunicar. ${proj && proj.open ? "Lo de abajo usa lo último recibido" : "El índice y el próximo turno de abajo suponen que descansa desde entonces"}: conviene confirmarlo con el conductor o la base.</span></div>` : null}
       ${proj ? html`<div className=${"verdict-line " + (proj.level === "rojo" ? "bad" : "")}><span className="vtag">${proj.open ? "En jornada" : "Próximo turno"}</span><span>
-        <b>${proj.action}.</b>
+        <b>${off && !proj.open ? "Si descansó: " + proj.action.charAt(0).toLowerCase() + proj.action.slice(1) : proj.action}.</b>
         ${proj.open ? html` Empezó a las ${hm(proj.open.s)} (turno ${proj.open.type}); lleva ${dur((now - proj.open.s) / H)} de jornada y ${dur(proj.open.dh)} de manejo. Si completa su jornada habitual (${dur(proj.hb.span)}) el índice llegaría a ${fiTag(proj.peak, fz)}${proj.crossAt && proj.crossAt > now ? html` y pasaría de ${fz.fi_high} a las <b>${hm(proj.crossAt)}</b>` : ""}.`
           : proj.next ? html` Terminó el ${when(proj.next.lastE)}. Si arranca a su hora habitual, el ${when(proj.next.start)} (turno ${proj.next.hb.type}, ${dur(proj.next.hb.span)}), empezaría con ${fiTag(proj.next.Fstart, fz)} y terminaría en ${fiTag(proj.next.peak, fz)}.` : null}</span></div>` : null}
       <${RosterBox} api=${api} id=${id} rs=${s && s.rs} roster=${roster} isAdmin=${isAdmin} userName=${userName} onRoster=${onRoster} />
       ${s && s.sim ? html`<div className="ft-sub-head"><h3>Evolución del índice de fatiga</h3><${Segmented} value=${cdays} onChange=${setCdays} options=${[{ value: 3, label: "3 días" }, { value: 7, label: "7 días" }, { value: 14, label: "14 días" }]} /></div>
-        <${IndexChart} entry=${s} proj=${proj} fz=${fz} now=${now} days=${cdays} onCase=${onCase} height=${250} />` : null}
+        <${IndexChart} entry=${s} proj=${proj} fz=${fz} now=${now} days=${cdays} onCase=${onCase} height=${250} off=${off} />` : null}
       <div className="ft-facts">${facts.map(([l, v, bad]) => html`<div key=${l} className=${bad ? "bad" : ""}><span>${l}</span><b>${v}</b></div>`)}</div>
       <details className="ft-more"><summary>Patrón de jornadas por día</summary>
         <div className="ft-sub-head"><span></span><${Segmented} value=${days} onChange=${setDays} options=${[{ value: 14, label: "14 días" }, { value: 28, label: "28 días" }]} /></div>
@@ -1196,7 +1217,7 @@ ${restFrom != null && restFrom < j.s ? (() => { const g = GAP[restKind(j, fz)]; 
             : sub === "indicadores" && isBeta() ? html`<${KpiSection} view=${view} res=${period} cases=${cases} idents=${idents} onCase=${setSel} onDriver=${openDriver} />`
             : html`<${DriversSection} view=${view} onDriver=${openDriver} />`}
         </div>`}
-      ${drv && !findSel ? html`<${FatigueDriver} key=${drv} view=${view} id=${drv} res=${res} cases=${cases} now=${live.now}
+      ${drv && !findSel ? html`<${FatigueDriver} key=${drv} view=${view} id=${drv} res=${res} cases=${cases} now=${live.now} status=${live.status}
         api=${api} isAdmin=${isAdmin} userName=${userName} roster=${rosters.get(drv)} onRoster=${r => setRosters(m => { const n = new Map(m); if (r && !r.removed) n.set(r.drv, r); else n.delete(drv); return n; })}
         onClose=${() => setDrv(null)} onCase=${j => setSel(j)} onSafety=${id => { setDrv(null); onDriver(id); }} />` : null}
       ${findSel ? html`<${CaseDetail} key=${findSel.key} view=${view} api=${api} j=${findSel} fz=${limits} rec=${cases.get(findSel.key)} userName=${userName}
