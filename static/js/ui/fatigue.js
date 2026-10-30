@@ -413,22 +413,50 @@ ${restFrom != null && restFrom < j.s ? (() => { const g = GAP[restKind(j, fz)]; 
     const t0 = j.s - 2 * H, t1 = j.e + 2 * H, X = t => (((Math.max(t0, Math.min(t1, t)) - t0) / (t1 - t0)) * 100).toFixed(2) + "%";
     const ticks = [];
     for (let t = new Date(t0).setMinutes(0, 0, 0) + H; t < t1; t += H) if (new Date(t).getHours() % 4 === 0) ticks.push(t);
-    const keyLabel = k => (k.r ? drvName(view, k.r).split(" ")[0] : "sin conductor");
+    // Llaves en franjas: cada llave rige desde que se pasa hasta que se pasa otra (de otro conductor o
+    // "sin conductor"); pasadas seguidas de la misma llave se unen. Un carril por conductor y otro para
+    // "sin conductor". La llave clave (se vuelve a pasar la del mismo conductor) se marca aparte.
+    const allKeys = (keys || []).filter(k => k.t <= t1).sort((a, b) => a.t - b.t);
+    const groups = [];
+    for (const k of allKeys) {
+      const g = groups[groups.length - 1];
+      if (g && g.r === (k.r || null)) continue;
+      if (g) g.b = k.t;
+      groups.push({ r: k.r || null, a: k.t, b: t1 });
+    }
+    const shown = groups.filter(g => g.b > t0);
+    const otherIds = [...new Set(shown.filter(g => g.r && g.r !== j.drv).map(g => g.r))];
+    const lanes = [{ r: j.drv, label: "Llave " + drvName(view, j.drv).split(" ")[0], cls: "same" }, { r: null, label: "Sin conductor", cls: "none" },
+      ...(otherIds.length ? otherIds.map(r => ({ r, label: "Llave " + drvName(view, r).split(" ")[0], cls: "other" })) : [{ r: "__otro", label: "Llave de otro", cls: "other", empty: true }])];
+    const tm = t => (GI.dayKey(t) !== GI.dayKey(j.s) ? dshort(t) + " " : "") + hm(t);
+    // lista: franjas, la llave clave y el tramo que probablemente manejó otro chofer, en orden
+    const rows = shown.map((g, i) => ({ t: Math.max(g.a, t0), txt: (i === 0 ? dshort(Math.max(g.a, t0)) + " " + hm(Math.max(g.a, t0)) : tm(Math.max(g.a, t0))) + " → " + (g.b >= t1 ? "fin" : tm(g.b)), who: g.r ? drvName(view, g.r) : "Sin conductor" }));
+    if (reswipe) rows.push({ t: reswipe.t, txt: tm(reswipe.t), who: "Se vuelve a pasar la llave de " + drvName(view, j.drv) + ": probable inicio de su turno", key: true });
+    if (outcome === "relevo" && fromMs && atMs && atMs > fromMs) {
+      const n = j.trips.filter(t => t.s >= fromMs - MIN && t.s < atMs).length;
+      rows.push({ t: fromMs + 1, txt: tm(fromMs) + " → " + tm(atMs), who: "Probablemente manejó otro chofer (" + n + " viaje" + (n === 1 ? "" : "s") + " sin su llave)", doubt: true });
+    }
+    rows.sort((a, b) => a.t - b.t);
     const valid = outcome !== "relevo" || (fromMs && atMs && atMs > fromMs && fromMs >= j.s - MIN && atMs <= j.e + MIN);
     return html`<div className="ft-ident">
       <h3>¿Quién manejó esta jornada?</h3>
       <p>Para el sistema, ${drvName(view, j.drv)} manejó ${devName(view, dev)} desde el <b>${when(j.s)}</b> hasta el <b>${when(j.e)}</b> (${dur(j.span)}) sin un corte que cierre la jornada. Con camiones en relevo esto suele pasar cuando el otro chofer no pasa su llave: su turno queda a nombre del anterior.</p>
       <div className="ft-ident-tl">
-        <div className="ft-ident-lane"><span className="ft-ident-lab">Llave pasada</span><div className="ft-ident-track keys">
-          ${keys == null ? html`<span className="muted small">Buscando identificaciones…</span>` : !keys.length ? html`<span className="muted small">Sin registros de identificación en este rango.</span>`
-            : keys.filter(k => k.t >= t0 && k.t <= t1).map((k, i) => html`<span key=${i} className=${"ft-key " + (k.r === j.drv ? (reswipe && k.t === reswipe.t ? "again" : "same") : k.r ? "other" : "none")} style=${{ left: X(k.t) }} title=${when(k.t) + " · " + (k.r ? drvName(view, k.r) : "sin conductor identificado")}><b>${hm(k.t)}</b> ${keyLabel(k)}</span>`)}
-        </div></div>
+        ${keys == null ? html`<div className="ft-ident-lane"><span className="ft-ident-lab">Llaves</span><span className="muted small">Buscando identificaciones…</span></div>`
+          : !shown.length ? html`<div className="ft-ident-lane"><span className="ft-ident-lab">Llaves</span><span className="muted small">Sin registros de identificación en este rango.</span></div>`
+          : lanes.map(l => html`<div key=${l.r || "none"} className="ft-ident-lane"><span className="ft-ident-lab">${l.label}</span><div className="ft-ident-track kband">
+            ${l.empty ? html`<span className="ft-kband-empty">ninguna en este rango</span>` : shown.filter(g => g.r === l.r).map((g, i) => html`<span key=${i} className=${"ft-kband " + l.cls} style=${{ left: X(g.a), width: "calc(" + X(g.b) + " - " + X(g.a) + ")" }} title=${tm(Math.max(g.a, t0)) + " → " + (g.b >= t1 ? "fin" : tm(g.b)) + " · " + (g.r ? drvName(view, g.r) : "sin conductor identificado")}></span>`)}
+            ${l.r === j.drv && reswipe ? html`<span className="ft-kmark" style=${{ left: X(reswipe.t) }} title=${when(reswipe.t) + " · se vuelve a pasar la llave: probable inicio de su turno"}></span>` : null}
+          </div></div>`)}
         <div className="ft-ident-lane"><span className="ft-ident-lab">Manejo a nombre de ${drvName(view, j.drv).split(" ")[0]}</span><div className="ft-ident-track">
           ${(outcome === "relevo" && atMs && fromMs && atMs > fromMs) ? html`<span className="ft-ident-doubt" style=${{ left: X(fromMs), width: "calc(" + X(atMs) + " - " + X(fromMs) + ")" }}></span>` : null}
           ${j.trips.map((t, i) => html`<span key=${i} className="ft-ident-trip" style=${{ left: X(t.s), width: "calc(" + X(t.e) + " - " + X(t.s) + ")" }}></span>`)}
         </div></div>
         <div className="ft-ident-lane"><span></span><div className="ft-ident-axis">${ticks.map(t => html`<span key=${t} style=${{ left: X(t) }}>${new Date(t).getHours() === 0 ? dshort(t) : String(new Date(t).getHours()).padStart(2, "0") + " h"}</span>`)}</div></div>
       </div>
+      ${rows.length ? html`<div className="ft-klist"><b>Cambios de llave</b>
+        ${rows.map((r, i) => html`<div key=${i} className=${"ft-klist-row" + (r.doubt ? " gap" : r.key ? " key" : "")}><span>${r.txt}</span><span>${r.who}</span></div>`)}
+      </div>` : null}
       <div className="ft-ident-hints">
         <b>Pistas</b>
         ${habits.length ? html`<span>· En ${devName(view, dev)}, los otros días: ${habits.slice(0, 3).map(h => drvName(view, h.drv) + " suele empezar a las " + minTxt(h.startMin) + " (turno " + h.type + ", ~" + dur(h.span) + ", " + h.n + " jornadas)").join("; ")}.</span>` : null}
