@@ -167,10 +167,15 @@
         const proj = GI.projectIndex(entry, fz, now, 16);
         if (!proj) continue;
         const prog = proj.open ? GI.shiftProgress(proj.open, fz, now) : null;
-        out.push({ id, entry, proj, prog, last, off: GI.commGap(entry, status, now) });
+        // tendencia: cuánto subió el índice en las últimas 2 h (sube mientras trabaja)
+        const rise = proj.Fnow - entry.sim.at(now - 2 * H);
+        out.push({ id, entry, proj, prog, last, rise, up: rise >= 2, off: GI.commGap(entry, status, now) });
       }
-      const ord = { rojo: 2, amarillo: 1, ok: 0 };
-      return out.sort((a, b) => ord[b.proj.level] - ord[a.proj.level] || b.proj.risk - a.proj.risk);
+      // primero los críticos (rojo, después amarillo), después los que vienen subiendo y al final
+      // el resto; dentro de cada grupo, el índice más alto primero
+      const ord = { rojo: 3, amarillo: 2, ok: 0 };
+      const rank = r => ord[r.proj.level] || (r.up ? 1 : 0);
+      return out.sort((a, b) => rank(b) - rank(a) || b.proj.Fnow - a.proj.Fnow || b.rise - a.rise || b.proj.risk - a.proj.risk);
     }, [res, now, status]);
     const show = all ? rows : rows.filter(r => r.proj.level !== "ok" || r.off);
     const offRows = rows.filter(r => r.off);
@@ -199,7 +204,7 @@
             : html`Descansando hace ${dur((now - r.last.e) / H)}<div className="muted">${p.nextStart ? "arranque habitual " + when(p.nextStart) : ""}</div>`}
             ${r.off && p.open ? html`<div><span className="ft-nocom">Sin comunicación</span> <span className="muted">desde ${hm(r.off.at)}</span></div>` : null}
             ${p.rs && p.rs.work && !p.franco ? html`<div className="muted">día ${p.rs.curDay} de ${p.rs.work} <span className="tag" title=${p.rs.source === "auto" ? "Detectado de sus vueltas" : "Fijado a mano"}>${p.rs.label}</span></div>` : null}</td>
-          <td className="num">${fiTag(p.Fnow, fz)}${r.off ? html`<div className="small muted" title="Supone que descansa desde la última comunicación">sin datos</div>` : null}</td>
+          <td className="num">${fiTag(p.Fnow, fz)}${r.up ? html`<div className="small ft-up" title="Cuánto subió el índice en las últimas 2 h">↑ +${Math.round(r.rise)} en 2 h</div>` : null}${r.off ? html`<div className="small muted" title="Supone que descansa desde la última comunicación">sin datos</div>` : null}</td>
           <td><${Spark} entry=${r.entry} proj=${p} fz=${fz} now=${now} off=${r.off} /></td>
           <td className="num">${p.crossAt && p.crossAt > now ? html`<b>${(GI.dayKey(p.crossAt) !== GI.dayKey(now) ? dshort(p.crossAt) + " " : "") + hm(p.crossAt)}</b>${p.open ? "" : html`<div className="small muted">en su próximo turno</div>`}` : p.open && p.Fnow >= fz.fi_high ? html`<b className="delta bad">ya</b>` : html`<span className="muted">–</span>`}</td>
           <td><span className=${"ft-act " + p.level}>${p.action}</span>${r.off ? html`<div className="small">Confirmar con el conductor o la base si descansó</div>` : null}</td>
