@@ -727,9 +727,12 @@
   }
   // Todas las cámaras de la base, por vehículo (id del vehículo; si la respuesta no lo trae, por nombre).
   async function loadAllCameras(api, devices) {
-    const r = ((await api.call("Get", { typeName: "Camera", search: {} })) || []).map(camOf).filter(c => c.serial);
+    const raw = (await api.call("Get", { typeName: "Camera", search: {} })) || [];
+    const r = raw.map(camOf).filter(c => c.serial);
     const byName = new Map((devices || []).map(d => [d.name, d.id]));
     const out = new Map();
+    // diagnóstico: cuántas devolvió la API y qué campos trae (sin valores)
+    out.diag = { total: raw.length, withSerial: r.length, keys: raw[0] ? Object.keys(raw[0]).join(", ") : "" };
     for (const c of r) {
       const id = c.dev || byName.get(c.devName);
       if (!id) continue;

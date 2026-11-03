@@ -158,11 +158,12 @@
   function TrackSection({ view, res, live, onRefresh, onDriver, api }) {
     const status = live.status;
     const [cams, setCams] = useState(null); // vehículo -> cámaras
+    const [camErr, setCamErr] = useState(null);
     const [watch, setWatch] = useState(null); // { drv, dev }
     useEffect(() => {
       let off = false;
       if (!api || !GI.loadAllCameras) return;
-      GI.loadAllCameras(api, view.model.devices).then(m => { if (!off) setCams(m); }).catch(e => { console.warn("[Geotab Insights] cámaras", e); if (!off) setCams(new Map()); });
+      GI.loadAllCameras(api, view.model.devices).then(m => { if (!off) setCams(m); }).catch(e => { console.warn("[Geotab Insights] cámaras", e); if (!off) { setCams(new Map()); setCamErr(String((e && (e.message || e.name)) || e)); } });
       return () => { off = true; };
     }, [api]);
     const fz = res.limits, now = live.now;
@@ -223,6 +224,7 @@
             const btn = html`<button className=${"btn small" + (on ? " primary" : "")} title=${!known ? "Abre el video en vivo de MyGeotab" : on ? "Cámara en línea" : "La cámara no figura en línea"} onClick=${e => { e.stopPropagation(); known ? setWatch({ drv: r.id, dev }) : GI.openLiveVideo(dev); }}>▶ En vivo</button>`;
             return html`<td>${!dev ? html`<span className="small muted">–</span>` : !known ? btn : cs ? html`${btn}${on ? null : html`<div className="small muted">sin conexión</div>`}` : html`<span className="small muted">sin cámara</span>`}</td>`; })()}
         </tr>`; })}</tbody></table></div>`}
+    ${cams && !cams.size ? html`<p className="small muted">Cámaras: ${camErr ? "Geotab Video no respondió (" + camErr + ")" : cams.diag ? "Geotab Video devolvió " + cams.diag.total + " cámara(s), ninguna asociada a un vehículo" + (cams.diag.keys ? " (campos: " + cams.diag.keys + ")" : "") : "sin datos"}. El botón ▶ En vivo abre el reproductor de MyGeotab de cada vehículo.</p>` : null}
     ${watch ? html`<${Modal} wide title=${"Video en vivo · " + drvName(view, watch.drv) + " · " + devName(view, watch.dev)} onClose=${() => setWatch(null)}>
       <${LiveCam} api=${api} view=${view} dev=${watch.dev} auto=${true} />
     <//>` : null}
