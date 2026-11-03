@@ -719,27 +719,35 @@
 
 
   // Cámaras asociadas a un vehículo (Geotab Video: GO Focus y cámaras de partners como Surfsight).
-  const camOf = c => ({ serial: c.cameraSerialNumber, name: c.deviceName || c.name || c.cameraSerialNumber, status: String(c.status || ""), vendor: c.vendor || c.cameraVendor || "",
-    dev: GI.idOf(c.device) || c.deviceId || null, devName: c.deviceName || null });
-  async function loadCameras(api, devId) {
-    const r = (await api.call("Get", { typeName: "Camera", search: { deviceSearch: { deviceIds: [devId] } } })) || [];
-    return r.map(camOf).filter(c => c.serial);
-  }
-  // Todas las cámaras de la base, por vehículo (id del vehículo; si la respuesta no lo trae, por nombre).
+  // Camera (Geotab Video): trae cameraSerialNumber, vendor, model, deviceSerialNumber (serie del GO
+  // del vehículo), activeFrom/activeTo. El vehículo se encuentra por la serie del GO.
+  const camOf = c => ({ serial: c.cameraSerialNumber, name: c.model || c.cameraSerialNumber, model: c.model || "", status: String(c.status || ""), vendor: c.vendor || c.cameraVendor || "",
+    dev: GI.idOf(c.device) || c.deviceId || null, goSerial: c.deviceSerialNumber || null, devName: c.deviceName || null,
+    active: !c.activeTo || Date.parse(c.activeTo) > Date.now() });
+  let camCache = null; // { at, devKey, map }
+  // Todas las cámaras activas de la base, por vehículo.
   async function loadAllCameras(api, devices) {
+    const devKey = (devices || []).length;
+    if (camCache && camCache.devKey === devKey && Date.now() - camCache.at < 10 * 60000) return camCache.map;
     const raw = (await api.call("Get", { typeName: "Camera", search: {} })) || [];
-    const r = raw.map(camOf).filter(c => c.serial);
+    const r = raw.map(camOf).filter(c => c.serial && c.active);
+    const bySerial = new Map((devices || []).filter(d => d.serial).map(d => [String(d.serial).toUpperCase(), d.id]));
     const byName = new Map((devices || []).map(d => [d.name, d.id]));
     const out = new Map();
-    // diagnóstico: cuántas devolvió la API y qué campos trae (sin valores)
     out.diag = { total: raw.length, withSerial: r.length, keys: raw[0] ? Object.keys(raw[0]).join(", ") : "" };
     for (const c of r) {
-      const id = c.dev || byName.get(c.devName);
+      const id = c.dev || (c.goSerial && bySerial.get(String(c.goSerial).toUpperCase())) || byName.get(c.devName);
       if (!id) continue;
       if (!out.has(id)) out.set(id, []);
       out.get(id).push(c);
     }
+    camCache = { at: Date.now(), devKey, map: out };
     return out;
+  }
+  // Cámaras de un vehículo (de la lista completa, que queda en memoria 10 min).
+  async function loadCameras(api, devId, devices) {
+    const m = await loadAllCameras(api, devices);
+    return m.get(devId) || [];
   }
 
   Object.assign(GI, {

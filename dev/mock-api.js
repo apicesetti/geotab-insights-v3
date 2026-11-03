@@ -320,7 +320,7 @@
           ...(d.id === "b300" ? { isDeviceCommunicating: false, dateTime: trips.filter(t => t.device.id === "b300" && t.stop <= new Date().toISOString()).map(t => t.stop).sort().pop() } : { isDeviceCommunicating: true }) })); break;
         case "AddInData": out = addInData.filter(a => a.addInId === s.addInId); break;
         case "Camera": { const ids = (s.deviceSearch && s.deviceSearch.deviceIds) || devices.map(d => d.id);
-          out = devices.filter(d => ids.includes(d.id) && ["b300", "b301", "b302"].includes(d.id)).map(d => ({ cameraSerialNumber: "CAM" + d.serialNumber, deviceName: d.name, status: d.id === "b300" ? "Offline" : "Online", vendor: d.id === "b301" ? "Gofocus" : "Surfsight" })); break; }
+          out = devices.filter(d => ids.includes(d.id) && ["b300", "b301", "b302"].includes(d.id)).map(d => ({ cameraSerialNumber: "CAM" + d.serialNumber, deviceSerialNumber: d.serialNumber, vendor: d.id === "b301" ? "Gofocus" : "Surfsight", model: d.id === "b301" ? "GO Focus Plus" : "AI-12", activeFrom: "2026-01-01T00:00:00Z", activeTo: "2050-01-01T00:00:00Z", id: "c" + d.id })); break; }
         case "LogRecord": {
           // Sin deviceSearch (muestreo de corredores): un punto cada 10 s de
           // cada viaje que pase por la ventana, con velocidad.
