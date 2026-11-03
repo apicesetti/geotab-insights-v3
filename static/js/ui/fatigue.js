@@ -155,8 +155,16 @@
   }
 
   // ---------- Seguimiento: quién se acerca a un índice alto ----------
-  function TrackSection({ view, res, live, onRefresh, onDriver }) {
+  function TrackSection({ view, res, live, onRefresh, onDriver, api }) {
     const status = live.status;
+    const [cams, setCams] = useState(null); // vehículo -> cámaras
+    const [watch, setWatch] = useState(null); // { drv, dev }
+    useEffect(() => {
+      let off = false;
+      if (!api || !GI.loadAllCameras) return;
+      GI.loadAllCameras(api, view.model.devices).then(m => { if (!off) setCams(m); }).catch(() => { if (!off) setCams(new Map()); });
+      return () => { off = true; };
+    }, [api]);
     const fz = res.limits, now = live.now;
     const [all, setAll] = useState(false);
     const rows = useMemo(() => {
@@ -194,7 +202,7 @@
       </div>
       <div className="ft-filters"><${Segmented} value=${all ? "all" : "risk"} onChange=${v => setAll(v === "all")} options=${[{ value: "risk", label: "Con riesgo (" + rows.filter(r => r.proj.level !== "ok").length + ")" }, { value: "all", label: "Todos (" + rows.length + ")" }]} /></div>
       ${!show.length ? html`<p className="muted">${live.loading ? "Calculando…" : "Ningún conductor activo se acerca a un índice alto."}</p>` : html`<div className="table-wrap"><table className="tbl ft-track">
-        <thead><tr><th>Conductor</th><th>Estado</th><th className="num">Índice ahora</th><th>Últimas 72 h y próximas 16 h</th><th className="num">Llega a ${fz.fi_high}</th><th>Qué hacer</th></tr></thead>
+        <thead><tr><th>Conductor</th><th>Estado</th><th className="num">Índice ahora</th><th>Últimas 72 h y próximas 16 h</th><th className="num">Llega a ${fz.fi_high}</th><th>Qué hacer</th>${cams && cams.size ? html`<th>Cámara</th>` : null}</tr></thead>
         <tbody>${show.map(r => { const p = r.proj; return html`<tr key=${r.id} className=${"ft-track-" + p.level} onClick=${() => onDriver(r.id)} style=${{ cursor: "pointer" }}>
           <td><${DriverLink} view=${view} id=${r.id} onDriver=${onDriver} /><div className="small muted">${r.last.devices.map(d => devName(view, d)).join(", ")}</div></td>
           <td className="small">${p.open ? html`${r.prog && r.prog.driving ? html`<span className="ft-live">● Manejando</span>` : "En jornada, parado hace " + dur(r.prog ? r.prog.sinceLast / 60 : 0)}
@@ -208,7 +216,12 @@
           <td><${Spark} entry=${r.entry} proj=${p} fz=${fz} now=${now} off=${r.off} /></td>
           <td className="num">${p.crossAt && p.crossAt > now ? html`<b>${(GI.dayKey(p.crossAt) !== GI.dayKey(now) ? dshort(p.crossAt) + " " : "") + hm(p.crossAt)}</b>${p.open ? "" : html`<div className="small muted">en su próximo turno</div>`}` : p.open && p.Fnow >= fz.fi_high ? html`<b className="delta bad">ya</b>` : html`<span className="muted">–</span>`}</td>
           <td><span className=${"ft-act " + p.level}>${p.action}</span>${r.off ? html`<div className="small">Confirmar con el conductor o la base si descansó</div>` : null}</td>
+          ${cams && cams.size ? (() => { const dev = (r.last.trips[r.last.trips.length - 1] || {}).d, cs = dev && cams.get(dev), on = cs && cs.some(c => /online/i.test(c.status));
+            return html`<td>${cs ? html`<button className=${"btn small" + (on ? " primary" : "")} title=${on ? "Cámara en línea" : "La cámara no figura en línea"} onClick=${e => { e.stopPropagation(); setWatch({ drv: r.id, dev }); }}>▶ En vivo</button>${on ? null : html`<div className="small muted">sin conexión</div>`}` : html`<span className="small muted">–</span>`}</td>`; })() : null}
         </tr>`; })}</tbody></table></div>`}
+    ${watch ? html`<${Modal} wide title=${"Video en vivo · " + drvName(view, watch.drv) + " · " + devName(view, watch.dev)} onClose=${() => setWatch(null)}>
+      <${LiveCam} api=${api} view=${view} dev=${watch.dev} auto=${true} />
+    <//>` : null}
     <//>`;
   }
 
@@ -1247,7 +1260,7 @@ ${restFrom != null && restFrom < j.s ? (() => { const g = GAP[restKind(j, fz)]; 
     const subs = ANALYSIS.filter(([k]) => !BETA_ANALYSIS.has(k) || isBeta());
     return html`<div>
       <div className="subnav"><${Segmented} value=${sec} onChange=${setSec} options=${SECTIONS.map(([value, label]) => ({ value, label }))} /></div>
-      ${sec === "seguimiento" ? html`<${TrackSection} view=${view} res=${res} live=${live} onRefresh=${refresh} onDriver=${openDriver} />`
+      ${sec === "seguimiento" ? html`<${TrackSection} view=${view} res=${res} live=${live} onRefresh=${refresh} onDriver=${openDriver} api=${api} />`
         : sec === "casos" ? html`<${CasesSection} view=${view} shifts=${shifts} cases=${cases} idents=${idents} limits=${limits} onOpen=${setSel} onDriver=${openDriver} />`
         : html`<div>
           <div className="subnav ft-subnav"><${Segmented} value=${sub} onChange=${setSub} options=${subs.map(([value, label]) => ({ value, label }))} /></div>

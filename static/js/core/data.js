@@ -719,13 +719,28 @@
 
 
   // Cámaras asociadas a un vehículo (Geotab Video: GO Focus y cámaras de partners como Surfsight).
+  const camOf = c => ({ serial: c.cameraSerialNumber, name: c.deviceName || c.name || c.cameraSerialNumber, status: String(c.status || ""), vendor: c.vendor || c.cameraVendor || "",
+    dev: GI.idOf(c.device) || c.deviceId || null, devName: c.deviceName || null });
   async function loadCameras(api, devId) {
     const r = (await api.call("Get", { typeName: "Camera", search: { deviceSearch: { deviceIds: [devId] } } })) || [];
-    return r.map(c => ({ serial: c.cameraSerialNumber, name: c.deviceName || c.name || c.cameraSerialNumber, status: String(c.status || ""), vendor: c.vendor || c.cameraVendor || "" })).filter(c => c.serial);
+    return r.map(camOf).filter(c => c.serial);
+  }
+  // Todas las cámaras de la base, por vehículo (id del vehículo; si la respuesta no lo trae, por nombre).
+  async function loadAllCameras(api, devices) {
+    const r = ((await api.call("Get", { typeName: "Camera", search: {} })) || []).map(camOf).filter(c => c.serial);
+    const byName = new Map((devices || []).map(d => [d.name, d.id]));
+    const out = new Map();
+    for (const c of r) {
+      const id = c.dev || byName.get(c.devName);
+      if (!id) continue;
+      if (!out.has(id)) out.set(id, []);
+      out.get(id).push(c);
+    }
+    return out;
   }
 
   Object.assign(GI, {
-    loadCameras, loadRecentTrips, loadDriveStatus, loadDriverChanges,
+    loadCameras, loadAllCameras, loadRecentTrips, loadDriveStatus, loadDriverChanges,
     loadCatalogs, loadZones, loadZoneTypes, loadPeriod, loadFuel, loadEventLocations, loadTrace, clearCache,
     _idbGetMany: idbGetMany, _idbPutMany: idbPutMany,
     _compactTrips: compactTrips, _compactExceptions: compactExceptions, _compactCounter: compactCounter, _loadFuelBoundaries: loadFuelBoundaries, _missingRuns: missingRuns, _getRangeMulti: getRangeMulti,
