@@ -762,9 +762,12 @@
     return { "X-MyGeotab-Database": encodeURIComponent(ss.database), "X-MyGeotab-Username": ss.userName,
       "X-MyGeotab-SessionId": ss.sessionId, "X-MyGeotab-Path": ss.server || "my.geotab.com" };
   }
+  // Algunas llamadas del servicio son GET y otras POST (OrganizationToken responde 405 a GET):
+  // se prueba GET y, si el método no está permitido, POST sin cuerpo.
   async function mediaGet(path) {
-    const res = await fetch(MEDIA + path, { headers: mediaHeaders() });
-    if (!res.ok) throw new Error("HTTP " + res.status);
+    let res = await fetch(MEDIA + path, { headers: mediaHeaders() });
+    if (res.status === 405) res = await fetch(MEDIA + path, { method: "POST", headers: { ...mediaHeaders(), "Content-Type": "application/json" }, body: "{}" });
+    if (!res.ok) throw new Error("HTTP " + res.status + " en " + path);
     return res.json();
   }
   // Video en vivo Surfsight: token de la organización (MyGeotab lo pide igual) y lentes activas.
