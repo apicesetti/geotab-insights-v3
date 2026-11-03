@@ -4,38 +4,38 @@
 <meta charset="UTF-8" />
 <title>Geotab Insights</title>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<link rel="stylesheet" href="https://raw.githack.com/apicesetti/geotab-insights-v3/cc0ffa49abf3eaaaaaaa2fdef0cd7285178d9328/static/style.css?v=3.28.0">
+<link rel="stylesheet" href="https://raw.githack.com/apicesetti/geotab-insights-v3/8a98c4c86060bbab2ec1a72dd4d4a7bb5d390cf7/static/style.css?v=3.28.1">
 </head>
 <body>
 <div id="gi3-root"><div class="splash">Esta página está pensada para abrirse como Add-In dentro de MyGeotab.</div></div>
 
-<script src="https://raw.githack.com/apicesetti/geotab-insights-v3/cc0ffa49abf3eaaaaaaa2fdef0cd7285178d9328/static/vendor/react.production.min.js"></script>
-<script src="https://raw.githack.com/apicesetti/geotab-insights-v3/cc0ffa49abf3eaaaaaaa2fdef0cd7285178d9328/static/vendor/react-dom.production.min.js"></script>
-<script src="https://raw.githack.com/apicesetti/geotab-insights-v3/cc0ffa49abf3eaaaaaaa2fdef0cd7285178d9328/static/vendor/htm.umd.js"></script>
-<script src="https://raw.githack.com/apicesetti/geotab-insights-v3/cc0ffa49abf3eaaaaaaa2fdef0cd7285178d9328/static/vendor/chart.umd.min.js"></script>
-<script src="https://raw.githack.com/apicesetti/geotab-insights-v3/cc0ffa49abf3eaaaaaaa2fdef0cd7285178d9328/static/vendor/leaflet.js"></script>
-<script src="https://raw.githack.com/apicesetti/geotab-insights-v3/cc0ffa49abf3eaaaaaaa2fdef0cd7285178d9328/static/vendor/leaflet-heat.js"></script>
+<script src="https://raw.githack.com/apicesetti/geotab-insights-v3/8a98c4c86060bbab2ec1a72dd4d4a7bb5d390cf7/static/vendor/react.production.min.js"></script>
+<script src="https://raw.githack.com/apicesetti/geotab-insights-v3/8a98c4c86060bbab2ec1a72dd4d4a7bb5d390cf7/static/vendor/react-dom.production.min.js"></script>
+<script src="https://raw.githack.com/apicesetti/geotab-insights-v3/8a98c4c86060bbab2ec1a72dd4d4a7bb5d390cf7/static/vendor/htm.umd.js"></script>
+<script src="https://raw.githack.com/apicesetti/geotab-insights-v3/8a98c4c86060bbab2ec1a72dd4d4a7bb5d390cf7/static/vendor/chart.umd.min.js"></script>
+<script src="https://raw.githack.com/apicesetti/geotab-insights-v3/8a98c4c86060bbab2ec1a72dd4d4a7bb5d390cf7/static/vendor/leaflet.js"></script>
+<script src="https://raw.githack.com/apicesetti/geotab-insights-v3/8a98c4c86060bbab2ec1a72dd4d4a7bb5d390cf7/static/vendor/leaflet-heat.js"></script>
 
-<script src="https://raw.githack.com/apicesetti/geotab-insights-v3/cc0ffa49abf3eaaaaaaa2fdef0cd7285178d9328/static/js/core/util.js?v=3.28.0"></script>
-<script src="https://raw.githack.com/apicesetti/geotab-insights-v3/cc0ffa49abf3eaaaaaaa2fdef0cd7285178d9328/static/js/core/catalog.js?v=3.28.0"></script>
-<script src="https://raw.githack.com/apicesetti/geotab-insights-v3/cc0ffa49abf3eaaaaaaa2fdef0cd7285178d9328/static/js/core/storage.js?v=3.28.0"></script>
-<script src="https://raw.githack.com/apicesetti/geotab-insights-v3/cc0ffa49abf3eaaaaaaa2fdef0cd7285178d9328/static/js/core/data.js?v=3.28.0"></script>
-<script src="https://raw.githack.com/apicesetti/geotab-insights-v3/cc0ffa49abf3eaaaaaaa2fdef0cd7285178d9328/static/js/core/model.js?v=3.28.0"></script>
-<script src="https://raw.githack.com/apicesetti/geotab-insights-v3/cc0ffa49abf3eaaaaaaa2fdef0cd7285178d9328/static/js/core/exposure.js?v=3.28.0"></script>
-<script src="https://raw.githack.com/apicesetti/geotab-insights-v3/cc0ffa49abf3eaaaaaaa2fdef0cd7285178d9328/static/js/core/riskfactors.js?v=3.28.0"></script>
-<script src="https://raw.githack.com/apicesetti/geotab-insights-v3/cc0ffa49abf3eaaaaaaa2fdef0cd7285178d9328/static/js/core/hotspots.js?v=3.28.0"></script>
-<script src="https://raw.githack.com/apicesetti/geotab-insights-v3/cc0ffa49abf3eaaaaaaa2fdef0cd7285178d9328/static/js/core/roads.js?v=3.28.0"></script>
-<script src="https://raw.githack.com/apicesetti/geotab-insights-v3/cc0ffa49abf3eaaaaaaa2fdef0cd7285178d9328/static/js/core/fatigue.js?v=3.28.0"></script>
-<script src="https://raw.githack.com/apicesetti/geotab-insights-v3/cc0ffa49abf3eaaaaaaa2fdef0cd7285178d9328/static/js/core/benchmark.js?v=3.28.0"></script>
-<script src="https://raw.githack.com/apicesetti/geotab-insights-v3/cc0ffa49abf3eaaaaaaa2fdef0cd7285178d9328/static/js/ui/components.js?v=3.28.0"></script>
-<script src="https://raw.githack.com/apicesetti/geotab-insights-v3/cc0ffa49abf3eaaaaaaa2fdef0cd7285178d9328/static/js/ui/glossary.js?v=3.28.0"></script>
-<script src="https://raw.githack.com/apicesetti/geotab-insights-v3/cc0ffa49abf3eaaaaaaa2fdef0cd7285178d9328/static/js/ui/tabs.js?v=3.28.0"></script>
-<script src="https://raw.githack.com/apicesetti/geotab-insights-v3/cc0ffa49abf3eaaaaaaa2fdef0cd7285178d9328/static/js/ui/exposure.js?v=3.28.0"></script>
-<script src="https://raw.githack.com/apicesetti/geotab-insights-v3/cc0ffa49abf3eaaaaaaa2fdef0cd7285178d9328/static/js/ui/myperf.js?v=3.28.0"></script>
-<script src="https://raw.githack.com/apicesetti/geotab-insights-v3/cc0ffa49abf3eaaaaaaa2fdef0cd7285178d9328/static/js/ui/roads.js?v=3.28.0"></script>
-<script src="https://raw.githack.com/apicesetti/geotab-insights-v3/cc0ffa49abf3eaaaaaaa2fdef0cd7285178d9328/static/js/ui/fatigue.js?v=3.28.0"></script>
-<script src="https://raw.githack.com/apicesetti/geotab-insights-v3/cc0ffa49abf3eaaaaaaa2fdef0cd7285178d9328/static/js/ui/milestones.js?v=3.28.0"></script>
-<script src="https://raw.githack.com/apicesetti/geotab-insights-v3/cc0ffa49abf3eaaaaaaa2fdef0cd7285178d9328/static/js/ui/config.js?v=3.28.0"></script>
-<script src="https://raw.githack.com/apicesetti/geotab-insights-v3/cc0ffa49abf3eaaaaaaa2fdef0cd7285178d9328/static/js/ui/app.js?v=3.28.0"></script>
+<script src="https://raw.githack.com/apicesetti/geotab-insights-v3/8a98c4c86060bbab2ec1a72dd4d4a7bb5d390cf7/static/js/core/util.js?v=3.28.1"></script>
+<script src="https://raw.githack.com/apicesetti/geotab-insights-v3/8a98c4c86060bbab2ec1a72dd4d4a7bb5d390cf7/static/js/core/catalog.js?v=3.28.1"></script>
+<script src="https://raw.githack.com/apicesetti/geotab-insights-v3/8a98c4c86060bbab2ec1a72dd4d4a7bb5d390cf7/static/js/core/storage.js?v=3.28.1"></script>
+<script src="https://raw.githack.com/apicesetti/geotab-insights-v3/8a98c4c86060bbab2ec1a72dd4d4a7bb5d390cf7/static/js/core/data.js?v=3.28.1"></script>
+<script src="https://raw.githack.com/apicesetti/geotab-insights-v3/8a98c4c86060bbab2ec1a72dd4d4a7bb5d390cf7/static/js/core/model.js?v=3.28.1"></script>
+<script src="https://raw.githack.com/apicesetti/geotab-insights-v3/8a98c4c86060bbab2ec1a72dd4d4a7bb5d390cf7/static/js/core/exposure.js?v=3.28.1"></script>
+<script src="https://raw.githack.com/apicesetti/geotab-insights-v3/8a98c4c86060bbab2ec1a72dd4d4a7bb5d390cf7/static/js/core/riskfactors.js?v=3.28.1"></script>
+<script src="https://raw.githack.com/apicesetti/geotab-insights-v3/8a98c4c86060bbab2ec1a72dd4d4a7bb5d390cf7/static/js/core/hotspots.js?v=3.28.1"></script>
+<script src="https://raw.githack.com/apicesetti/geotab-insights-v3/8a98c4c86060bbab2ec1a72dd4d4a7bb5d390cf7/static/js/core/roads.js?v=3.28.1"></script>
+<script src="https://raw.githack.com/apicesetti/geotab-insights-v3/8a98c4c86060bbab2ec1a72dd4d4a7bb5d390cf7/static/js/core/fatigue.js?v=3.28.1"></script>
+<script src="https://raw.githack.com/apicesetti/geotab-insights-v3/8a98c4c86060bbab2ec1a72dd4d4a7bb5d390cf7/static/js/core/benchmark.js?v=3.28.1"></script>
+<script src="https://raw.githack.com/apicesetti/geotab-insights-v3/8a98c4c86060bbab2ec1a72dd4d4a7bb5d390cf7/static/js/ui/components.js?v=3.28.1"></script>
+<script src="https://raw.githack.com/apicesetti/geotab-insights-v3/8a98c4c86060bbab2ec1a72dd4d4a7bb5d390cf7/static/js/ui/glossary.js?v=3.28.1"></script>
+<script src="https://raw.githack.com/apicesetti/geotab-insights-v3/8a98c4c86060bbab2ec1a72dd4d4a7bb5d390cf7/static/js/ui/tabs.js?v=3.28.1"></script>
+<script src="https://raw.githack.com/apicesetti/geotab-insights-v3/8a98c4c86060bbab2ec1a72dd4d4a7bb5d390cf7/static/js/ui/exposure.js?v=3.28.1"></script>
+<script src="https://raw.githack.com/apicesetti/geotab-insights-v3/8a98c4c86060bbab2ec1a72dd4d4a7bb5d390cf7/static/js/ui/myperf.js?v=3.28.1"></script>
+<script src="https://raw.githack.com/apicesetti/geotab-insights-v3/8a98c4c86060bbab2ec1a72dd4d4a7bb5d390cf7/static/js/ui/roads.js?v=3.28.1"></script>
+<script src="https://raw.githack.com/apicesetti/geotab-insights-v3/8a98c4c86060bbab2ec1a72dd4d4a7bb5d390cf7/static/js/ui/fatigue.js?v=3.28.1"></script>
+<script src="https://raw.githack.com/apicesetti/geotab-insights-v3/8a98c4c86060bbab2ec1a72dd4d4a7bb5d390cf7/static/js/ui/milestones.js?v=3.28.1"></script>
+<script src="https://raw.githack.com/apicesetti/geotab-insights-v3/8a98c4c86060bbab2ec1a72dd4d4a7bb5d390cf7/static/js/ui/config.js?v=3.28.1"></script>
+<script src="https://raw.githack.com/apicesetti/geotab-insights-v3/8a98c4c86060bbab2ec1a72dd4d4a7bb5d390cf7/static/js/ui/app.js?v=3.28.1"></script>
 </body>
 </html>
