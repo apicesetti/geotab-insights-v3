@@ -741,7 +741,32 @@
       if (!out.has(id)) out.set(id, []);
       out.get(id).push(c);
     }
+    // Estado de conexión: el servicio de cámaras de Geotab (el mismo que usa el add-in de configuración
+    // de cámaras) informa por cámara el estado y la última conexión real. Si no responde, queda sin estado.
+    try {
+      const st = await cameraStatusByGo();
+      for (const list of out.values()) for (const c of list) {
+        const m = st.get(String(c.goSerial || "").toUpperCase() + "|" + (/surf|lytx/i.test(c.vendor) ? "surfsight" : "smarterai"));
+        if (m) { c.status = m.status || c.status; c.lastConn = m.lastConn || null; }
+      }
+      out.diag.status = st.size;
+    } catch (e) { out.diag.statusErr = String((e && e.message) || e); }
     camCache = { at: Date.now(), devKey, map: out };
+    return out;
+  }
+  async function cameraStatusByGo() {
+    const ss = GI._mgSession;
+    if (!ss || !ss.sessionId) throw new Error("sin sesión");
+    const res = await fetch("https://media-services.geotab.com/api/DeviceMappings", { headers: {
+      "X-MyGeotab-Database": encodeURIComponent(ss.database), "X-MyGeotab-Username": ss.userName,
+      "X-MyGeotab-SessionId": ss.sessionId, "X-MyGeotab-Path": ss.server || "my.geotab.com" } });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const out = new Map();
+    for (const m of (await res.json()) || []) {
+      if (!m.associatedDeviceSerialNumber) continue;
+      const lastConn = (m.partnerMetaData && m.partnerMetaData.LastConnectedAt) || null;
+      out.set(String(m.associatedDeviceSerialNumber).toUpperCase() + "|" + String(m.partnerId || "").toLowerCase(), { status: String(m.deviceStatus || ""), lastConn });
+    }
     return out;
   }
   // Cámaras de un vehículo (de la lista completa, que queda en memoria 10 min).

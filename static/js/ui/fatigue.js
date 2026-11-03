@@ -224,6 +224,7 @@
             const btn = html`<button className=${"btn small" + (on ? " primary" : "")} title=${!known ? "Abre el video en vivo de MyGeotab" : on ? "Cámara en línea" : "La cámara no figura en línea"} onClick=${e => { e.stopPropagation(); known ? setWatch({ drv: r.id, dev }) : GI.openLiveVideo(dev); }}>▶ En vivo</button>`;
             return html`<td>${!dev ? html`<span className="small muted">–</span>` : !known ? btn : cs ? html`${btn}${on || unk ? null : html`<div className="small muted">sin conexión</div>`}` : html`<span className="small muted">sin cámara</span>`}</td>`; })()}
         </tr>`; })}</tbody></table></div>`}
+    ${cams && cams.size && cams.diag && cams.diag.statusErr ? html`<p className="small muted">Cámaras: ${cams.size} vehículos con cámara; el estado de conexión no está disponible (${cams.diag.statusErr}).</p>` : null}
     ${cams && !cams.size ? html`<p className="small muted">Cámaras: ${camErr ? "Geotab Video no respondió (" + camErr + ")" : cams.diag ? "Geotab Video devolvió " + cams.diag.total + " cámara(s), ninguna asociada a un vehículo" + (cams.diag.keys ? " (campos: " + cams.diag.keys + ")" : "") : "sin datos"}. El botón ▶ En vivo abre el reproductor de MyGeotab de cada vehículo.</p>` : null}
     ${watch ? html`<${Modal} wide title=${"Video en vivo · " + drvName(view, watch.drv) + " · " + devName(view, watch.dev)} onClose=${() => setWatch(null)}>
       <${LiveCam} api=${api} view=${view} dev=${watch.dev} auto=${true} />
@@ -1406,7 +1407,7 @@ ${restFrom != null && restFrom < j.s ? (() => { const g = GAP[restKind(j, fz)]; 
             <button className="btn primary" onClick=${() => GI.openLiveVideo(dev)}>Ver en vivo en MyGeotab ↗</button></div>`
         : html`<div className="ft-cam-bar">
             ${cams.length > 1 ? html`<select value=${sel || ""} onChange=${e => { setSel(e.target.value); }}>${cams.map(c => html`<option key=${c.serial} value=${c.serial}>${c.name}${c.vendor ? " · " + c.vendor : ""} (${c.status || "estado desconocido"})</option>`)}</select>`
-              : html`<span className="small">Cámara ${cam.name}${cam.vendor ? " · " + cam.vendor : ""} ${cam.status ? html` · <b className=${/online/i.test(cam.status) ? "ft-cam-on" : "muted"}>${/online/i.test(cam.status) ? "en línea" : cam.status.toLowerCase()}</b>` : null}</span>`}
+              : html`<span className="small">Cámara ${cam.name}${cam.vendor ? " · " + cam.vendor : ""} ${cam.status ? html` · <b className=${/online/i.test(cam.status) ? "ft-cam-on" : "muted"}>${/online/i.test(cam.status) ? "en línea" : cam.status.toLowerCase()}</b>` : null}${cam.lastConn && !/online/i.test(cam.status) ? html` <span className="muted">· última conexión ${when(Date.parse(cam.lastConn))}</span>` : null}</span>`}
             ${ext ? html`<button className="btn primary" onClick=${() => GI.openLiveVideo(dev)}>Ver en vivo en MyGeotab ↗</button>`
               : !go ? html`<button className="btn primary" disabled=${!src} onClick=${() => setGo(true)}>Ver en vivo aquí</button>` : html`<button className="btn small" onClick=${() => setGo(false)}>Cortar el video</button>`}
           </div>
