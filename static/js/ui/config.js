@@ -398,6 +398,7 @@
           <label>Volver a avisar si el índice sube (puntos)${num(["fatigue_alerts", "re_rise"], al.re_rise, { min: 1, step: 1 })}</label>
           <label>… o si pasan (horas) desde la última intervención${num(["fatigue_alerts", "re_hours"], al.re_hours, { min: 0.25, step: 0.25 })}</label>
           <label>Si no contesta, volver a avisar a los (min)${num(["fatigue_alerts", "noanswer_min"], al.noanswer_min, { min: 1, step: 1 })}</label>
+          <label>Sonido mientras haya una alerta sin atender: cada (segundos, 0 = sin sonido)${num(["fatigue_alerts", "beep_sec"], al.beep_sec, { min: 0, step: 5 })}</label>
           <label>Usuarios que reciben las alertas (separados por coma; vacío = todos los supervisores)<input type="text" disabled=${ro} value=${al.users || ""} onChange=${e => set(["fatigue_alerts", "users"], e.target.value)} placeholder="operaciones@empresa.com" /></label>
         </div>`; })()}
         <p className="muted small">Solo avisa por conductores en jornada. En la alerta crítica la nota es obligatoria. El botón "Ver cámara en vivo" abre el mapa de MyGeotab con el vehículo seleccionado; el video en vivo se abre desde su panel (Surfsight o GO Focus), con los permisos de cada usuario.</p>

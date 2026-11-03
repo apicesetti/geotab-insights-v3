@@ -517,7 +517,7 @@
 
 
   // ---------- Alertas con intervención obligatoria ----------
-  const ALERT_DEFAULT = { on: false, warn: 90, crit: 100, re_rise: 10, re_hours: 1, noanswer_min: 15, users: "" };
+  const ALERT_DEFAULT = { on: false, warn: 90, crit: 100, re_rise: 10, re_hours: 1, noanswer_min: 15, users: "", beep_sec: 20 };
   function alertConfig(settings) { return Object.assign({}, ALERT_DEFAULT, (settings && settings.fatigue_alerts) || {}); }
   const ALERT_RANK = { alerta: 1, critica: 2 };
   // items: conductores en jornada [{ drv, key, F, ... }]; acks: intervenciones registradas

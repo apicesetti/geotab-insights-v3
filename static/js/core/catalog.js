@@ -208,7 +208,7 @@
       drivers: { min_km_ranking: 300, exclude_unknown: false },
       // Fatiga: valores de referencia, se ajustan a la política de la empresa.
       fatigue: { max_drive_day: 9, max_span: 12, min_rest: 8, max_continuous: 4, max_days_row: 6, rest_split: 4, fi_mod: 80, fi_high: 100, micro_km: 0.5, micro_min: 10 },
-      fatigue_alerts: { on: false, warn: 90, crit: 100, re_rise: 10, re_hours: 1, noanswer_min: 15, users: "" },
+      fatigue_alerts: { on: false, warn: 90, crit: 100, re_rise: 10, re_hours: 1, noanswer_min: 15, users: "", beep_sec: 20 },
       // Gravedad: ponderar cada infracción por su duración (opcional).
       severity: { by_duration: false, per_minute: 0.5, max: 3, long_minutes: 1 },
       ui: { default_period: "3m", default_granularity: "week", milestone_window_days: 28 },

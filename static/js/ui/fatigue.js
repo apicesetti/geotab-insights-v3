@@ -1344,10 +1344,11 @@ ${restFrom != null && restFrom < j.s ? (() => { const g = GAP[restKind(j, fz)]; 
       const t0 = document.title.replace(/^⚠ Alerta de fatiga · /, "");
       if (!due.length) { document.title = t0; return; }
       document.title = "⚠ Alerta de fatiga · " + t0;
-      beep();
-      const b = setInterval(beep, 20000);
-      return () => { clearInterval(b); document.title = t0; };
-    }, [due.length, cur && cur.drv]);
+      const sec = +cfg.beep_sec || 0; // 0 = sin sonido
+      if (sec > 0) beep();
+      const b = sec > 0 ? setInterval(beep, Math.max(3, sec) * 1000) : null;
+      return () => { if (b) clearInterval(b); document.title = t0; };
+    }, [due.length, cur && cur.drv, cfg.beep_sec]);
     if (!cur) return null;
     return html`<${AlertModal} key=${cur.drv + cur.key + cur.level} a=${cur} n=${due.length} i=${Math.min(idx, due.length - 1)} setIdx=${setIdx} view=${view} api=${api} userName=${userName} cfg=${cfg}
       onSaved=${ack => setState(st => { const acks = [...st.acks, ack]; return { ...st, acks, items: GI.alertsDue(st.items, acks, cfg, Date.now()) }; })} />`;
