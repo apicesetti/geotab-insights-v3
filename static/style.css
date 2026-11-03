@@ -1231,10 +1231,12 @@
 #gi3-root .ft-alert-note textarea { font: inherit; font-weight: 400; padding: 8px 10px; border: 1px solid var(--rule-strong); border-radius: 8px; resize: vertical; }
 #gi3-root .ft-alert-cam { flex-direction: column; align-items: stretch; }
 #gi3-root .ft-cam-bar { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; justify-content: space-between; }
-#gi3-root .ft-cam-frame { position: relative; width: 100%; max-width: 600px; align-self: center; aspect-ratio: 16 / 9; background: #111418; border-radius: 6px; overflow: hidden; }
+#gi3-root .ft-cam-frame { position: relative; width: 100%; max-width: 860px; align-self: center; background: #111418; border-radius: 6px; overflow: hidden; }
+#gi3-root .ft-cam-frame.gvp { height: min(620px, 72vh); }
+#gi3-root .ft-cam-frame.surf { max-width: 760px; overflow: visible; background: none; }
 #gi3-root .ft-cam-frame iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
 #gi3-root .ft-cam-on { color: #0b7a3e; }
 #gi3-root .ft-alert-cam > .btn.small { align-self: flex-start; }
 #gi3-root .ft-surf { display: flex; flex-direction: column; gap: 8px; }
 #gi3-root .ft-surf .ft-cam-bar .btn.small { margin-left: 4px; }
-#gi3-root .ft-cam-frame lytx-live-video { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+#gi3-root .ft-cam-frame lytx-live-video { display: block; width: 100%; }

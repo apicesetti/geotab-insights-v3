@@ -617,10 +617,12 @@ tr.ft-row-ident td { background: #fffbea; }
 .ft-alert-note textarea { font: inherit; font-weight: 400; padding: 8px 10px; border: 1px solid var(--rule-strong); border-radius: 8px; resize: vertical; }
 .ft-alert-cam { flex-direction: column; align-items: stretch; }
 .ft-cam-bar { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; justify-content: space-between; }
-.ft-cam-frame { position: relative; width: 100%; max-width: 600px; align-self: center; aspect-ratio: 16 / 9; background: #111418; border-radius: 6px; overflow: hidden; }
+.ft-cam-frame { position: relative; width: 100%; max-width: 860px; align-self: center; background: #111418; border-radius: 6px; overflow: hidden; }
+.ft-cam-frame.gvp { height: min(620px, 72vh); }
+.ft-cam-frame.surf { max-width: 760px; overflow: visible; background: none; }
 .ft-cam-frame iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
 .ft-cam-on { color: #0b7a3e; }
 .ft-alert-cam > .btn.small { align-self: flex-start; }
 .ft-surf { display: flex; flex-direction: column; gap: 8px; }
 .ft-surf .ft-cam-bar .btn.small { margin-left: 4px; }
-.ft-cam-frame lytx-live-video { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.ft-cam-frame lytx-live-video { display: block; width: 100%; }

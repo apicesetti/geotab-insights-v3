@@ -1438,7 +1438,7 @@ ${restFrom != null && restFrom < j.s ? (() => { const g = GAP[restKind(j, fz)]; 
         ${st.phase === "live" ? html`<button className="btn small" onClick=${() => stop()}>Cortar el video</button>`
           : html`<button className="btn primary" disabled=${st.phase === "starting"} onClick=${start}>${st.phase === "starting" ? "Conectando…" : st.phase === "paused" ? "Seguir viendo" : "Ver en vivo aquí"}</button>`}
       </div>
-      ${st.phase === "live" ? html`<div className="ft-cam-frame"><lytx-live-video key=${st.key + "-" + lens} auth-token=${st.token} imei=${imei} camera-id=${String(lens)} organization-id=${String(st.org)}></lytx-live-video></div>
+      ${st.phase === "live" ? html`<div className="ft-cam-frame surf"><lytx-live-video key=${st.key + "-" + lens} auth-token=${st.token} imei=${imei} camera-id=${String(lens)} organization-id=${String(st.org)}></lytx-live-video></div>
         <span className="small muted">Se corta solo a los ${SURF_MAX_S / 60} minutos para no consumir datos de más.</span>` : null}
       ${st.phase === "paused" ? html`<span className="small muted">El video se pausó a los ${SURF_MAX_S / 60} minutos.</span>` : null}
       ${st.phase === "error" ? html`<span className="small delta bad">No se pudo abrir el video acá: ${st.err}. Usá "Ver en vivo en MyGeotab".</span>` : null}
@@ -1478,7 +1478,7 @@ ${restFrom != null && restFrom < j.s ? (() => { const g = GAP[restKind(j, fz)]; 
               : !go ? html`<button className="btn primary" disabled=${!src} onClick=${() => setGo(true)}>Ver en vivo aquí</button>` : html`<button className="btn small" onClick=${() => setGo(false)}>Cortar el video</button>`}
           </div>
           ${ext ? html`<${SurfsightLive} key=${cam.serial} api=${api} view=${view} dev=${dev} cam=${cam} auto=${auto} />` : null}
-          ${go && src && !ext ? html`<div className="ft-cam-frame"><iframe ref=${frame} key=${src} src=${src} title="Video en vivo" allow="autoplay; fullscreen"></iframe></div>` : null}
+          ${go && src && !ext ? html`<div className="ft-cam-frame gvp"><iframe ref=${frame} key=${src} src=${src} title="Video en vivo" allow="autoplay; fullscreen"></iframe></div>` : null}
           ${cam && cam.status && !/online/i.test(cam.status) ? html`<span className="small muted">La cámara no figura en línea: el video en vivo necesita el vehículo encendido y la cámara conectada.</span>` : null}`}
       ${!ext ? html`<button className="btn small" onClick=${() => GI.openLiveVideo(dev)}>Abrir el video en MyGeotab ↗</button>` : null}
     </div>`;
