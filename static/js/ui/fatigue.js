@@ -1296,12 +1296,14 @@ ${restFrom != null && restFrom < j.s ? (() => { const g = GAP[restKind(j, fz)]; 
     ["otra", "Otra (detallar en la nota)"],
   ];
   const ALERT_POLL_MS = 3 * 60000;
-  // Mapa de MyGeotab con el vehículo seleccionado (desde ahí se abre "Video en vivo" de la cámara).
-  GI.openLiveMap = function (devId) {
-    const hash = "map,liveVehicleIds:!('" + String(devId).replace(/!/g, "!!").replace(/'/g, "!'") + "')";
+  // Reproductor de video en vivo de MyGeotab (Activos → Cámaras) para un vehículo: sirve para
+  // Surfsight y GO Focus, con los permisos, el aviso de consumo de datos y la auditoría de MyGeotab.
+  // Se abre en otra pestaña para que esta siga vigilando las alertas.
+  GI.openLiveVideo = function (devId) {
     const base = GI.MG_BASE_URL || window.location.href.split("#")[0];
-    window.open(base + "#" + hash, "_blank", "noopener");
+    window.open(base + "#inventory,livestreamDeviceId:" + encodeURIComponent(devId) + ",tab:cameras", "_blank", "noopener");
   };
+  GI.openLiveMap = GI.openLiveVideo;
   function beep() {
     try {
       const C = window.AudioContext || window.webkitAudioContext; if (!C) return;
@@ -1375,7 +1377,7 @@ ${restFrom != null && restFrom < j.s ? (() => { const g = GAP[restKind(j, fz)]; 
     const frame = useRef(null);
     useEffect(() => {
       let off = false;
-      GI.loadCameras(api, dev).then(c => { if (off) return; setCams(c); const on = c.find(x => /online/i.test(x.status)) || c[0]; setSel(on ? on.serial : null); if (auto && on && /online/i.test(on.status)) setGo(true); })
+      GI.loadCameras(api, dev).then(c => { if (off) return; setCams(c); const on = c.find(x => /online/i.test(x.status)) || c[0]; setSel(on ? on.serial : null); if (auto && on && /online/i.test(on.status) && !/surfsight|lytx/i.test(on.vendor)) setGo(true); })
         .catch(e => { if (!off) { setCams([]); setErr(String((e && e.message) || e)); } });
       return () => { off = true; };
     }, [dev]);
@@ -1389,17 +1391,22 @@ ${restFrom != null && restFrom < j.s ? (() => { const g = GAP[restKind(j, fz)]; 
       return () => window.removeEventListener("message", h);
     }, [go, src]);
     const cam = cams && cams.find(c => c.serial === sel);
+    // Surfsight necesita un token de Surfsight que solo maneja MyGeotab: su video se abre en el reproductor
+    // de MyGeotab. Las cámaras de Geotab (GO Focus) se ven acá con el Video Player de Geotab.
+    const ext = cam && /surfsight|lytx/i.test(cam.vendor);
     return html`<div className="ft-alert-cam">
       ${cams == null ? html`<span className="small muted">Buscando la cámara de ${devName(view, dev)}…</span>`
         : !cams.length ? html`<span className="small muted">${err ? "No se pudo consultar la cámara (" + err + ")." : "Este vehículo no tiene una cámara asociada en Geotab Video."}</span>`
         : html`<div className="ft-cam-bar">
             ${cams.length > 1 ? html`<select value=${sel || ""} onChange=${e => { setSel(e.target.value); }}>${cams.map(c => html`<option key=${c.serial} value=${c.serial}>${c.name}${c.vendor ? " · " + c.vendor : ""} (${c.status || "estado desconocido"})</option>`)}</select>`
               : html`<span className="small">Cámara ${cam.name}${cam.vendor ? " · " + cam.vendor : ""} · <b className=${/online/i.test(cam.status) ? "ft-cam-on" : "muted"}>${/online/i.test(cam.status) ? "en línea" : cam.status ? cam.status.toLowerCase() : "estado desconocido"}</b></span>`}
-            ${!go ? html`<button className="btn primary" disabled=${!src} onClick=${() => setGo(true)}>Ver en vivo aquí</button>` : html`<button className="btn small" onClick=${() => setGo(false)}>Cortar el video</button>`}
+            ${ext ? html`<button className="btn primary" onClick=${() => GI.openLiveVideo(dev)}>Ver en vivo en MyGeotab ↗</button>`
+              : !go ? html`<button className="btn primary" disabled=${!src} onClick=${() => setGo(true)}>Ver en vivo aquí</button>` : html`<button className="btn small" onClick=${() => setGo(false)}>Cortar el video</button>`}
           </div>
-          ${go && src ? html`<div className="ft-cam-frame"><iframe ref=${frame} key=${src} src=${src} title="Video en vivo" allow="autoplay; fullscreen"></iframe></div>` : null}
+          ${ext ? html`<span className="small muted">Las cámaras Surfsight se ven en el reproductor de MyGeotab, que se abre en otra pestaña (esta sigue vigilando las alertas).</span>` : null}
+          ${go && src && !ext ? html`<div className="ft-cam-frame"><iframe ref=${frame} key=${src} src=${src} title="Video en vivo" allow="autoplay; fullscreen"></iframe></div>` : null}
           ${cam && !/online/i.test(cam.status) ? html`<span className="small muted">La cámara no figura en línea: el video en vivo necesita el vehículo encendido y la cámara conectada.</span>` : null}`}
-      <button className="btn small" onClick=${() => GI.openLiveMap(dev)}>Abrir en el mapa de MyGeotab ↗</button>
+      ${!ext ? html`<button className="btn small" onClick=${() => GI.openLiveVideo(dev)}>Abrir el video en MyGeotab ↗</button>` : null}
     </div>`;
   }
 

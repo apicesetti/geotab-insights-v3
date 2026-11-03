@@ -401,7 +401,7 @@
           <label>Sonido mientras haya una alerta sin atender: cada (segundos, 0 = sin sonido)${num(["fatigue_alerts", "beep_sec"], al.beep_sec, { min: 0, step: 5 })}</label>
           <label>Usuarios que reciben las alertas (separados por coma; vacío = todos los supervisores)<input type="text" disabled=${ro} value=${al.users || ""} onChange=${e => set(["fatigue_alerts", "users"], e.target.value)} placeholder="operaciones@empresa.com" /></label>
         </div>`; })()}
-        <p className="muted small">Solo avisa por conductores en jornada. En la alerta crítica la nota es obligatoria. El botón "Ver cámara en vivo" abre el mapa de MyGeotab con el vehículo seleccionado; el video en vivo se abre desde su panel (Surfsight o GO Focus), con los permisos de cada usuario.</p>
+        <p className="muted small">Solo avisa por conductores en jornada. En la alerta crítica la nota es obligatoria. El video en vivo de las cámaras GO Focus se ve dentro de la alerta; el de las Surfsight se abre en el reproductor de MyGeotab (Activos → Cámaras) en otra pestaña, con los permisos de cada usuario.</p>
       <//>
       <${Panel} title="Gravedad de las infracciones"
         hint="Una infracción que dura más (por ejemplo un exceso de velocidad de 3 minutos) es más peligrosa que una de segundos. Si activás la ponderación, cada minuto de duración suma un porcentaje del peso de la categoría, con un tope. Las infracciones instantáneas (frenadas, giros) no cambian.">
