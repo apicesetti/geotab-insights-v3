@@ -162,7 +162,7 @@
     useEffect(() => {
       let off = false;
       if (!api || !GI.loadAllCameras) return;
-      GI.loadAllCameras(api, view.model.devices).then(m => { if (!off) setCams(m); }).catch(() => { if (!off) setCams(new Map()); });
+      GI.loadAllCameras(api, view.model.devices).then(m => { if (!off) setCams(m); }).catch(e => { console.warn("[Geotab Insights] cámaras", e); if (!off) setCams(new Map()); });
       return () => { off = true; };
     }, [api]);
     const fz = res.limits, now = live.now;
@@ -202,7 +202,7 @@
       </div>
       <div className="ft-filters"><${Segmented} value=${all ? "all" : "risk"} onChange=${v => setAll(v === "all")} options=${[{ value: "risk", label: "Con riesgo (" + rows.filter(r => r.proj.level !== "ok").length + ")" }, { value: "all", label: "Todos (" + rows.length + ")" }]} /></div>
       ${!show.length ? html`<p className="muted">${live.loading ? "Calculando…" : "Ningún conductor activo se acerca a un índice alto."}</p>` : html`<div className="table-wrap"><table className="tbl ft-track">
-        <thead><tr><th>Conductor</th><th>Estado</th><th className="num">Índice ahora</th><th>Últimas 72 h y próximas 16 h</th><th className="num">Llega a ${fz.fi_high}</th><th>Qué hacer</th>${cams && cams.size ? html`<th>Cámara</th>` : null}</tr></thead>
+        <thead><tr><th>Conductor</th><th>Estado</th><th className="num">Índice ahora</th><th>Últimas 72 h y próximas 16 h</th><th className="num">Llega a ${fz.fi_high}</th><th>Qué hacer</th><th>Cámara</th></tr></thead>
         <tbody>${show.map(r => { const p = r.proj; return html`<tr key=${r.id} className=${"ft-track-" + p.level} onClick=${() => onDriver(r.id)} style=${{ cursor: "pointer" }}>
           <td><${DriverLink} view=${view} id=${r.id} onDriver=${onDriver} /><div className="small muted">${r.last.devices.map(d => devName(view, d)).join(", ")}</div></td>
           <td className="small">${p.open ? html`${r.prog && r.prog.driving ? html`<span className="ft-live">● Manejando</span>` : "En jornada, parado hace " + dur(r.prog ? r.prog.sinceLast / 60 : 0)}
@@ -216,8 +216,12 @@
           <td><${Spark} entry=${r.entry} proj=${p} fz=${fz} now=${now} off=${r.off} /></td>
           <td className="num">${p.crossAt && p.crossAt > now ? html`<b>${(GI.dayKey(p.crossAt) !== GI.dayKey(now) ? dshort(p.crossAt) + " " : "") + hm(p.crossAt)}</b>${p.open ? "" : html`<div className="small muted">en su próximo turno</div>`}` : p.open && p.Fnow >= fz.fi_high ? html`<b className="delta bad">ya</b>` : html`<span className="muted">–</span>`}</td>
           <td><span className=${"ft-act " + p.level}>${p.action}</span>${r.off ? html`<div className="small">Confirmar con el conductor o la base si descansó</div>` : null}</td>
-          ${cams && cams.size ? (() => { const dev = (r.last.trips[r.last.trips.length - 1] || {}).d, cs = dev && cams.get(dev), on = cs && cs.some(c => /online/i.test(c.status));
-            return html`<td>${cs ? html`<button className=${"btn small" + (on ? " primary" : "")} title=${on ? "Cámara en línea" : "La cámara no figura en línea"} onClick=${e => { e.stopPropagation(); setWatch({ drv: r.id, dev }); }}>▶ En vivo</button>${on ? null : html`<div className="small muted">sin conexión</div>`}` : html`<span className="small muted">–</span>`}</td>`; })() : null}
+          ${(() => {
+            // si Geotab Video no informa las cámaras (o no se pudo consultar), el botón se muestra igual
+            // y abre el reproductor de MyGeotab, que sabe qué cámara tiene cada vehículo
+            const dev = (r.last.trips[r.last.trips.length - 1] || {}).d, known = cams && cams.size > 0, cs = dev && known && cams.get(dev), on = cs && cs.some(c => /online/i.test(c.status));
+            const btn = html`<button className=${"btn small" + (on ? " primary" : "")} title=${!known ? "Abre el video en vivo de MyGeotab" : on ? "Cámara en línea" : "La cámara no figura en línea"} onClick=${e => { e.stopPropagation(); known ? setWatch({ drv: r.id, dev }) : GI.openLiveVideo(dev); }}>▶ En vivo</button>`;
+            return html`<td>${!dev ? html`<span className="small muted">–</span>` : !known ? btn : cs ? html`${btn}${on ? null : html`<div className="small muted">sin conexión</div>`}` : html`<span className="small muted">sin cámara</span>`}</td>`; })()}
         </tr>`; })}</tbody></table></div>`}
     ${watch ? html`<${Modal} wide title=${"Video en vivo · " + drvName(view, watch.drv) + " · " + devName(view, watch.dev)} onClose=${() => setWatch(null)}>
       <${LiveCam} api=${api} view=${view} dev=${watch.dev} auto=${true} />
@@ -1396,7 +1400,8 @@ ${restFrom != null && restFrom < j.s ? (() => { const g = GAP[restKind(j, fz)]; 
     const ext = cam && /surfsight|lytx/i.test(cam.vendor);
     return html`<div className="ft-alert-cam">
       ${cams == null ? html`<span className="small muted">Buscando la cámara de ${devName(view, dev)}…</span>`
-        : !cams.length ? html`<span className="small muted">${err ? "No se pudo consultar la cámara (" + err + ")." : "Este vehículo no tiene una cámara asociada en Geotab Video."}</span>`
+        : !cams.length ? html`<div className="ft-cam-bar"><span className="small muted">${err ? "No se pudo consultar la cámara en Geotab Video." : "Geotab Video no informa una cámara para este vehículo."}</span>
+            <button className="btn primary" onClick=${() => GI.openLiveVideo(dev)}>Ver en vivo en MyGeotab ↗</button></div>`
         : html`<div className="ft-cam-bar">
             ${cams.length > 1 ? html`<select value=${sel || ""} onChange=${e => { setSel(e.target.value); }}>${cams.map(c => html`<option key=${c.serial} value=${c.serial}>${c.name}${c.vendor ? " · " + c.vendor : ""} (${c.status || "estado desconocido"})</option>`)}</select>`
               : html`<span className="small">Cámara ${cam.name}${cam.vendor ? " · " + cam.vendor : ""} · <b className=${/online/i.test(cam.status) ? "ft-cam-on" : "muted"}>${/online/i.test(cam.status) ? "en línea" : cam.status ? cam.status.toLowerCase() : "estado desconocido"}</b></span>`}
