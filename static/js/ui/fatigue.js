@@ -1387,15 +1387,20 @@ ${restFrom != null && restFrom < j.s ? (() => { const g = GAP[restKind(j, fz)]; 
   const SURF_LENSES = { 1: "Camino", 2: "Cabina", 51: "Auxiliar 1", 52: "Auxiliar 2", 53: "Auxiliar 3", 54: "Auxiliar 4" };
   const SURF_UI = "https://ui-components.surfsight.net/latest/build/cloud-ui-components.esm.js";
   const SURF_MAX_S = 180;
+  // Carga del componente de Surfsight. Si falla o no responde, se puede reintentar (con otra URL para
+  // que el navegador no reuse un intento fallido) y el error dice qué pasó.
   function loadSurfsightUi() {
     if (window.customElements && customElements.get("lytx-live-video")) return Promise.resolve();
     if (!loadSurfsightUi.p) {
+      loadSurfsightUi.n = (loadSurfsightUi.n || 0) + 1;
       loadSurfsightUi.p = new Promise((ok, ko) => {
-        const sc = document.createElement("script"); sc.type = "module"; sc.src = SURF_UI;
-        sc.onerror = () => { loadSurfsightUi.p = null; ko(new Error("no se pudo cargar el reproductor de Surfsight")); };
+        const fail = msg => { loadSurfsightUi.p = null; ko(new Error(msg)); };
+        const sc = document.createElement("script"); sc.type = "module";
+        sc.src = SURF_UI + (loadSurfsightUi.n > 1 ? "?r=" + Date.now() : "");
+        sc.onerror = () => fail("no se pudo descargar el reproductor de Surfsight (ui-components.surfsight.net)");
         document.head.appendChild(sc);
         customElements.whenDefined("lytx-live-video").then(ok);
-        setTimeout(() => ko(new Error("el reproductor de Surfsight no respondió")), 15000);
+        setTimeout(() => { if (!customElements.get("lytx-live-video")) fail("el reproductor de Surfsight se descargó pero no arrancó en 30 s"); }, 30000);
       });
     }
     return loadSurfsightUi.p;
