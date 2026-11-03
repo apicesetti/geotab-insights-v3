@@ -394,7 +394,18 @@
       let w = riskCats.has(catKey) ? (weights[catKey] != null ? weights[catKey] : 1) : 0;
       // Gravedad por duración: cada minuto suma un % del peso, con tope.
       if (w > 0 && sev.by_duration && ev.h > 0) w *= Math.min(sev.max || 3, 1 + (sev.per_minute || 0) * ev.h * 60);
-      const e = { ...ev, cat: catKey, dk, drv: drv || null, j, w };
+      // Excesos de velocidad: Leve / Medio / Grave por regla, y la duración sube un nivel.
+      let sv = null, svBase = null, svUp = false;
+      if (catKey === "velocidad") {
+        const ss = settings.speed_sev || {};
+        svBase = (ss.levels || {})[ev.rule] || "leve";
+        const min = (ev.h || 0) * 60;
+        sv = svBase;
+        if (svBase === "leve" && min > (ss.up_leve_min != null ? ss.up_leve_min : 5)) { sv = "medio"; svUp = true; }
+        else if (svBase === "medio" && min > (ss.up_medio_min != null ? ss.up_medio_min : 5)) { sv = "grave"; svUp = true; }
+        if (ss.weigh && w > 0) w *= ((ss.mult || {})[sv] || 1);
+      }
+      const e = { ...ev, cat: catKey, dk, drv: drv || null, j, w, sev: sv, sevBase: svBase, sevUp: svUp };
       events.push(e);
       const c = cell(ev.d, dk);
       c.ev[catKey] = (c.ev[catKey] || 0) + 1;

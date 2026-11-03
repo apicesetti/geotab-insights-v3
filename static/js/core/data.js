@@ -686,6 +686,35 @@
     return out;
   }
 
+  // Límites de velocidad de las reglas (valores "más de X" de su condición), por regla.
+  async function loadRuleLimits(api, ruleIds) {
+    const ids = [...new Set(ruleIds)].filter(Boolean);
+    const out = new Map();
+    if (!ids.length) return out;
+    const res = await api.multiCall(ids.map(id => ["Get", { typeName: "Rule", search: { id } }]));
+    ids.forEach((id, i) => {
+      const r = (res[i] || [])[0];
+      const vals = [];
+      const walk = c => { if (!c || typeof c !== "object") return; if (/IsValueMoreThan/.test(c.conditionType || "") && c.value > 0) vals.push(+c.value); (c.children || []).forEach(walk); };
+      walk(r && r.condition);
+      out.set(id, [...new Set(vals)].sort((a, b) => a - b));
+    });
+    return out;
+  }
+  // Velocidad real de un evento: GPS del vehículo mientras duró (máxima y trazado).
+  async function loadEventSpeed(api, ev) {
+    const from = ev.t - 5000, to = ev.t + Math.max(30, (ev.h || 0) * 3600) * 1000 + 5000;
+    const recs = (await api.call("Get", { typeName: "LogRecord", resultsLimit: 5000,
+      search: { deviceSearch: { id: ev.d }, fromDate: new Date(from).toISOString(), toDate: new Date(to).toISOString() } })) || [];
+    let max = null, at = null;
+    const pts = [];
+    for (const r of recs) {
+      if (r.latitude || r.longitude) pts.push([r.latitude, r.longitude]);
+      if (r.speed != null && (max == null || r.speed > max)) { max = r.speed; at = new Date(r.dateTime).getTime(); }
+    }
+    return { max, at, pts, n: recs.length };
+  }
+
   // Fatiga "Ahora": viajes de las últimas horas (sin caché, toda la flota
   // visible) y estado en vivo de cada vehículo (¿está manejando? ¿desde cuándo?).
   async function loadRecentTrips(api, hours) {
@@ -806,7 +835,7 @@
   }
 
   Object.assign(GI, {
-    loadCameras, loadAllCameras, surfsightToken, surfsightLenses, surfsightConsumption, loadRecentTrips, loadDriveStatus, loadDriverChanges,
+    loadRuleLimits, loadEventSpeed, loadCameras, loadAllCameras, surfsightToken, surfsightLenses, surfsightConsumption, loadRecentTrips, loadDriveStatus, loadDriverChanges,
     loadCatalogs, loadZones, loadZoneTypes, loadPeriod, loadFuel, loadEventLocations, loadTrace, clearCache,
     _idbGetMany: idbGetMany, _idbPutMany: idbPutMany,
     _compactTrips: compactTrips, _compactExceptions: compactExceptions, _compactCounter: compactCounter, _loadFuelBoundaries: loadFuelBoundaries, _missingRuns: missingRuns, _getRangeMulti: getRangeMulti,

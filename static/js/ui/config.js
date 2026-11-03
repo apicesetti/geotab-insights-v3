@@ -56,7 +56,7 @@
       objetivos: html`<${TargetsSection} draft=${draft} set=${set} ro=${ro} model=${model} />`,
       categorias: html`<${CategoriesSection} draft=${draft} set=${set} ro=${ro} />`,
       recorridos: html`<${RoutesSection} api=${api} draft=${draft} set=${set} ro=${ro} />`,
-      fatiga: html`<${FatigueSection} draft=${draft} set=${set} ro=${ro} />`,
+      fatiga: html`<${FatigueSection} draft=${draft} set=${set} ro=${ro} />${GI.BUILD === "beta" || /\/dev\//.test(location.pathname) ? html`<${SpeedSevSection} draft=${draft} set=${set} ro=${ro} catalogs=${catalogs} api=${api} model=${model} />` : null}`,
       referencias: html`<${ReferenceSection} draft=${draft} set=${set} ro=${ro} model=${model} benchmark=${benchmark} onPublish=${onPublishBenchmark} mgGroups=${mgGroups} groups=${groups} />`,
       alcance: html`<${ScopeSection} draft=${draft} set=${set} groups=${groups} ro=${ro} model=${model} />`,
       general: html`<${GeneralSection} draft=${draft} set=${set} ro=${ro} />`,
@@ -362,6 +362,53 @@
         ${msg ? html`<p className=${"msg " + msg.tone}>${msg.text}</p>` : null}
       <//>
     </div>`;
+  }
+
+
+  // ---------- Gravedad de los excesos de velocidad (Mapa de calor) ----------
+  const SEV_LABEL = { leve: "Leve", medio: "Medio", grave: "Grave" };
+  function suggestSev(name) {
+    const n = String(name || "").toLowerCase();
+    if (/grave|extrem|cr[ií]tic|excesiva/.test(n)) return "grave";
+    if (/medio|moderad/.test(n)) return "medio";
+    if (/leve/.test(n)) return "leve";
+    return null;
+  }
+  function SpeedSevSection({ draft, set, ro, catalogs, api, model }) {
+    const ss = Object.assign({ levels: {}, up_leve_min: 5, up_medio_min: 5, weigh: false, mult: { leve: 1, medio: 1.5, grave: 2.5 } }, draft.speed_sev || {});
+    const map = draft.rule_mapping || {};
+    const rules = (catalogs.rules || []).filter(r => map[r.id] === "velocidad").sort((a, b) => a.name.localeCompare(b.name));
+    const [limits, setLimits] = useState(null);
+    useEffect(() => {
+      let off = false;
+      if (!rules.length || !GI.loadRuleLimits) return;
+      GI.loadRuleLimits(api, rules.map(r => r.id)).then(l => { if (!off) setLimits(l); }).catch(() => { if (!off) setLimits(new Map()); });
+      return () => { off = true; };
+    }, [rules.map(r => r.id).join(",")]);
+    const count = useMemo(() => { const c = new Map(); for (const e of (model && model.events) || []) if (e.cat === "velocidad") c.set(e.rule, (c.get(e.rule) || 0) + 1); return c; }, [model]);
+    const setLevel = (id, v) => set(["speed_sev", "levels"], { ...(ss.levels || {}), [id]: v || undefined });
+    const sugg = rules.filter(r => !ss.levels[r.id] && suggestSev(r.name));
+    const num = (path, v, props) => html`<input type="number" disabled=${ro} value=${v} onChange=${e => set(path, +e.target.value)} ...${props || {}} />`;
+    return html`<${Panel} title="Gravedad de los excesos de velocidad"
+      hint="Cada regla de la categoría Exceso de velocidad tiene un nivel según cuánto se pasa del límite. Si el exceso dura mucho, sube un nivel. Se usa en el Mapa de calor y, si lo activás, en el índice de riesgo. Las reglas escalonadas (por ejemplo +10, +20 y +30 sobre el límite) las crea un administrador en MyGeotab.">
+      <div className="form two-col">
+        <label>Un exceso Leve pasa a Medio si dura más de (min)${num(["speed_sev", "up_leve_min"], ss.up_leve_min, { min: 0, step: 1 })}</label>
+        <label>Un exceso Medio pasa a Grave si dura más de (min)${num(["speed_sev", "up_medio_min"], ss.up_medio_min, { min: 0, step: 1 })}</label>
+        <label className="inline"><input type="checkbox" disabled=${ro} checked=${!!ss.weigh} onChange=${e => set(["speed_sev", "weigh"], e.target.checked)} /> Pesar más en el índice de riesgo (Leve ×${GI.fmtNum(ss.mult.leve, 1)} · Medio ×${GI.fmtNum(ss.mult.medio, 1)} · Grave ×${GI.fmtNum(ss.mult.grave, 1)})</label>
+      </div>
+      ${!rules.length ? html`<p className="muted small">No hay reglas asignadas a la categoría Exceso de velocidad (Configuración → Reglas y objetivos).</p>` : html`
+        ${sugg.length && !ro ? html`<p className="small"><button className="btn small" onClick=${() => { const lv = { ...(ss.levels || {}) }; for (const r of sugg) lv[r.id] = suggestSev(r.name); set(["speed_sev", "levels"], lv); }}>Aplicar el nivel sugerido a ${sugg.length} regla(s) sin asignar</button></p>` : null}
+        <div className="table-wrap"><table className="tbl">
+          <thead><tr><th>Regla de velocidad (MyGeotab)</th><th>Límite</th><th>Nivel</th><th className="num">Excesos en el período</th></tr></thead>
+          <tbody>${rules.map(r => { const lv = ss.levels[r.id] || "", sg = suggestSev(r.name), lim = limits && limits.get(r.id);
+            return html`<tr key=${r.id} className=${lv ? "" : "row-warn"}>
+              <td>${r.name}</td><td>${limits == null ? "…" : lim && lim.length ? lim.join(" / ") + " km/h" : "–"}</td>
+              <td><select disabled=${ro} value=${lv} onChange=${e => setLevel(r.id, e.target.value)} aria-label=${"Nivel de " + r.name}>
+                <option value="">Sin asignar (cuenta como Leve)${sg ? " · sugerido " + SEV_LABEL[sg] : ""}</option>
+                <option value="leve">Leve</option><option value="medio">Medio</option><option value="grave">Grave</option></select></td>
+              <td className="num">${GI.fmtNum(count.get(r.id) || 0, 0)}</td></tr>`; })}</tbody></table></div>
+        <p className="muted small">Una sola regla para todos los excesos no permite separar 111 de 140 km/h: solo la duración la sube de nivel. El límite se lee de la condición de cada regla ("más de X km/h"); si una regla tiene varios, se muestran todos.</p>`}
+    <//>`;
   }
 
   // ---------- Fatiga y gravedad ----------

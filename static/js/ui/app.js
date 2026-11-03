@@ -12,22 +12,22 @@
     ["seguridad", "Seguridad"],
     ["conductores", "Conductores"],
     ["recorridos", "Recorridos"],
+    ["mapa", "Mapa de calor"],
     ["fatiga", "Fatiga"],
-    ["exposicion", "Exposición"],
     ["corredores", "Corredores"],
     ["hitos", "Hitos"],
     ["config", "Configuración"],
   ];
 
   // Pestañas que por ahora solo se publican en la BETA (en la versión normal no aparecen).
-  const BETA_ONLY = new Set(["corredores"]);
+  const BETA_ONLY = new Set(["corredores", "mapa"]);
   const showBetaTabs = () => GI.BUILD === "beta" || /\/dev\//.test(window.location.pathname);
 
   // Config guardada + campos nuevos que pudieran faltar (versiones futuras).
   function mergeDefaults(saved, defaults) {
     if (!saved) return defaults;
     const out = { ...defaults, ...saved };
-    for (const k of ["service", "fuel", "journeys", "drivers", "ui", "fatigue", "severity", "fatigue_alerts"]) out[k] = { ...defaults[k], ...(saved[k] || {}) };
+    for (const k of ["service", "fuel", "journeys", "drivers", "ui", "fatigue", "severity", "fatigue_alerts", "speed_sev"]) out[k] = { ...defaults[k], ...(saved[k] || {}) };
     out.service.group_ids = { ...defaults.service.group_ids, ...((saved.service || {}).group_ids || {}) };
     out.category_weights = { ...defaults.category_weights, ...(saved.category_weights || {}) };
     out.categories = saved.categories && saved.categories.length ? saved.categories : defaults.categories;
@@ -77,6 +77,7 @@
     const [loading, setLoading] = useState(null);
     const [tab, setTab] = useState("resumen");
     const [fatigueDrv, setFatigueDrv] = useState(null); // conductor a abrir en Fatiga
+    const [mapPreset, setMapPreset] = useState(null); // filtro con el que se abre el Mapa de calor
     const [detail, setDetail] = useState(null);
     const loadId = useRef(0);
     const zonesAreaRef = useRef(false);
@@ -263,6 +264,8 @@
       load(settings, p, catalogs);
     }
 
+    const mapOn = !!GI.MapTab && !driverMode && showBetaTabs();
+    const openMap = p => { setDetail(null); setMapPreset(p); setTab("mapa"); };
     if (phase === "init") return html`<div className="splash"><div className="spinner"></div>Cargando configuración de ${database}…</div>`;
     if (phase === "error") return html`<div className="splash"><${Info} tone="error">${error}<//></div>`;
 
@@ -341,7 +344,9 @@
           : tab === "combustible" ? html`<${GI.FuelTab} view=${view} onVehicle=${id => setDetail({ type: "v", id })} />`
           : tab === "seguridad" ? html`<${GI.SafetyTab} view=${view} onVehicle=${id => setDetail({ type: "v", id })} onDriver=${(id, mode) => setDetail({ type: "d", id, mode: mode || "safety" })} />`
           : tab === "conductores" ? html`<${GI.DriversTab} view=${view} onDriver=${id => setDetail({ type: "d", id })} />`
-          : tab === "recorridos" ? html`<${GI.RoutesTab} view=${view} api=${api} />`
+          : tab === "recorridos" ? html`<${GI.RoutesTab} view=${view} api=${api} onMap=${mapOn ? openMap : null} />`
+          : tab === "mapa" ? html`<${GI.MapTab} view=${view} api=${api} preset=${mapPreset} onPresetUsed=${() => setMapPreset(null)} onDriver=${id => setDetail({ type: "d", id, mode: "safety" })}
+              period=${period} presets=${PRESETS} onPeriod=${applyPreset} />`
           : tab === "fatiga" ? (GI.FatigueTab ? html`<${GI.FatigueTab} view=${view} api=${api} userName=${userName} isAdmin=${isAdmin} onSaveSettings=${saveSettings} openDriverId=${fatigueDrv} onOpened=${() => setFatigueDrv(null)} onDriver=${id => setDetail({ type: "d", id, mode: "safety" })} />` : html`<${Info} tone="warn">Se está terminando de cargar la nueva versión. Recargá la página (Ctrl + F5).<//>`)
           : tab === "exposicion" ? html`<${GI.ExposureTab} view=${view} onDriver=${id => setDetail({ type: "d", id })} />`
           : tab === "corredores" && showBetaTabs() ? (GI.RoadsTab ? html`<${GI.RoadsTab} view=${view} api=${api} database=${database} />` : html`<${Info} tone="warn">Se está terminando de cargar la nueva versión de Corredores. Recargá la página (Ctrl + F5).<//>`)
@@ -353,9 +358,9 @@
         <//>
         ${raw ? html`<footer className="foot">Datos del ${raw.fromKey} al ${raw.toKey}${raw.complete ? "" : " (completando el resto del período)"}: ${GI.fmtNum(raw.trips.length)} viajes y ${GI.fmtNum(raw.exceptions.length)} eventos, cargados en ${GI.fmtNum(raw.loadedMs / 1000, 1)} s.${model && model.excludedUnknown ? " Sin conductor identificado (excluidos por configuración): " + GI.fmtNum(model.excludedUnknown.trips) + " viajes, " + GI.fmtNum(model.excludedUnknown.km, 0) + " km y " + GI.fmtNum(model.excludedUnknown.events) + " eventos." : ""}</footer>` : null}
       </div>
-      ${detail && view && detail.type === "v" ? html`<${GI.VehicleDetail} view=${view} id=${detail.id} onClose=${() => setDetail(null)} />` : null}
+      ${detail && view && detail.type === "v" ? html`<${GI.VehicleDetail} view=${view} id=${detail.id} onClose=${() => setDetail(null)} onMap=${mapOn ? openMap : null} />` : null}
       ${detail && view && detail.type === "d" ? html`<${GI.DriverDetail} view=${view} id=${detail.id} mode=${detail.mode} onClose=${() => setDetail(null)}
-        onFatigue=${GI.FatigueTab && !driverMode ? id => { setDetail(null); setFatigueDrv(id); setTab("fatiga"); } : null} />` : null}
+        onFatigue=${GI.FatigueTab && !driverMode ? id => { setDetail(null); setFatigueDrv(id); setTab("fatiga"); } : null} onMap=${mapOn ? openMap : null} />` : null}
     </div>`;
   }
 

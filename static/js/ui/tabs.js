@@ -712,7 +712,7 @@
       ${rest > 0 ? html`<span className="muted small">+${rest} más</span>` : null}</span>`;
   }
 
-  function RoutesTab({ view, api }) {
+  function RoutesTab({ view, api, onMap }) {
     const s = view.settings.journeys;
     const [showNoZone, setShowNoZone] = useState(false);
     const [route, setRoute] = useState(null);
@@ -743,7 +743,8 @@
       <//>
       ${route ? html`<${RouteDrivers} view=${view} route=${rows.find(r => r.key === route.key) || route} onClose=${() => setRoute(null)} />`
         : rows.length ? html`<p className="muted small" style=${{ margin: "-6px 0 14px" }}>Click en un recorrido para ver quiénes lo manejaron y sus infracciones.</p>` : null}
-      <${HeatmapPanel} view=${view} api=${api} route=${route} onClearRoute=${() => setRoute(null)} />
+      ${onMap ? html`<div className="hm-routecta"><button className="btn" onClick=${() => onMap(route ? { route, cat: "" } : { cat: "" })}>${route ? "Ver las infracciones de este recorrido en el Mapa de calor →" : "Ver dónde ocurren las infracciones en el Mapa de calor →"}</button></div>`
+        : html`<${HeatmapPanel} view=${view} api=${api} route=${route} onClearRoute=${() => setRoute(null)} />`}
     </div>`;
   }
 
@@ -920,6 +921,187 @@
     </div>`;
   }
 
+
+  // ======================= MAPA DE CALOR =======================
+  // Pestaña propia: filtros (período, chofer, vehículo, categoría, gravedad del exceso, franja
+  // horaria), tres capas (calor, puntos por gravedad, puntos calientes), ranking lateral y detalle
+  // de un evento con la velocidad real a pedido.
+  const SEV = { leve: { label: "Leve", color: "#e8b730", stroke: "#a07a10" }, medio: { label: "Medio", color: "#e0701f", stroke: "#9a4710" }, grave: { label: "Grave", color: "#8f1717", stroke: "#5a0d0d" } };
+  const SEV_KEYS = ["leve", "medio", "grave"];
+  const BANDS = [["all", "Todo el día", null], ["night", "De noche (22–06 h)", [22, 6]], ["dawn", "Madrugada (02–05 h)", [2, 5]], ["day", "De día (06–22 h)", [6, 22]]];
+  const inBand = (t, b) => { if (!b) return true; const h = new Date(t).getHours(); return b[0] < b[1] ? h >= b[0] && h < b[1] : h >= b[0] || h < b[1]; };
+  const minsTxt = h => { const m = Math.round((h || 0) * 60 * 60); return m >= 60 ? Math.floor(m / 60) + " min " + (m % 60) + " s" : m + " s"; };
+
+  function MapTab({ view, api, preset, onPresetUsed, onDriver, period, presets, onPeriod }) {
+    const hasSpeed = view.events.some(e => e.cat === "velocidad");
+    const [cat, setCat] = useState(hasSpeed ? "velocidad" : "");
+    const [sev, setSev] = useState(new Set(SEV_KEYS));
+    const [drv, setDrv] = useState(""), [dev, setDev] = useState(""), [band, setBand] = useState("all");
+    const [route, setRoute] = useState(null);
+    const [layer, setLayer] = useState("points");
+    const [limit, setLimit] = useState(1000);
+    const [locs, setLocs] = useState(null), [progress, setProgress] = useState(null), [err, setErr] = useState(null);
+    const [sel, setSel] = useState(null), [focus, setFocus] = useState(null);
+    const mapRef = React.useRef(null), mapObj = React.useRef(null), runRef = React.useRef(0);
+    // Llega con un filtro puesto (desde un conductor, un vehículo o un recorrido)
+    useEffect(() => {
+      if (!preset) return;
+      if (preset.driverId) setDrv(preset.driverId);
+      if (preset.deviceId) setDev(preset.deviceId);
+      if (preset.route) setRoute(preset.route);
+      if (preset.cat != null) setCat(preset.cat);
+      if (onPresetUsed) onPresetUsed();
+    }, [preset]);
+    const b = (BANDS.find(x => x[0] === band) || [])[2];
+    const sevAll = sev.size === 3;
+    const evs = useMemo(() => view.events.filter(e => e.w > 0 && (!cat || e.cat === cat) && (!drv || e.drv === drv) && (!dev || e.d === dev)
+      && (sevAll || (e.sev && sev.has(e.sev))) && inBand(e.t, b) && (!route || (e.j && !e.j.internal && e.j.o + "→" + e.j.dest === route.key))), [view, cat, drv, dev, sev, band, route]);
+    const sample = useMemo(() => {
+      const r = [...evs].sort((x, y) => (SEV_KEYS.indexOf(y.sev) - SEV_KEYS.indexOf(x.sev)) || y.t - x.t);
+      return r.slice(0, limit);
+    }, [evs, limit]);
+    // Ubicar los eventos (LogRecord más cercano; queda guardado en el navegador)
+    useEffect(() => {
+      const id = ++runRef.current;
+      setErr(null); setSel(null);
+      if (!sample.length) { setLocs(new Map()); setProgress(null); return; }
+      setProgress(0);
+      let last = 0;
+      GI.loadEventLocations(api, sample, (p, partial) => {
+        if (id !== runRef.current) return;
+        setProgress(p);
+        if (p - last >= 0.15 || p === 1) { last = p; setLocs(new Map(partial)); }
+      }).then(l => { if (id === runRef.current) { setLocs(l); setProgress(null); } })
+        .catch(e => { if (id === runRef.current) { setErr(String((e && e.message) || e)); setProgress(null); } });
+    }, [sample]);
+    const placed = useMemo(() => (locs ? sample.filter(e => locs.get(e.i)) : []), [locs, sample]);
+    const spots = useMemo(() => (locs && progress == null ? GI.hotspots(sample, locs) : null), [locs, progress, sample]);
+    const ensureMap = () => {
+      if (!mapObj.current && mapRef.current) {
+        mapObj.current = L.map(mapRef.current, { preferCanvas: true });
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 18, attribution: "© OpenStreetMap" }).addTo(mapObj.current);
+        mapObj.current.setView([-38.95, -68.06], 7);
+      }
+      return mapObj.current;
+    };
+    const colorOf = e => (e.sev ? SEV[e.sev].color : GI.catColor(e.cat));
+    useEffect(() => {
+      const m = ensureMap();
+      if (!m) return;
+      for (const k of ["_heat", "_pts", "_spots"]) if (m[k]) { m.removeLayer(m[k]); m[k] = null; }
+      const pts = placed.map(e => [...locs.get(e.i), e.w]);
+      if (layer === "heat") m._heat = L.heatLayer(pts, { radius: 14, blur: 18, maxZoom: 12, max: 2 }).addTo(m);
+      if (layer === "points") {
+        const order = [...placed].sort((x, y) => SEV_KEYS.indexOf(x.sev) - SEV_KEYS.indexOf(y.sev)); // graves arriba
+        m._pts = L.layerGroup(order.map(e => L.circleMarker(locs.get(e.i), { radius: e.sev === "grave" ? 7 : 5.5, color: "#fff", weight: 1.5, fillColor: colorOf(e), fillOpacity: 0.95 })
+          .on("click", () => setSel(e)).bindTooltip(GI.catLabel(e.cat) + (e.sev ? " · " + SEV[e.sev].label : "") + " · " + new Date(e.t).toLocaleString("es-AR", { dateStyle: "short", timeStyle: "short" })))).addTo(m);
+      }
+      if (layer === "spots" && spots) m._spots = L.layerGroup(spots.slice(0, 15).map((h, i) => L.rectangle(h.bounds, { color: "#b02f2e", weight: 2, fill: false })
+        .bindTooltip(String(i + 1), { permanent: true, direction: "center", className: "spot-label" }))).addTo(m);
+      const fitKey = sample.length + "|" + (sample[0] ? sample[0].i : "");
+      if (pts.length && progress == null && m._fitKey !== fitKey) { m._fitKey = fitKey; m.fitBounds(L.latLngBounds(pts.map(p => [p[0], p[1]])), { padding: [24, 24], maxZoom: 13 }); }
+      setTimeout(() => m.invalidateSize(), 0);
+    }, [placed, layer, spots, progress == null]);
+    useEffect(() => { const m = mapObj.current; if (m && focus) m.fitBounds(focus.bounds, { padding: [60, 60], maxZoom: 15 }); }, [focus]);
+    // Trazado de un evento con su velocidad real
+    const [speed, setSpeed] = useState(null);
+    const [limits, setLimits] = useState(new Map());
+    useEffect(() => {
+      setSpeed(null);
+      const m = mapObj.current;
+      if (m && m._evTrace) { m.removeLayer(m._evTrace); m._evTrace = null; }
+      if (sel && sel.cat === "velocidad" && !limits.has(sel.rule) && GI.loadRuleLimits) GI.loadRuleLimits(api, [sel.rule]).then(l => setLimits(x => new Map([...x, ...l]))).catch(() => {});
+      if (sel && m && locs && locs.get(sel.i)) m.setView(locs.get(sel.i), Math.max(m.getZoom(), 13));
+    }, [sel && sel.i]);
+    async function calcSpeed() {
+      setSpeed({ loading: true });
+      try {
+        const r = await GI.loadEventSpeed(api, sel);
+        setSpeed(r);
+        const m = mapObj.current;
+        if (m && r.pts.length > 1) { if (m._evTrace) m.removeLayer(m._evTrace); m._evTrace = L.polyline(r.pts, { color: "#8f1717", weight: 5, opacity: 0.85 }).addTo(m); m.fitBounds(L.latLngBounds(r.pts), { padding: [60, 60], maxZoom: 16 }); }
+      } catch (e) { setSpeed({ error: String((e && e.message) || e) }); }
+    }
+    // Opciones de los filtros: los conductores y vehículos con eventos en el período
+    const drvOpts = useMemo(() => [...new Set(view.events.filter(e => e.w > 0 && e.drv).map(e => e.drv))].map(id => ({ id, name: view.model.driverName.get(id) || id })).sort((a, b) => a.name.localeCompare(b.name)), [view]);
+    const devOpts = useMemo(() => [...new Set(view.events.filter(e => e.w > 0).map(e => e.d))].map(id => ({ id, name: (view.model.devById.get(id) || {}).name || id })).sort((a, b) => a.name.localeCompare(b.name, "es", { numeric: true })), [view]);
+    const cats = GI.CATEGORIES.filter(c => c.kind === "riesgo" && view.events.some(e => e.cat === c.key));
+    const toggleSev = k => setSev(s0 => { const n = new Set(s0); if (n.has(k) && n.size > 1) n.delete(k); else n.add(k); return n; });
+    const chips = [];
+    if (cat) chips.push({ k: "cat", label: GI.catLabel(cat), clear: () => setCat("") });
+    if (!sevAll) chips.push({ k: "sev", label: "Gravedad: " + SEV_KEYS.filter(k => sev.has(k)).map(k => SEV[k].label).join(" y "), clear: () => setSev(new Set(SEV_KEYS)) });
+    if (drv) chips.push({ k: "drv", label: "Chofer: " + (view.model.driverName.get(drv) || drv), clear: () => setDrv("") });
+    if (dev) chips.push({ k: "dev", label: "Vehículo: " + ((view.model.devById.get(dev) || {}).name || dev), clear: () => setDev("") });
+    if (band !== "all") chips.push({ k: "band", label: (BANDS.find(x => x[0] === band) || [])[1], clear: () => setBand("all") });
+    if (route) chips.push({ k: "route", label: "Recorrido: " + route.from + " → " + route.to, clear: () => setRoute(null) });
+    const nDrv = new Set(evs.map(e => e.drv).filter(Boolean)).size, nDev = new Set(evs.map(e => e.d)).size;
+    const bySev = SEV_KEYS.map(k => ({ k, n: evs.filter(e => e.sev === k).length }));
+    const maxSev = Math.max(1, ...bySev.map(x => x.n));
+    const kml = () => spots && GI.downloadText("puntos-calientes.kml", GI.hotspotsKml(spots.slice(0, 15), "Puntos calientes"));
+    const lim = sel && limits.get(sel.rule);
+    const limVal = lim && lim.length ? (speed && speed.max != null ? (lim.filter(v => v <= speed.max).pop() || lim[0]) : lim[lim.length - 1]) : null;
+    return html`<div className="hm">
+      <div className="hm-filters">
+        <label className="ctl">Período<select value=${period.preset || "range"} onChange=${e => onPeriod(e.target.value)}>
+          ${presets.map(([k, l]) => html`<option key=${k} value=${k}>${l}</option>`)}
+          ${!period.preset ? html`<option value="range">Del ${period.from} al ${period.to}</option>` : null}</select></label>
+        <label className="ctl">Chofer<select value=${drv} onChange=${e => setDrv(e.target.value)}><option value="">Todos</option>${drvOpts.map(o => html`<option key=${o.id} value=${o.id}>${o.name}</option>`)}</select></label>
+        <label className="ctl">Vehículo<select value=${dev} onChange=${e => setDev(e.target.value)}><option value="">Todos</option>${devOpts.map(o => html`<option key=${o.id} value=${o.id}>${o.name}</option>`)}</select></label>
+        <label className="ctl">Categoría<select value=${cat} onChange=${e => setCat(e.target.value)}><option value="">Todas las de riesgo</option>${cats.map(c => html`<option key=${c.key} value=${c.key}>${c.label}</option>`)}</select></label>
+        <div className="ctl" role="group" aria-label="Gravedad del exceso de velocidad">Gravedad
+          <div className="hm-seg">${SEV_KEYS.map(k => html`<button key=${k} type="button" aria-pressed=${sev.has(k)} className=${sev.has(k) ? "on" : ""} onClick=${() => toggleSev(k)}><span className="hm-dot" style=${{ background: SEV[k].color }}></span>${SEV[k].label}</button>`)}</div></div>
+        <label className="ctl">Franja horaria<select value=${band} onChange=${e => setBand(e.target.value)}>${BANDS.map(([k, l]) => html`<option key=${k} value=${k}>${l}</option>`)}</select></label>
+        <label className="ctl">Eventos<select value=${limit} onChange=${e => setLimit(+e.target.value)}>${[500, 1000, 2000, 5000].map(n => html`<option key=${n} value=${n}>Hasta ${n0(n)}</option>`)}</select></label>
+      </div>
+      <div className="filterbar" role="status"><span>Mostrando:</span>
+        ${chips.map(c => html`<span key=${c.k} className="fchip">${c.label}<button aria-label=${"Quitar " + c.label} onClick=${c.clear}>×</button></span>`)}
+        <span className="muted">${n0(evs.length)} infracciones · ${n0(nDrv)} conductores · ${n0(nDev)} vehículos${evs.length > sample.length ? " · en el mapa, las " + n0(sample.length) + " más graves y recientes" : ""}</span>
+        ${!sevAll && cat !== "velocidad" ? html`<span className="muted small">(la gravedad solo aplica a los excesos de velocidad)</span>` : null}
+      </div>
+      ${progress != null ? html`<${GI.Progress} value=${progress} label=${"Ubicando " + n0(sample.length) + " eventos (la segunda vez es instantáneo)"} />` : null}
+      ${err ? html`<${Info} tone="error">No se pudieron ubicar los eventos: ${err}<//>` : null}
+      <div className="hm-main">
+        <div className="hm-mapbox">
+          <div className="hm-maphead">
+            <${Segmented} value=${layer} onChange=${setLayer} options=${[{ value: "heat", label: "Calor" }, { value: "points", label: "Puntos por gravedad" }, { value: "spots", label: "Puntos calientes" }]} />
+            ${layer === "points" ? html`<span className="hm-legend">${cat === "velocidad" || !cat ? SEV_KEYS.map(k => html`<span key=${k}><span className="hm-dot" style=${{ background: SEV[k].color }}></span>${SEV[k].label}</span>`) : null}${cat !== "velocidad" ? html`<span className="muted small">otras categorías: su color</span>` : null}</span>` : null}
+          </div>
+          <div ref=${mapRef} className="hm-map"></div>
+        </div>
+        <aside className="hm-side">
+          ${sel ? html`<div className="hm-detail">
+            <button className="btn small" onClick=${() => setSel(null)}>← Puntos calientes</button>
+            <h3>${GI.catLabel(sel.cat)} ${sel.sev ? html`<span className=${"hm-sev " + sel.sev}>${SEV[sel.sev].label}</span>` : null}</h3>
+            <p>${sel.drv ? html`<a href="#" onClick=${e => { e.preventDefault(); onDriver(sel.drv); }}>${view.model.driverName.get(sel.drv) || sel.drv}</a>` : "Sin conductor identificado"} · ${(view.model.devById.get(sel.d) || {}).name || sel.d}<br/>
+              <span className="muted">${new Date(sel.t).toLocaleString("es-AR", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}${sel.h ? " · duró " + minsTxt(sel.h) : ""}</span></p>
+            ${sel.sev ? html`<div className="hm-why"><b>Por qué es ${SEV[sel.sev].label}</b><br/>La regla <b>${(view.model.cat.rules.find(r => r.id === sel.rule) || { name: sel.rule }).name}</b> es ${SEV[sel.sevBase].label}${sel.sevUp ? html`; duró más de ${sel.sevBase === "leve" ? (view.settings.speed_sev || {}).up_leve_min : (view.settings.speed_sev || {}).up_medio_min} min, así que sube un nivel` : ""}.</div>` : null}
+            ${sel.cat === "velocidad" ? html`<div className="hm-kv">
+              <div><span>Límite de la regla</span><b>${lim ? (lim.length ? lim.join(" / ") + " km/h" : "–") : "…"}</b></div>
+              <div><span>Duración</span><b>${sel.h ? minsTxt(sel.h) : "–"}</b></div>
+              <div><span>Velocidad máxima</span><b className="bad">${speed && speed.max != null ? n0(speed.max) + " km/h" : "–"}</b></div>
+              <div><span>Sobre el límite</span><b className="bad">${speed && speed.max != null && limVal ? "+" + n0(speed.max - limVal) + " km/h" : "–"}</b></div>
+            </div>
+            <div className="hm-calc"><button className="btn" disabled=${speed && speed.loading} onClick=${calcSpeed}>${speed && speed.loading ? "Calculando…" : "Calcular velocidad real"}</button>
+              <span className="small muted">${speed && speed.error ? "No se pudo: " + speed.error : speed && !speed.loading && speed.max == null ? "El GPS no informó velocidad en ese tramo." : "Se pide el GPS solo de este evento y se dibuja su recorrido."}</span></div>` : null}
+            <div className="hm-links">
+              ${sel.drv ? html`<button className="btn small" onClick=${() => onDriver(sel.drv)}>Ficha del conductor</button>` : null}
+              <button className="btn small" onClick=${() => GI.openEventsPage({ ruleIds: [sel.rule], deviceIds: [sel.d], driverIds: sel.drv ? [sel.drv] : null, from: sel.dk, to: sel.dk })}>Evento en MyGeotab ↗</button>
+            </div>
+          </div>` : html`<div className="hm-spots">
+            <div className="hm-side-head"><h3>Puntos calientes</h3><button className="btn small" disabled=${!spots || !spots.length} onClick=${kml} title="KML con un polígono por punto caliente, para crear zonas con Import KML Zones">Descargar KML</button></div>
+            <p className="small muted">Lugares de ~500 m con 5 o más infracciones de 2 o más conductores. Click para centrar el mapa; click en un punto del mapa para ver el evento.</p>
+            ${!spots ? html`<p className="small muted">${progress != null ? "Calculando…" : "Sin datos."}</p>` : !spots.length ? html`<p className="small muted">Ningún lugar junta 5 o más infracciones de varios conductores con estos filtros.</p>`
+              : html`<ol className="hm-spotlist">${spots.slice(0, 15).map((h, i) => { return html`<li key=${h.key}><button type="button" onClick=${() => { setLayer(l => (l === "heat" ? "spots" : l)); setFocus(h); }}>
+                  <b>${i + 1}</b><span><span className="hm-spot-n">${n0(h.n)} infracciones</span> · ${n0(Math.max(h.drivers, h.devices))} conductores<br/><span className="small muted">${h.cats.slice(0, 2).map(c => GI.catLabel(c.cat) + " " + n0(c.n)).join(" · ")}</span></span></button></li>`; })}</ol>`}
+            ${cat === "velocidad" || !cat ? html`<div className="hm-sevbars"><b>Excesos de velocidad por gravedad</b>
+              ${bySev.map(x => html`<div key=${x.k} className=${sev.has(x.k) ? "" : "off"}><span>${SEV[x.k].label}</span><span className="hm-bar" style=${{ width: (x.n / maxSev) * 150 + "px", background: SEV[x.k].color }}></span><span>${n0(x.n)}</span></div>`)}
+              <span className="small muted">El nivel sale de la regla y la duración (Configuración → Fatiga y gravedad).</span></div>` : null}
+          </div>`}
+        </aside>
+      </div>
+    </div>`;
+  }
+
   // ======================= DETALLES =======================
   function smallBars(s, key, label, unit) {
     return { type: "bar", data: { labels: s.map(x => x.label), datasets: [{ label, data: s.map(x => GI.round(x[key] || 0, 0)), backgroundColor: s.map(x => (x.partial ? "#9ec5f4" : "#2a78d6")), borderRadius: 3 }] },
@@ -944,7 +1126,7 @@
       <p className="muted small" style=${{ marginTop: "6px" }}>Click en una categoría para ver sus eventos en MyGeotab.</p>`;
   }
 
-  function VehicleDetail({ view, id, onClose }) {
+  function VehicleDetail({ view, id, onClose, onMap }) {
     const r = view.vRows.find(x => x.id === id);
     const s = useMemo(() => GI.series(view.model, new Set([id]), view.gran), [id, view.gran]);
     const drivers = useMemo(() => {
@@ -961,6 +1143,7 @@
     const lastFull = [...s].reverse().find(b => !b.partial && b.km >= 50);
     const evRows = Object.entries(r.evByCat).filter(([k]) => (GI.CATEGORY_BY_KEY[k] || {}).kind === "riesgo").map(([k, n]) => ({ k, n }));
     return html`<${Modal} title=${r.name} onClose=${onClose} wide>
+      ${onMap ? html`<div className="hm-detail-cta"><button className="btn small" onClick=${() => onMap({ deviceId: id })}>Ver sus infracciones en el Mapa de calor →</button></div>` : null}
       <p className="muted" style=${{ marginBottom: "12px" }}>${GI.profileLabel(view.settings, r.profile)}. Servicio ${r.serviceSource === "grupo" ? "asignado por grupo" : r.serviceSource}. Referencia de consumo: ${r.refSource}.</p>
       <div className="readouts compact">
         <${Kpi} label="Km" value=${n0(r.km)} />
@@ -1014,7 +1197,7 @@
     </div>`;
   }
 
-  function DriverDetail({ view, id, onClose, mode, onFatigue }) {
+  function DriverDetail({ view, id, onClose, mode, onFatigue, onMap }) {
     const safety = mode === "safety";
     const r = view.dRows.find(x => x.id === id);
     const s = useMemo(() => {
@@ -1047,6 +1230,7 @@
     const withMarks = cfg => (safety ? { ...cfg, options: { ...cfg.options, plugins: { ...cfg.options.plugins, milestones: { items: GI.milestoneMarks(view.milestones, view.series, view.gran) } } } } : cfg);
     const evRows = Object.entries(r.evByCat).filter(([k]) => (GI.CATEGORY_BY_KEY[k] || {}).kind === "riesgo").map(([k, n]) => ({ k, n }));
     return html`<${Modal} title=${r.name} onClose=${onClose} wide>
+      ${onMap ? html`<div className="hm-detail-cta"><button className="btn small" onClick=${() => onMap({ driverId: id })}>Ver sus infracciones en el Mapa de calor →</button></div>` : null}
       <div className="readouts compact">
         <${Kpi} label="Km" value=${n0(r.km)} />
         <${Kpi} label="Riesgo del período" value=${n2(r.risk)} unit="pts/100 km"
@@ -1072,5 +1256,5 @@
     <//>`;
   }
 
-  Object.assign(GI, { SummaryTab, FuelTab, SafetyTab, DriversTab, RoutesTab, VehicleDetail, DriverDetail, TrendChart, METRICS, TargetCell });
+  Object.assign(GI, { MapTab, SummaryTab, FuelTab, SafetyTab, DriversTab, RoutesTab, VehicleDetail, DriverDetail, TrendChart, METRICS, TargetCell });
 })(window.GI);
