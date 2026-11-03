@@ -621,3 +621,6 @@ tr.ft-row-ident td { background: #fffbea; }
 .ft-cam-frame iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
 .ft-cam-on { color: #0b7a3e; }
 .ft-alert-cam > .btn.small { align-self: flex-start; }
+.ft-surf { display: flex; flex-direction: column; gap: 8px; }
+.ft-surf .ft-cam-bar .btn.small { margin-left: 4px; }
+.ft-cam-frame lytx-live-video { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }

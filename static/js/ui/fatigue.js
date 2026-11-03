@@ -1379,6 +1379,72 @@ ${restFrom != null && restFrom < j.s ? (() => { const g = GAP[restKind(j, fz)]; 
 
   // Video en vivo dentro de la alerta: live.html (misma versión del add-in) con el Video Player de
   // Geotab. Las credenciales de la sesión se pasan por postMessage, nunca en la URL.
+
+  // Video en vivo Surfsight dentro del add-in: token de la organización desde el servicio de cámaras de
+  // Geotab (con la sesión de MyGeotab) y el componente <lytx-live-video> de Surfsight, el mismo que usa
+  // MyGeotab. Como MyGeotab, informa el consumo de datos cada 30 s (si no se puede, no arranca) y deja
+  // un registro en la auditoría de MyGeotab. Se corta solo a los 3 min para no gastar datos de más.
+  const SURF_LENSES = { 1: "Camino", 2: "Cabina", 51: "Auxiliar 1", 52: "Auxiliar 2", 53: "Auxiliar 3", 54: "Auxiliar 4" };
+  const SURF_UI = "https://ui-components.surfsight.net/latest/build/cloud-ui-components.esm.js";
+  const SURF_MAX_S = 180;
+  function loadSurfsightUi() {
+    if (window.customElements && customElements.get("lytx-live-video")) return Promise.resolve();
+    if (!loadSurfsightUi.p) {
+      loadSurfsightUi.p = new Promise((ok, ko) => {
+        const sc = document.createElement("script"); sc.type = "module"; sc.src = SURF_UI;
+        sc.onerror = () => { loadSurfsightUi.p = null; ko(new Error("no se pudo cargar el reproductor de Surfsight")); };
+        document.head.appendChild(sc);
+        customElements.whenDefined("lytx-live-video").then(ok);
+        setTimeout(() => ko(new Error("el reproductor de Surfsight no respondió")), 15000);
+      });
+    }
+    return loadSurfsightUi.p;
+  }
+  function SurfsightLive({ api, view, dev, cam, auto }) {
+    const imei = cam.imei || cam.serial;
+    const [lenses, setLenses] = useState(null), [lens, setLens] = useState(2);
+    const [st, setSt] = useState({ phase: "idle" }); // idle | starting | live | paused | error
+    const tok = useRef(null), tick = useRef(null), secs = useRef(0);
+    useEffect(() => {
+      let off = false;
+      GI.surfsightLenses(imei).then(l => { if (off) return; setLenses(l); if (l.length && !l.includes(2)) setLens(l[0]); })
+        .catch(() => { if (!off) setLenses([1, 2]); });
+      return () => { off = true; };
+    }, [imei]);
+    const stop = phase => { if (tick.current) clearInterval(tick.current); tick.current = null; setSt(s => ({ ...s, phase: phase || "idle" })); };
+    useEffect(() => () => { if (tick.current) clearInterval(tick.current); }, []);
+    async function start() {
+      setSt({ phase: "starting" });
+      try {
+        if (!tok.current || Date.now() - tok.current.at > 20 * 60000) tok.current = { ...(await GI.surfsightToken()), at: Date.now() };
+        const code = await GI.surfsightConsumption(imei, tok.current.token);
+        if (code < 200 || code >= 300) throw new Error(code === 403 || code === 429 ? "Surfsight no autorizó el video (puede ser el límite mensual de video en vivo del plan)" : "Surfsight respondió " + code + " al registrar el consumo de datos");
+        await loadSurfsightUi();
+        try { api.call("Add", { typeName: "Audit", entity: { name: "Video en vivo (Geotab Insights)", comment: devName(view, dev) + " · cámara " + imei + " · lente " + (SURF_LENSES[lens] || lens) } }); } catch (e) { /* la auditoría no frena el video */ }
+        secs.current = 0;
+        setSt({ phase: "live", token: tok.current.token, org: tok.current.orgId, key: Date.now() });
+        tick.current = setInterval(async () => {
+          secs.current += 30;
+          if (secs.current >= SURF_MAX_S) { stop("paused"); return; }
+          try { await GI.surfsightConsumption(imei, tok.current.token); } catch (e) { /* se reintenta en el próximo tramo */ }
+        }, 30000);
+      } catch (e) { const m = String((e && e.message) || e); stop(); setSt({ phase: "error", err: /failed to fetch|networkerror|load failed/i.test(m) ? "el navegador no pudo conectarse con el servicio de cámaras (" + m + ")" : m }); }
+    }
+    useEffect(() => { if (auto && /online/i.test(cam.status)) start(); }, []);
+    useEffect(() => { if (st.phase === "live") { stop(); start(); } }, [lens]);
+    return html`<div className="ft-surf">
+      <div className="ft-cam-bar">
+        <span className="small">Lente: ${(lenses || [1, 2]).map(l => html`<button key=${l} type="button" className=${"btn small" + (l === lens ? " primary" : "")} aria-pressed=${l === lens} onClick=${() => setLens(l)}>${SURF_LENSES[l] || "Lente " + l}</button>`)}</span>
+        ${st.phase === "live" ? html`<button className="btn small" onClick=${() => stop()}>Cortar el video</button>`
+          : html`<button className="btn primary" disabled=${st.phase === "starting"} onClick=${start}>${st.phase === "starting" ? "Conectando…" : st.phase === "paused" ? "Seguir viendo" : "Ver en vivo aquí"}</button>`}
+      </div>
+      ${st.phase === "live" ? html`<div className="ft-cam-frame"><lytx-live-video key=${st.key + "-" + lens} auth-token=${st.token} imei=${imei} camera-id=${String(lens)} organization-id=${String(st.org)}></lytx-live-video></div>
+        <span className="small muted">Se corta solo a los ${SURF_MAX_S / 60} minutos para no consumir datos de más.</span>` : null}
+      ${st.phase === "paused" ? html`<span className="small muted">El video se pausó a los ${SURF_MAX_S / 60} minutos.</span>` : null}
+      ${st.phase === "error" ? html`<span className="small delta bad">No se pudo abrir el video acá: ${st.err}. Usá "Ver en vivo en MyGeotab".</span>` : null}
+    </div>`;
+  }
+
   function LiveCam({ api, view, dev, auto }) {
     const [cams, setCams] = useState(null), [err, setErr] = useState(null), [sel, setSel] = useState(null), [go, setGo] = useState(false);
     const frame = useRef(null);
@@ -1408,10 +1474,10 @@ ${restFrom != null && restFrom < j.s ? (() => { const g = GAP[restKind(j, fz)]; 
         : html`<div className="ft-cam-bar">
             ${cams.length > 1 ? html`<select value=${sel || ""} onChange=${e => { setSel(e.target.value); }}>${cams.map(c => html`<option key=${c.serial} value=${c.serial}>${c.name}${c.vendor ? " · " + c.vendor : ""} (${c.status || "estado desconocido"})</option>`)}</select>`
               : html`<span className="small">Cámara ${cam.name}${cam.vendor ? " · " + cam.vendor : ""} ${cam.status ? html` · <b className=${/online/i.test(cam.status) ? "ft-cam-on" : "muted"}>${/online/i.test(cam.status) ? "en línea" : cam.status.toLowerCase()}</b>` : null}${cam.lastConn && !/online/i.test(cam.status) ? html` <span className="muted">· última conexión ${when(Date.parse(cam.lastConn))}</span>` : null}</span>`}
-            ${ext ? html`<button className="btn primary" onClick=${() => GI.openLiveVideo(dev)}>Ver en vivo en MyGeotab ↗</button>`
+            ${ext ? html`<button className="btn small" onClick=${() => GI.openLiveVideo(dev)}>Ver en vivo en MyGeotab ↗</button>`
               : !go ? html`<button className="btn primary" disabled=${!src} onClick=${() => setGo(true)}>Ver en vivo aquí</button>` : html`<button className="btn small" onClick=${() => setGo(false)}>Cortar el video</button>`}
           </div>
-          ${ext ? html`<span className="small muted">Las cámaras Surfsight se ven en el reproductor de MyGeotab, que se abre en otra pestaña (esta sigue vigilando las alertas).</span>` : null}
+          ${ext ? html`<${SurfsightLive} key=${cam.serial} api=${api} view=${view} dev=${dev} cam=${cam} auto=${auto} />` : null}
           ${go && src && !ext ? html`<div className="ft-cam-frame"><iframe ref=${frame} key=${src} src=${src} title="Video en vivo" allow="autoplay; fullscreen"></iframe></div>` : null}
           ${cam && cam.status && !/online/i.test(cam.status) ? html`<span className="small muted">La cámara no figura en línea: el video en vivo necesita el vehículo encendido y la cámara conectada.</span>` : null}`}
       ${!ext ? html`<button className="btn small" onClick=${() => GI.openLiveVideo(dev)}>Abrir el video en MyGeotab ↗</button>` : null}

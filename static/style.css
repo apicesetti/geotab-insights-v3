@@ -1235,3 +1235,6 @@
 #gi3-root .ft-cam-frame iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
 #gi3-root .ft-cam-on { color: #0b7a3e; }
 #gi3-root .ft-alert-cam > .btn.small { align-self: flex-start; }
+#gi3-root .ft-surf { display: flex; flex-direction: column; gap: 8px; }
+#gi3-root .ft-surf .ft-cam-bar .btn.small { margin-left: 4px; }
+#gi3-root .ft-cam-frame lytx-live-video { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }

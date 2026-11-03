@@ -747,25 +747,52 @@
       const st = await cameraStatusByGo();
       for (const list of out.values()) for (const c of list) {
         const m = st.get(String(c.goSerial || "").toUpperCase() + "|" + (/surf|lytx/i.test(c.vendor) ? "surfsight" : "smarterai"));
-        if (m) { c.status = m.status || c.status; c.lastConn = m.lastConn || null; }
+        if (m) { c.status = m.status || c.status; c.lastConn = m.lastConn || null; c.imei = m.imei || null; }
       }
       out.diag.status = st.size;
     } catch (e) { out.diag.statusErr = String((e && e.message) || e); }
     camCache = { at: Date.now(), devKey, map: out };
     return out;
   }
-  async function cameraStatusByGo() {
+  // Servicio de cámaras de Geotab (interno, el que usa MyGeotab): se autentica con la sesión de MyGeotab.
+  const MEDIA = "https://media-services.geotab.com/api";
+  function mediaHeaders() {
     const ss = GI._mgSession;
-    if (!ss || !ss.sessionId) throw new Error("sin sesión");
-    const res = await fetch("https://media-services.geotab.com/api/DeviceMappings", { headers: {
-      "X-MyGeotab-Database": encodeURIComponent(ss.database), "X-MyGeotab-Username": ss.userName,
-      "X-MyGeotab-SessionId": ss.sessionId, "X-MyGeotab-Path": ss.server || "my.geotab.com" } });
+    if (!ss || !ss.sessionId) throw new Error("sin sesión de MyGeotab");
+    return { "X-MyGeotab-Database": encodeURIComponent(ss.database), "X-MyGeotab-Username": ss.userName,
+      "X-MyGeotab-SessionId": ss.sessionId, "X-MyGeotab-Path": ss.server || "my.geotab.com" };
+  }
+  async function mediaGet(path) {
+    const res = await fetch(MEDIA + path, { headers: mediaHeaders() });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    return res.json();
+  }
+  // Video en vivo Surfsight: token de la organización (MyGeotab lo pide igual) y lentes activas.
+  async function surfsightToken() {
+    const r = await mediaGet("/OrganizationToken");
+    const d = (r && r.data) || r || {};
+    if (!d.token || !d.organizationId) throw new Error("el servicio de cámaras no devolvió el token");
+    return { token: d.token, orgId: d.organizationId };
+  }
+  async function surfsightLenses(imei) {
+    const r = await mediaGet("/Surfsight/ActiveCameras/" + encodeURIComponent(imei));
+    return ((r && r.data) || r || []).map(x => x.cameraId).filter(x => x != null);
+  }
+  // Consumo de datos del video en vivo (como MyGeotab: cada ~30 s por lente, para el límite del plan).
+  async function surfsightConsumption(imei, token) {
+    const res = await fetch("https://api-prod.surfsight.net/mediacore_api/api/device-data-consumption/" + encodeURIComponent(imei) + "/live-video", {
+      method: "PATCH", headers: { "Content-Type": "application/json", Authorization: "Bearer " + token },
+      body: JSON.stringify({ videoSessionInSeconds: 30, validation: true }) });
+    return res.status;
+  }
+  async function cameraStatusByGo() {
+    const res = await fetch(MEDIA + "/DeviceMappings", { headers: mediaHeaders() });
     if (!res.ok) throw new Error("HTTP " + res.status);
     const out = new Map();
     for (const m of (await res.json()) || []) {
       if (!m.associatedDeviceSerialNumber) continue;
       const lastConn = (m.partnerMetaData && m.partnerMetaData.LastConnectedAt) || null;
-      out.set(String(m.associatedDeviceSerialNumber).toUpperCase() + "|" + String(m.partnerId || "").toLowerCase(), { status: String(m.deviceStatus || ""), lastConn });
+      out.set(String(m.associatedDeviceSerialNumber).toUpperCase() + "|" + String(m.partnerId || "").toLowerCase(), { status: String(m.deviceStatus || ""), lastConn, imei: m.partnerDeviceId || null });
     }
     return out;
   }
@@ -776,7 +803,7 @@
   }
 
   Object.assign(GI, {
-    loadCameras, loadAllCameras, loadRecentTrips, loadDriveStatus, loadDriverChanges,
+    loadCameras, loadAllCameras, surfsightToken, surfsightLenses, surfsightConsumption, loadRecentTrips, loadDriveStatus, loadDriverChanges,
     loadCatalogs, loadZones, loadZoneTypes, loadPeriod, loadFuel, loadEventLocations, loadTrace, clearCache,
     _idbGetMany: idbGetMany, _idbPutMany: idbPutMany,
     _compactTrips: compactTrips, _compactExceptions: compactExceptions, _compactCounter: compactCounter, _loadFuelBoundaries: loadFuelBoundaries, _missingRuns: missingRuns, _getRangeMulti: getRangeMulti,
