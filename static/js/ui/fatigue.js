@@ -4,7 +4,7 @@
 (function (GI) {
   "use strict";
   const React = GI.React;
-  const { useState, useMemo, useEffect } = React;
+  const { useState, useMemo, useEffect, useRef } = React;
   const html = GI.html;
   const { Kpi, Panel, Info, DataTable, Segmented, Modal } = GI;
   const H = 3600000, MIN = 60000;
@@ -657,7 +657,7 @@ ${restFrom != null && restFrom < j.s ? (() => { const g = GAP[restKind(j, fz)]; 
     </div>`;
   }
 
-  function FatigueDriver({ view, id, res, cases, now, status, onClose, onCase, onSafety, api, isAdmin, userName, roster, onRoster }) {
+  function FatigueDriver({ view, id, res, cases, now, status, acks, onClose, onCase, onSafety, api, isAdmin, userName, roster, onRoster }) {
     const fz = res.limits;
     const [days, setDays] = useState(14);
     const s = res.sims.get(id);
@@ -708,6 +708,13 @@ ${restFrom != null && restFrom < j.s ? (() => { const g = GAP[restKind(j, fz)]; 
         <div className="ft-sub-head"><span></span><${Segmented} value=${days} onChange=${setDays} options=${[{ value: 14, label: "14 días" }, { value: 28, label: "28 días" }]} /></div>
         <${ShiftPattern} list=${list} fz=${fz} days=${days} onCase=${onCase} />
       </details>
+      ${(() => { const mine = (acks || []).filter(a => a.drv === id).sort((a, b) => b.at - a.at); return mine.length ? html`<h3 style=${{ marginTop: "14px" }}>Intervenciones por alertas de fatiga</h3>
+        <${DataTable} rowKey=${a => a.id || a.at} rows=${mine} limit=${8} defaultSort=${{ key: "at", dir: "desc" }} columns=${[
+          { key: "at", label: "Cuándo", fmt: a => html`${dshort(a.at)} <span className="muted">${hm(a.at)}</span>` },
+          { key: "level", label: "Alerta", fmt: a => html`<span className=${"ft-act " + (a.level === "critica" ? "rojo" : "amarillo")}>${a.level === "critica" ? "Crítica" : "Alerta"} · ${a.F}</span>` },
+          { key: "action", label: "Qué se hizo", fmt: a => html`${a.actionLabel || a.action}${a.note ? html`<div className="small muted">${a.note}</div>` : null}` },
+          { key: "by", label: "Registró", fmt: a => a.by || "–" },
+        ]} />` : null; })()}
       <h3 style=${{ marginTop: "14px" }}>Jornadas</h3>
       <${DataTable} rowKey=${j => j.key} rows=${list} limit=${12} defaultSort=${{ key: "s", dir: "desc" }} onRowClick=${onCase} columns=${[
         { key: "s", label: "Inicio", fmt: j => html`${dshort(j.s)} <span className="muted">${hm(j.s)}</span>${j.open ? html` <span className="ft-live">● en curso</span>` : ""}` },
@@ -1209,8 +1216,8 @@ ${restFrom != null && restFrom < j.s ? (() => { const g = GAP[restKind(j, fz)]; 
     async function refresh() {
       setLive(l => ({ ...l, loading: true }));
       try {
-        const [recent, status] = await Promise.all([GI.loadRecentTrips(api, LIVE_HOURS), GI.loadDriveStatus(api).catch(() => [])]);
-        setLive({ recent, status, at: Date.now(), now: Date.now() });
+        const [recent, status, acks] = await Promise.all([GI.loadRecentTrips(api, LIVE_HOURS), GI.loadDriveStatus(api).catch(() => []), GI.loadAlertAcks ? GI.loadAlertAcks(api).catch(() => []) : []]);
+        setLive({ recent, status, acks, at: Date.now(), now: Date.now() });
       } catch (e) {
         console.warn("[Geotab Insights] fatiga en vivo", e);
         setLive({ err: String((e && e.message) || e), at: Date.now(), now: Date.now() });
@@ -1250,7 +1257,7 @@ ${restFrom != null && restFrom < j.s ? (() => { const g = GAP[restKind(j, fz)]; 
             : sub === "indicadores" && isBeta() ? html`<${KpiSection} view=${view} res=${period} cases=${cases} idents=${idents} onCase=${setSel} onDriver=${openDriver} />`
             : html`<${DriversSection} view=${view} onDriver=${openDriver} />`}
         </div>`}
-      ${drv && !findSel ? html`<${FatigueDriver} key=${drv} view=${view} id=${drv} res=${res} cases=${cases} now=${live.now} status=${live.status}
+      ${drv && !findSel ? html`<${FatigueDriver} key=${drv} view=${view} id=${drv} res=${res} cases=${cases} now=${live.now} status=${live.status} acks=${live.acks || []}
         api=${api} isAdmin=${isAdmin} userName=${userName} roster=${rosters.get(drv)} onRoster=${r => setRosters(m => { const n = new Map(m); if (r && !r.removed) n.set(r.drv, r); else n.delete(drv); return n; })}
         onClose=${() => setDrv(null)} onCase=${j => setSel(j)} onSafety=${id => { setDrv(null); onDriver(id); }} />` : null}
       ${findSel ? html`<${CaseDetail} key=${findSel.key} view=${view} api=${api} j=${findSel} fz=${limits} rec=${cases.get(findSel.key)} userName=${userName}
@@ -1260,5 +1267,167 @@ ${restFrom != null && restFrom < j.s ? (() => { const g = GAP[restKind(j, fz)]; 
     </div>`;
   }
 
-  Object.assign(GI, { FatigueTab, FatigueSpark: Spark });
+
+  // ---------- Alertas de fatiga con intervención obligatoria ----------
+  // Corre mientras el add-in está abierto (en cualquier pestaña): cada 3 min recalcula el índice de
+  // los conductores en jornada y, si alguno pasa el umbral, muestra una ventana que no se cierra sin
+  // registrar la intervención. La intervención queda guardada para todos los supervisores.
+  const ALERT_ACTIONS = [
+    ["bien", "Llamé al conductor: está bien y sigue con precaución"],
+    ["pausa", "Se le indicó una pausa corta (15–30 min)"],
+    ["descanso", "Se le indicó detenerse a descansar"],
+    ["relevo", "Se coordinó un relevo o cambio de chofer"],
+    ["camara", "Verificado por cámara: se lo ve atento"],
+    ["nocontesta", "No contesta: se escala a la base o al supervisor de campo"],
+    ["error", "Dato erróneo: no está manejando él o el vehículo no comunica"],
+    ["otra", "Otra (detallar en la nota)"],
+  ];
+  const ALERT_POLL_MS = 3 * 60000;
+  // Mapa de MyGeotab con el vehículo seleccionado (desde ahí se abre "Video en vivo" de la cámara).
+  GI.openLiveMap = function (devId) {
+    const hash = "map,liveVehicleIds:!('" + String(devId).replace(/!/g, "!!").replace(/'/g, "!'") + "')";
+    const base = GI.MG_BASE_URL || window.location.href.split("#")[0];
+    window.open(base + "#" + hash, "_blank", "noopener");
+  };
+  function beep() {
+    try {
+      const C = window.AudioContext || window.webkitAudioContext; if (!C) return;
+      const c = beep.ctx || (beep.ctx = new C()), o = c.createOscillator(), g = c.createGain();
+      o.frequency.value = 880; g.gain.value = 0.15; o.connect(g); g.connect(c.destination);
+      o.start(); o.stop(c.currentTime + 0.35);
+    } catch (e) { /* el navegador puede bloquear el sonido hasta que alguien toque la página */ }
+  }
+
+  function FatigueAlerts({ view, api, settings, userName }) {
+    const cfg = GI.alertConfig(settings);
+    const allowed = !String(cfg.users || "").trim() || String(cfg.users).split(/[,;\s]+/).map(x => x.trim().toLowerCase()).filter(Boolean).includes(String(userName || "").toLowerCase());
+    const [state, setState] = useState({ items: [], acks: [], at: null });
+    const [rosters, setRosters] = useState(null);
+    const [idx, setIdx] = useState(0);
+    const timer = useRef(null);
+    const on = cfg.on && allowed && !!view;
+    async function poll() {
+      try {
+        const now = Date.now();
+        const [recent, status, acks, ro, idn] = await Promise.all([GI.loadRecentTrips(api, LIVE_HOURS), GI.loadDriveStatus(api).catch(() => []),
+          GI.loadAlertAcks(api, now - 3 * 86400000).catch(() => []),
+          rosters ? Promise.resolve(null) : GI.loadRosters ? GI.loadRosters(api).catch(() => []) : Promise.resolve([]),
+          rosters ? Promise.resolve(null) : GI.loadIdents ? GI.loadIdents(api).catch(() => []) : Promise.resolve([])]);
+        let rs = rosters;
+        if (!rs) {
+          rs = { rmap: new Map((ro || []).map(r => [r.drv, r])), fixes: (idn || []).filter(r => r.outcome === "relevo" && r.at).map(r => ({ drv: r.drv, d: r.d, from: r.from || r.s, to: r.at, other: r.other || null })) };
+          setRosters(rs);
+        }
+        const tb = GI.liveTrips(view.model, recent, status, LIVE_HOURS, now);
+        const res = GI.buildShifts(view.model, view.ids, view.driverOk, { now, tripsByDevice: tb, rosters: rs.rmap, identFixes: rs.fixes });
+        const items = [];
+        for (const [drv, entry] of res.sims) {
+          if (!entry.sim) continue;
+          const proj = GI.projectIndex(entry, res.limits, now, 16);
+          if (!proj || !proj.open) continue;
+          const j = proj.open, lt = j.trips[j.trips.length - 1];
+          items.push({ drv, key: j.key, F: proj.Fnow, j, proj, dev: lt.d, prog: GI.shiftProgress(j, res.limits, now), off: GI.commGap(entry, status, now), fz: res.limits });
+        }
+        setState({ items: GI.alertsDue(items, acks, cfg, now), acks, at: now });
+      } catch (e) { console.warn("[Geotab Insights] alertas de fatiga", e); }
+    }
+    useEffect(() => {
+      if (!on) return;
+      poll();
+      timer.current = setInterval(poll, ALERT_POLL_MS);
+      return () => clearInterval(timer.current);
+    }, [on, view, cfg.warn, cfg.crit]);
+    const due = on ? state.items : [];
+    const cur = due[Math.min(idx, due.length - 1)];
+    // sonido y título de la pestaña mientras haya alertas sin atender
+    useEffect(() => {
+      const t0 = document.title.replace(/^⚠ Alerta de fatiga · /, "");
+      if (!due.length) { document.title = t0; return; }
+      document.title = "⚠ Alerta de fatiga · " + t0;
+      beep();
+      const b = setInterval(beep, 20000);
+      return () => { clearInterval(b); document.title = t0; };
+    }, [due.length, cur && cur.drv]);
+    if (!cur) return null;
+    return html`<${AlertModal} key=${cur.drv + cur.key + cur.level} a=${cur} n=${due.length} i=${Math.min(idx, due.length - 1)} setIdx=${setIdx} view=${view} api=${api} userName=${userName} cfg=${cfg}
+      onSaved=${ack => setState(st => { const acks = [...st.acks, ack]; return { ...st, acks, items: GI.alertsDue(st.items, acks, cfg, Date.now()) }; })} />`;
+  }
+
+
+  // Video en vivo dentro de la alerta: live.html (misma versión del add-in) con el Video Player de
+  // Geotab. Las credenciales de la sesión se pasan por postMessage, nunca en la URL.
+  function LiveCam({ api, view, dev, auto }) {
+    const [cams, setCams] = useState(null), [err, setErr] = useState(null), [sel, setSel] = useState(null), [go, setGo] = useState(false);
+    const frame = useRef(null);
+    useEffect(() => {
+      let off = false;
+      GI.loadCameras(api, dev).then(c => { if (off) return; setCams(c); const on = c.find(x => /online/i.test(x.status)) || c[0]; setSel(on ? on.serial : null); if (auto && on && /online/i.test(on.status)) setGo(true); })
+        .catch(e => { if (!off) { setCams([]); setErr(String((e && e.message) || e)); } });
+      return () => { off = true; };
+    }, [dev]);
+    const sess = GI._mgSession;
+    const src = sel && sess && GI.STATIC_BASE ? GI.STATIC_BASE + "live.html?server=" + encodeURIComponent(sess.server) + "&serial=" + encodeURIComponent(sel) : null;
+    useEffect(() => {
+      if (!go || !src) return;
+      const origin = new URL(src).origin;
+      const h = e => { if (frame.current && e.source === frame.current.contentWindow && e.data && e.data.gvpReady) frame.current.contentWindow.postMessage({ gvpCredentials: { database: sess.database, userName: sess.userName, sessionId: sess.sessionId } }, origin); };
+      window.addEventListener("message", h);
+      return () => window.removeEventListener("message", h);
+    }, [go, src]);
+    const cam = cams && cams.find(c => c.serial === sel);
+    return html`<div className="ft-alert-cam">
+      ${cams == null ? html`<span className="small muted">Buscando la cámara de ${devName(view, dev)}…</span>`
+        : !cams.length ? html`<span className="small muted">${err ? "No se pudo consultar la cámara (" + err + ")." : "Este vehículo no tiene una cámara asociada en Geotab Video."}</span>`
+        : html`<div className="ft-cam-bar">
+            ${cams.length > 1 ? html`<select value=${sel || ""} onChange=${e => { setSel(e.target.value); }}>${cams.map(c => html`<option key=${c.serial} value=${c.serial}>${c.name}${c.vendor ? " · " + c.vendor : ""} (${c.status || "estado desconocido"})</option>`)}</select>`
+              : html`<span className="small">Cámara ${cam.name}${cam.vendor ? " · " + cam.vendor : ""} · <b className=${/online/i.test(cam.status) ? "ft-cam-on" : "muted"}>${/online/i.test(cam.status) ? "en línea" : cam.status ? cam.status.toLowerCase() : "estado desconocido"}</b></span>`}
+            ${!go ? html`<button className="btn primary" disabled=${!src} onClick=${() => setGo(true)}>Ver en vivo aquí</button>` : html`<button className="btn small" onClick=${() => setGo(false)}>Cortar el video</button>`}
+          </div>
+          ${go && src ? html`<div className="ft-cam-frame"><iframe ref=${frame} key=${src} src=${src} title="Video en vivo" allow="autoplay; fullscreen"></iframe></div>` : null}
+          ${cam && !/online/i.test(cam.status) ? html`<span className="small muted">La cámara no figura en línea: el video en vivo necesita el vehículo encendido y la cámara conectada.</span>` : null}`}
+      <button className="btn small" onClick=${() => GI.openLiveMap(dev)}>Abrir en el mapa de MyGeotab ↗</button>
+    </div>`;
+  }
+
+  function AlertModal({ a, n, i, setIdx, view, api, userName, cfg, onSaved }) {
+    const fz = a.fz, crit = a.level === "critica", now = Date.now();
+    const [action, setAction] = useState("");
+    const [note, setNote] = useState("");
+    const [busy, setBusy] = useState(false), [err, setErr] = useState(null);
+    const needNote = action === "otra" || action === "nocontesta" || crit;
+    const ok = action && (!needNote || note.trim().length >= 3);
+    async function save() {
+      setBusy(true); setErr(null);
+      try {
+        const ack = await GI.saveAlertAck(api, { drv: a.drv, key: a.key, d: a.dev, level: a.level, F: Math.round(a.F), at: Date.now(), action, actionLabel: (ALERT_ACTIONS.find(x => x[0] === action) || [])[1], note: note.trim(), by: userName || "" });
+        onSaved(ack);
+      } catch (e) { setErr("No se pudo guardar: " + ((e && e.message) || e)); }
+      setBusy(false);
+    }
+    const p = a.proj, pr = a.prog;
+    return html`<div className="modal-bg ft-alert-bg" role="alertdialog" aria-modal="true" aria-labelledby="ft-alert-t">
+      <div className=${"modal wide ft-alert " + (crit ? "crit" : "warn")}>
+        <div className="modal-head"><h2 id="ft-alert-t">${crit ? "Alerta crítica de fatiga" : "Alerta de fatiga"} · intervención obligatoria</h2>
+          ${n > 1 ? html`<span className="ft-alert-nav"><button className="btn small" disabled=${i === 0} onClick=${() => setIdx(i - 1)}>‹</button> ${i + 1} de ${n} <button className="btn small" disabled=${i >= n - 1} onClick=${() => setIdx(i + 1)}>›</button></span>` : null}</div>
+        <div className="modal-body">
+          <div className="ft-alert-who"><b>${drvName(view, a.drv)}</b> · ${devName(view, a.dev)}<span className="ft-alert-f">Índice ${fiTag(a.F, fz)} <span className="muted">(${crit ? "crítico desde " + cfg.crit : "alerta desde " + cfg.warn})</span></span></div>
+          <p>En jornada desde las <b>${hm(a.j.s)}</b>: lleva ${dur((now - a.j.s) / H)} de jornada y ${dur(a.j.dh)} de manejo${pr && pr.driving ? html`, <span className="ft-live">● manejando ahora</span>` : pr ? ", parado hace " + dur(pr.sinceLast / 60) : ""}.
+            ${p.crossAt && p.crossAt > now ? html` Si sigue a este ritmo, pasa de ${fz.fi_high} a las <b>${hm(p.crossAt)}</b>.` : ""}
+            ${a.last ? html` <span className="muted">Última intervención: ${hm(a.last.at)} · ${a.last.actionLabel || a.last.action}${a.last.by ? " (" + a.last.by + ")" : ""}.</span>` : ""}</p>
+          ${a.off ? html`<${Info} tone="warn">El vehículo no comunica con MyGeotab desde las ${hm(a.off.at)}: el índice usa lo último recibido.<//>` : null}
+          <p className="small muted">El índice es una estimación por horarios de trabajo y descanso, no una detección del estado del conductor: verificá cómo está.</p>
+          <${LiveCam} api=${api} view=${view} dev=${a.dev} auto=${crit} />
+          <fieldset className="ft-alert-acts"><legend>¿Qué se hizo?</legend>
+            ${ALERT_ACTIONS.map(([k, l]) => html`<label key=${k} className=${action === k ? "on" : ""}><input type="radio" name="ft-alert-act" value=${k} checked=${action === k} onChange=${() => setAction(k)} /> ${l}</label>`)}
+          </fieldset>
+          <label className="ft-alert-note">Nota${needNote ? " (obligatoria)" : " (opcional)"}<textarea rows="2" value=${note} onInput=${e => setNote(e.target.value)} placeholder=${crit ? "Qué dijo el conductor, qué se vio en la cámara, qué se decidió" : "Detalle de la intervención"}></textarea></label>
+          ${err ? html`<p className="delta bad small">${err}</p>` : null}
+          <div className="form-actions"><button className="btn primary" disabled=${busy || !ok} onClick=${save}>${busy ? "Guardando…" : "Registrar intervención"}</button>
+            <span className="small muted">${!action ? "Elegí qué se hizo para cerrar la alerta." : needNote && note.trim().length < 3 ? "Agregá una nota para cerrar la alerta." : "Queda registrada a tu nombre, con la hora."}</span></div>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  Object.assign(GI, { FatigueTab, FatigueSpark: Spark, FatigueAlerts, ALERT_ACTIONS });
 })(window.GI);

@@ -32,7 +32,7 @@
     const set = (path, value) => setDraft(d => {
       const n = clone(d);
       let o = n;
-      for (let i = 0; i < path.length - 1; i++) o = o[path[i]];
+      for (let i = 0; i < path.length - 1; i++) o = o[path[i]] || (o[path[i]] = {});
       o[path[path.length - 1]] = value;
       return n;
     });
@@ -387,6 +387,20 @@
         <p className="muted small">Las jornadas se arman por pausas, no por día calendario: los viajes separados por menos de ${f.rest_split} h son una sola jornada (un turno noche de 19 a 7 h cuenta como una jornada del día en que empezó). Una pausa más larga cierra la jornada y es el descanso previo de la siguiente; si es menor al descanso mínimo, se marca.</p>
         <p className="muted small">Los movimientos mínimos (por ejemplo, encender el camión durante el descanso por frío o calor, o la dispersión del GPS con el vehículo parado) no cuentan como trabajo: no cortan el descanso. Si duran 5 minutos o más, ese tiempo cuenta como descanso con el motor en marcha.</p>
         <p className="muted small">El índice de fatiga es una estimación propia del add-in (no es un sistema certificado como FAID): sube mientras el conductor trabaja, más rápido manejando y de madrugada, y baja mientras descansa, más rápido si descansa de noche. Una jornada diurna normal termina cerca de 50–70; turnos noche largos o descansos cortos lo llevan por encima de 100.</p>
+      <//>
+      <${Panel} title="Alertas de fatiga con intervención obligatoria"
+        hint="Mientras el add-in está abierto (en cualquier pestaña), cada 3 minutos se recalcula el índice de los conductores en jornada. Si alguno pasa el umbral aparece una ventana que no se cierra hasta registrar qué se hizo; la intervención queda guardada con el nombre de quien la registró y la ven todos los supervisores. Solo funciona en las pantallas que tengan el add-in abierto.">
+        ${(() => { const al = Object.assign({}, GI.ALERT_DEFAULT || {}, draft.fatigue_alerts || {}); return html`<div className="form two-col">
+          <label className="inline"><input type="checkbox" disabled=${ro} checked=${!!al.on} onChange=${e => set(["fatigue_alerts", "on"], e.target.checked)} /> Activar las alertas en esta base</label>
+          <span></span>
+          <label>Alerta (intervención obligatoria) desde el índice${num(["fatigue_alerts", "warn"], al.warn, { min: 10, step: 5 })}</label>
+          <label>Alerta crítica (intervención + cámara en vivo) desde${num(["fatigue_alerts", "crit"], al.crit, { min: 10, step: 5 })}</label>
+          <label>Volver a avisar si el índice sube (puntos)${num(["fatigue_alerts", "re_rise"], al.re_rise, { min: 1, step: 1 })}</label>
+          <label>… o si pasan (horas) desde la última intervención${num(["fatigue_alerts", "re_hours"], al.re_hours, { min: 0.25, step: 0.25 })}</label>
+          <label>Si no contesta, volver a avisar a los (min)${num(["fatigue_alerts", "noanswer_min"], al.noanswer_min, { min: 1, step: 1 })}</label>
+          <label>Usuarios que reciben las alertas (separados por coma; vacío = todos los supervisores)<input type="text" disabled=${ro} value=${al.users || ""} onChange=${e => set(["fatigue_alerts", "users"], e.target.value)} placeholder="operaciones@empresa.com" /></label>
+        </div>`; })()}
+        <p className="muted small">Solo avisa por conductores en jornada. En la alerta crítica la nota es obligatoria. El botón "Ver cámara en vivo" abre el mapa de MyGeotab con el vehículo seleccionado; el video en vivo se abre desde su panel (Surfsight o GO Focus), con los permisos de cada usuario.</p>
       <//>
       <${Panel} title="Gravedad de las infracciones"
         hint="Una infracción que dura más (por ejemplo un exceso de velocidad de 3 minutos) es más peligrosa que una de segundos. Si activás la ponderación, cada minuto de duración suma un porcentaje del peso de la categoría, con un tope. Las infracciones instantáneas (frenadas, giros) no cambian.">

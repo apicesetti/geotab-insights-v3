@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Video en vivo</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #111418; color: #e8ebef; font: 14px/1.4 system-ui, sans-serif; }
+  #wrap { position: absolute; inset: 0; }
+  #msg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; padding: 16px; }
+</style>
+<!-- Video Player de Geotab (GVP): usa la sesión de MyGeotab del usuario y pide él mismo el token de video. -->
+<script src="https://storage.googleapis.com/gvp-web-libs/gvp-video-player/2026.29.02/gvp-video-player.min.js"></script>
+</head>
+<body>
+<div id="wrap"></div>
+<div id="msg">Conectando con la cámara…</div>
+<script>
+  // La página la abre el add-in dentro de un iframe: ?server=<host de MyGeotab>&serial=<serie de la cámara>.
+  // Las credenciales de la sesión llegan solo por postMessage desde la ventana que la contiene (no por URL).
+  (function () {
+    var qs = new URLSearchParams(location.search);
+    var serial = qs.get("serial");
+    var msg = document.getElementById("msg");
+    function say(t) { msg.textContent = t; msg.style.display = t ? "flex" : "none"; }
+    if (!serial || !qs.get("server")) { say("Falta la cámara o el servidor."); return; }
+    var started = false;
+    window.addEventListener("message", function (e) {
+      if (e.source !== window.parent || started) return;
+      var c = e.data && e.data.gvpCredentials;
+      if (!c || !c.sessionId) return;
+      started = true;
+      if (!window.customElements || !customElements.get("gvp-video-player")) { say("No se pudo cargar el reproductor de video de Geotab."); return; }
+      var p = document.createElement("gvp-video-player");
+      p.setAttribute("camera-serial-number", serial);
+      p.setAttribute("force-thumbnail-view", "on");
+      p.setAttribute("hide-header", "");
+      p.setAttribute("hide-widgets", "");
+      p.setAttribute("hide-map", "");
+      p.style.cssText = "position:absolute;inset:0;width:100%;height:100%;display:block;";
+      p.addEventListener("load", function () { say(""); });
+      p.addEventListener("error", function (ev) { say("No se pudo iniciar el video: " + ((ev && ev.detail) || "error del reproductor") + ". Verificá que el vehículo esté encendido y la cámara en línea."); });
+      document.getElementById("wrap").appendChild(p);
+      p.credentials = { database: c.database, username: c.userName, sessionId: c.sessionId };
+      setTimeout(function () { if (msg.style.display !== "none") say(""); }, 4000);
+    });
+    window.parent.postMessage({ gvpReady: true }, "*");
+  })();
+</script>
+</body>
+</html>

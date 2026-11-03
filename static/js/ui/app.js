@@ -27,7 +27,7 @@
   function mergeDefaults(saved, defaults) {
     if (!saved) return defaults;
     const out = { ...defaults, ...saved };
-    for (const k of ["service", "fuel", "journeys", "drivers", "ui", "fatigue", "severity"]) out[k] = { ...defaults[k], ...(saved[k] || {}) };
+    for (const k of ["service", "fuel", "journeys", "drivers", "ui", "fatigue", "severity", "fatigue_alerts"]) out[k] = { ...defaults[k], ...(saved[k] || {}) };
     out.service.group_ids = { ...defaults.service.group_ids, ...((saved.service || {}).group_ids || {}) };
     out.category_weights = { ...defaults.category_weights, ...(saved.category_weights || {}) };
     out.categories = saved.categories && saved.categories.length ? saved.categories : defaults.categories;
@@ -313,6 +313,7 @@
       ${loading != null ? html`<${Progress} value=${loading} label=${loadingLabel || "Descargando datos"} />` : null}
       <nav className="tabs">${(driverMode ? [["mi", "Mi desempeño"]] : TABS.filter(([k]) => !BETA_ONLY.has(k) || showBetaTabs())).map(([k, l]) => html`<button key=${k} className=${tab === k ? "on" : ""} onClick=${() => setTab(k)}>${l}</button>`)}</nav>
       <div className="gi-main">
+        ${view && !driverMode && GI.FatigueAlerts ? html`<${ErrorBoundary}><${GI.FatigueAlerts} view=${view} api=${api} settings=${settings} userName=${userName} /><//>` : null}
         ${error ? html`<${Info} tone="error">${error}<//>` : null}
         ${noShared && !isAdmin && !driverMode ? html`<${Info} tone="warn">Estás viendo la configuración por defecto: un administrador todavía no la configuró, o la guardó antes de que se compartiera con tu grupo. Pedile que abra el add-in y guarde la configuración (o use "Compartir con todos").<//>` : null}
         ${isAdmin && sharing && sharing.missingUsers.length ? html`<${Info} tone="warn">
@@ -418,6 +419,8 @@
   if (!SRC) { try { throw new Error("x"); } catch (e) { SRC = String(e.stack || ""); } }
   const BUILD = /githack|\/beta\/|\/exposicion\//.test(SRC) ? "beta" : "main";
   GI.BUILD = BUILD;
+  // Carpeta static/ de esta versión (para páginas auxiliares como live.html)
+  GI.STATIC_BASE = (SRC.match(/(https?:\/\/[^\s)'"]*?\/)js\/ui\/app\.js/) || [])[1] || "";
   // Cada versión toma su propio contenedor #gi3-root (si las dos están en la
   // página, getElementById devolvería siempre el primero).
   function claimRoot() {
@@ -433,6 +436,8 @@
       initialize: function (api, state, done) {
         GI._mgState = state;
         api.getSession(function (credentials, server) {
+          // sesión para el reproductor de video de Geotab (se pasa por postMessage al iframe de video)
+          GI._mgSession = { database: credentials.database, userName: credentials.userName, sessionId: credentials.sessionId, server: (typeof server === "string" && server) || window.location.hostname };
           if (!root) {
             const el = claimRoot();
             el.dataset.giOwner = BUILD;

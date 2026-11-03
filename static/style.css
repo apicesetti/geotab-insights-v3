@@ -1213,3 +1213,25 @@
 #gi3-root .ft-kband { min-width: 3px; transform: none; border-radius: 2px; }
 #gi3-root .ft-kmark { position: absolute; top: 0; bottom: 0; width: 8px; transform: translateX(-4px); border: 2px solid #c99400; border-radius: 3px; background: rgba(255,255,255,.35); z-index: 1; }
 #gi3-root .ft-up { color: #b93a0f; font-weight: 600; white-space: nowrap; }
+#gi3-root .ft-alert-bg { z-index: 2000; background: rgba(20, 24, 31, .62); }
+#gi3-root .ft-alert { max-width: 760px; border-top: 6px solid #c99400; }
+#gi3-root .ft-alert.crit { border-top-color: #b93a0f; }
+#gi3-root .ft-alert .modal-head h2 { color: #7a5a00; }
+#gi3-root .ft-alert.crit .modal-head h2 { color: #b93a0f; }
+#gi3-root .ft-alert-nav { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+#gi3-root .ft-alert-who { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: baseline; font-size: 16px; margin-bottom: 6px; }
+#gi3-root .ft-alert-f { margin-left: auto; }
+#gi3-root .ft-alert-cam { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; background: var(--sunken); border-radius: 8px; padding: 10px 12px; margin: 10px 0; }
+#gi3-root .ft-alert-cam > span { flex: none; }
+#gi3-root .ft-alert-acts { border: 1px solid var(--rule); border-radius: 8px; padding: 8px 12px; margin: 0 0 10px; display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 2px 12px; }
+#gi3-root .ft-alert-acts legend { font-weight: 600; padding: 0 4px; }
+#gi3-root .ft-alert-acts label { display: flex; gap: 8px; align-items: flex-start; padding: 5px 6px; border-radius: 6px; cursor: pointer; font-size: 14px; }
+#gi3-root .ft-alert-acts label.on { background: var(--marking-soft, #fff6d6); }
+#gi3-root .ft-alert-note { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 600; margin-bottom: 10px; }
+#gi3-root .ft-alert-note textarea { font: inherit; font-weight: 400; padding: 8px 10px; border: 1px solid var(--rule-strong); border-radius: 8px; resize: vertical; }
+#gi3-root .ft-alert-cam { flex-direction: column; align-items: stretch; }
+#gi3-root .ft-cam-bar { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; justify-content: space-between; }
+#gi3-root .ft-cam-frame { position: relative; width: 100%; max-width: 600px; align-self: center; aspect-ratio: 16 / 9; background: #111418; border-radius: 6px; overflow: hidden; }
+#gi3-root .ft-cam-frame iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+#gi3-root .ft-cam-on { color: #0b7a3e; }
+#gi3-root .ft-alert-cam > .btn.small { align-self: flex-start; }

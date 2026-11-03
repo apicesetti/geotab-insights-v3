@@ -235,6 +235,20 @@
     return out;
   }
 
+
+  // Intervenciones por alertas de fatiga (quién, cuándo, qué se hizo). Las ven todos los supervisores.
+  async function saveAlertAck(api, r) {
+    const details = { kind: "falert", ...r, updated_at: new Date().toISOString() };
+    delete details.id;
+    const id = await api.call("Add", { typeName: "AddInData", entity: { addInId: ADDIN_ID, groups: await shareGroups(api), details } });
+    return { ...details, id };
+  }
+  async function loadAlertAcks(api, sinceMs) {
+    const out = [];
+    for (const rec of await getAll(api)) { const d = parseDetails(rec); if (d && d.kind === "falert" && (!sinceMs || d.at >= sinceMs)) out.push({ ...d, id: rec.id }); }
+    return out;
+  }
+
   // Datos del usuario actual (id, si es conductor). null si no se pudo.
   async function currentUser(api, userName) {
     try {
@@ -268,5 +282,5 @@
     return saved;
   }
 
-  Object.assign(GI, { _deepestOnly: deepestOnly, shareGroups, ADDIN_ID, loadShared, saveSettings, saveBenchmark, currentUser, sharingStatus, shareWithAll, addMilestone, updateMilestone, removeMilestone, resolveIsAdmin, saveFatigueCase, loadFatigueCases, saveRoster, removeRoster, loadRosters, saveIdent, loadIdents });
+  Object.assign(GI, { saveAlertAck, loadAlertAcks, _deepestOnly: deepestOnly, shareGroups, ADDIN_ID, loadShared, saveSettings, saveBenchmark, currentUser, sharingStatus, shareWithAll, addMilestone, updateMilestone, removeMilestone, resolveIsAdmin, saveFatigueCase, loadFatigueCases, saveRoster, removeRoster, loadRosters, saveIdent, loadIdents });
 })(window.GI);

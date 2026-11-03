@@ -515,6 +515,31 @@
     return { d: lt.d, at, h: (now - at) / H };
   }
 
+
+  // ---------- Alertas con intervención obligatoria ----------
+  const ALERT_DEFAULT = { on: false, warn: 90, crit: 100, re_rise: 10, re_hours: 1, noanswer_min: 15, users: "" };
+  function alertConfig(settings) { return Object.assign({}, ALERT_DEFAULT, (settings && settings.fatigue_alerts) || {}); }
+  const ALERT_RANK = { alerta: 1, critica: 2 };
+  // items: conductores en jornada [{ drv, key, F, ... }]; acks: intervenciones registradas
+  // [{ drv, key, level, F, at, action }]. Devuelve los que requieren intervención, críticos primero.
+  // Después de una intervención se vuelve a avisar si sube de nivel, si el índice sube re_rise puntos,
+  // si pasan re_hours horas o, si no contestó, a los noanswer_min minutos.
+  function alertsDue(items, acks, cfg, now) {
+    const out = [];
+    for (const it of items) {
+      const level = it.F >= cfg.crit ? "critica" : it.F >= cfg.warn ? "alerta" : null;
+      if (!level) continue;
+      const last = acks.filter(a => a.drv === it.drv && a.key === it.key).sort((a, b) => b.at - a.at)[0];
+      if (last) {
+        const again = last.action === "nocontesta" ? now - last.at >= cfg.noanswer_min * MIN
+          : ALERT_RANK[level] > (ALERT_RANK[last.level] || 0) || it.F >= last.F + cfg.re_rise || now - last.at >= cfg.re_hours * H;
+        if (!again) continue;
+      }
+      out.push({ ...it, level, last: last || null });
+    }
+    return out.sort((a, b) => ALERT_RANK[b.level] - ALERT_RANK[a.level] || b.F - a.F);
+  }
+
   // Avance de una jornada abierta contra los límites, con proyección.
   function shiftProgress(j, fz, now) {
     const spanNow = (now - j.s) / H;
@@ -698,5 +723,5 @@
     return { current, best, tried: grid.length };
   }
 
-  Object.assign(GI, { commGap, rosterOf, projectIndex, FI_DEFAULT, FI_BANDS, fiExposure, poissonFit, calibrateIndex, FATIGUE_SIGNALS: SIGNALS, FATIGUE_CAM_CATS: CAM_CATS, buildShifts, isMicro, shiftProgress, liveTrips, fatigueLimits, fiLevel, openShiftIndex, nextShiftRisk, _fat: { overlapHours, nightFrac, circ, fiWork, fiRest, simulateDriver, habitual } });
+  Object.assign(GI, { commGap, alertsDue, alertConfig, ALERT_DEFAULT, rosterOf, projectIndex, FI_DEFAULT, FI_BANDS, fiExposure, poissonFit, calibrateIndex, FATIGUE_SIGNALS: SIGNALS, FATIGUE_CAM_CATS: CAM_CATS, buildShifts, isMicro, shiftProgress, liveTrips, fatigueLimits, fiLevel, openShiftIndex, nextShiftRisk, _fat: { overlapHours, nightFrac, circ, fiWork, fiRest, simulateDriver, habitual } });
 })(window.GI);

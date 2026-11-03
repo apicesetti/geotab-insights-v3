@@ -717,8 +717,15 @@
     });
   }
 
+
+  // Cámaras asociadas a un vehículo (Geotab Video: GO Focus y cámaras de partners como Surfsight).
+  async function loadCameras(api, devId) {
+    const r = (await api.call("Get", { typeName: "Camera", search: { deviceSearch: { deviceIds: [devId] } } })) || [];
+    return r.map(c => ({ serial: c.cameraSerialNumber, name: c.deviceName || c.name || c.cameraSerialNumber, status: String(c.status || ""), vendor: c.vendor || c.cameraVendor || "" })).filter(c => c.serial);
+  }
+
   Object.assign(GI, {
-    loadRecentTrips, loadDriveStatus, loadDriverChanges,
+    loadCameras, loadRecentTrips, loadDriveStatus, loadDriverChanges,
     loadCatalogs, loadZones, loadZoneTypes, loadPeriod, loadFuel, loadEventLocations, loadTrace, clearCache,
     _idbGetMany: idbGetMany, _idbPutMany: idbPutMany,
     _compactTrips: compactTrips, _compactExceptions: compactExceptions, _compactCounter: compactCounter, _loadFuelBoundaries: loadFuelBoundaries, _missingRuns: missingRuns, _getRangeMulti: getRangeMulti,

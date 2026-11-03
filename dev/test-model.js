@@ -553,4 +553,19 @@ assert.strictEqual(GI.durationToHours("00:11:42.0300000").toFixed(4), (11 / 60 +
   const tb = GI.liveTrips(fake, [], [{ d: "v9", r: "c9", driving: true, comm: false, since: now - 3600000 }], 24, now);
   assert.ok(!(tb.get("v9") || []).length);
 }
+
+// Alertas de fatiga: umbrales, intervención y cuándo vuelve a avisar.
+{
+  const cfg = GI.alertConfig({ fatigue_alerts: { on: true } }), now = Date.parse("2026-11-03T12:00:00Z"), M = 60000;
+  const it = [{ drv: "a", key: "k1", F: 95 }, { drv: "b", key: "k2", F: 104 }, { drv: "c", key: "k3", F: 70 }];
+  let due = GI.alertsDue(it, [], cfg, now);
+  assert.strictEqual(due.map(x => x.drv + ":" + x.level).join(), "b:critica,a:alerta");
+  const acks = [{ drv: "a", key: "k1", level: "alerta", F: 95, at: now - 10 * M, action: "bien" }, { drv: "b", key: "k2", level: "critica", F: 104, at: now - 20 * M, action: "nocontesta" }];
+  due = GI.alertsDue(it, acks, cfg, now);
+  assert.strictEqual(due.map(x => x.drv).join(), "b"); // no contestó: vuelve a los 15 min; a ya intervenido
+  assert.strictEqual(GI.alertsDue([{ drv: "a", key: "k1", F: 101 }], acks, cfg, now).map(x => x.level).join(), "critica"); // sube de nivel
+  assert.strictEqual(GI.alertsDue([{ drv: "a", key: "k1", F: 99 }], acks, cfg, now).length, 0);
+  assert.strictEqual(GI.alertsDue([{ drv: "a", key: "k1", F: 96 }], acks, cfg, now + 61 * M).length, 1); // pasó 1 h
+  assert.strictEqual(GI.alertsDue([{ drv: "a", key: "k9", F: 96 }], acks, cfg, now).length, 1); // otra jornada
+}
 console.log("OK");
