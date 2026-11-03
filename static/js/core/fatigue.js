@@ -91,20 +91,33 @@
       while (ji < list.length && list[ji].e <= a) ji++;
       const j = list[ji];
       const working = j && j.s < b && j.e > a;
-      let df = 0;
       if (working) {
-        if (j._fiStart == null) { j._fiStart = F; j.fiPeak = F; j.fiPeakAt = j.s; }
+        // el paso de 15 min puede tomar parte de descanso antes del inicio o después del fin de la
+        // jornada: se trabaja solo el tramo dentro de la jornada y el resto se descansa, así el pico
+        // queda en la hora real de fin (no al cierre del paso de 15 min)
+        const ws = Math.max(a, j.s), we = Math.min(b, j.e), inH = (we - ws) / H;
+        if (j._fiStart == null) { if (ws > a) F = fiStep(F, a, false, 0, (ws - a) / H); j._fiStart = F; j.fiPeak = F; j.fiPeakAt = j.s; }
+        else if (ws > a) F = fiStep(F, a, false, 0, (ws - a) / H);
         let ov = 0;
         for (let k = 0; k < j.trips.length; k++) { const t = j.trips[k]; if (t.e <= a) continue; if (t.s >= b) break; const len = t.e - t.s, fr = len > 0 ? Math.min(1, (t.dh * H) / len) : 1; ov += (Math.min(b, t.e) - Math.max(a, t.s)) * fr; }
-        df = Math.min(1, ov / FI.step);
-      }
-      if (!working && poorAt(a)) F = F * Math.pow(1 - sleepQ(a) * 0.5, FI.step / H);
-      else F = fiStep(F, a, working, df, FI.step / H);
+        const df = we > ws ? Math.min(1, ov / (we - ws)) : 0;
+        F = fiStep(F, ws, true, df, inH);
+        if (F > j.fiPeak) { j.fiPeak = F; j.fiPeakAt = we; }
+        j.fiEnd = F;
+        if (we < b) F = (poorAt(we) ? F * Math.pow(1 - sleepQ(we) * 0.5, (b - we) / H) : fiStep(F, we, false, 0, (b - we) / H));
+      } else if (poorAt(a)) F = F * Math.pow(1 - sleepQ(a) * 0.5, FI.step / H);
+      else F = fiStep(F, a, false, 0, FI.step / H);
       vals[i] = F;
-      if (working) { if (F > j.fiPeak) { j.fiPeak = F; j.fiPeakAt = b; } j.fiEnd = F; }
     }
     for (const j of list) { j.fiStart = j._fiStart != null ? j._fiStart : FI.start; delete j._fiStart; }
-    return { t0, step: FI.step, vals, at: t => { const i = Math.floor((t - t0) / FI.step); return i < 0 ? FI.start : vals[Math.min(vals.length - 1, i)]; } };
+    // vals[i] es el valor al final del paso i (t0 + (i + 1) · paso): at(t) interpola entre pasos
+    return { t0, step: FI.step, vals, at: t => {
+      const k = (t - t0) / FI.step - 1;
+      if (k < -1) return FI.start;
+      if (k >= vals.length - 1) return vals[vals.length - 1];
+      const lo = Math.floor(k), v0 = lo < 0 ? FI.start : vals[lo], v1 = vals[lo + 1];
+      return v0 + (v1 - v0) * (k - lo);
+    } };
   }
   function fiLevel(v, fz) { return v == null ? null : v >= fz.fi_high + 20 ? "muy alto" : v >= fz.fi_high ? "alto" : v >= fz.fi_mod ? "moderado" : "bajo"; }
 
