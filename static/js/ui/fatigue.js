@@ -1435,8 +1435,15 @@ ${restFrom != null && restFrom < j.s ? (() => { const g = GAP[restKind(j, fz)]; 
         }, 30000);
       } catch (e) { const m = String((e && e.message) || e); stop(); setSt({ phase: "error", err: /failed to fetch|networkerror|load failed/i.test(m) ? "el navegador no pudo conectarse con el servicio de cámaras (" + m + ")" : m }); }
     }
-    useEffect(() => { if (auto && /online/i.test(cam.status)) start(); }, []);
+    // Surfsight solo deja cargar su reproductor desde páginas de MyGeotab: en la página independiente
+    // (otro dominio) el navegador lo bloquea, así que ahí se usa el reproductor de MyGeotab.
+    const standalone = !!GI.MG_BASE_URL;
+    useEffect(() => { if (auto && !standalone && /online/i.test(cam.status)) start(); }, []);
+
     useEffect(() => { if (st.phase === "live") { stop(); start(); } }, [lens]);
+    if (standalone) return html`<div className="ft-surf"><div className="ft-cam-bar">
+      <span className="small muted">Desde la página independiente no se puede mostrar el video de Surfsight: su servidor solo lo permite dentro de MyGeotab.</span>
+      <button className="btn primary" onClick=${() => GI.openLiveVideo(dev)}>Ver en vivo en MyGeotab ↗</button></div></div>`;
     return html`<div className="ft-surf">
       <div className="ft-cam-bar">
         <span className="small">Lente: ${(lenses || [1, 2]).map(l => html`<button key=${l} type="button" className=${"btn small" + (l === lens ? " primary" : "")} aria-pressed=${l === lens} onClick=${() => setLens(l)}>${SURF_LENSES[l] || "Lente " + l}</button>`)}</span>
