@@ -143,6 +143,8 @@
     const sim = entry.sim, pts = [];
     for (let t = Math.max(t0, sim.t0); t <= now; t += H) pts.push(x(t).toFixed(1) + "," + y(sim.at(t)).toFixed(1));
     const pp = proj ? proj.pts.filter((p, i) => i % 4 === 0 || i === proj.pts.length - 1).map(([t, v]) => x(t).toFixed(1) + "," + y(v).toFixed(1)) : [];
+    const cams = [];
+    for (const j of entry.list) if (j.e > t0) for (const e of j.cam || []) if (e.t >= t0 && e.t <= now) cams.push(e);
     return html`<svg className="ft-spark" viewBox=${"0 0 " + W + " " + Hh} width="220" height="44" aria-hidden="true">
       <rect x=${x(now)} y="0" width=${W - x(now)} height=${Hh} fill="#f4f6f9" />
       ${off && off.at < now ? html`<rect x=${x(Math.max(t0, off.at))} y="0" width=${x(now) - x(Math.max(t0, off.at))} height=${Hh} fill="#b8bec8" opacity="0.35"><title>Sin comunicación del vehículo</title></rect>` : null}
@@ -150,6 +152,7 @@
       <line x1="0" x2=${W} y1=${y(fz.fi_mod)} y2=${y(fz.fi_mod)} stroke="#c99400" strokeDasharray="2 3" opacity="0.6" />
       ${pts.length ? html`<path d=${"M" + pts.join("L")} fill="none" stroke="#1f2a37" strokeWidth="1.6" />` : null}
       ${pp.length ? html`<path d=${"M" + pp.join("L")} fill="none" stroke="#1f2a37" strokeWidth="1.4" strokeDasharray="3 2" opacity="0.7" />` : null}
+      ${cams.map((e, i) => { const cy = Math.max(6, y(sim.at(e.t)) - 2); return html`<path key=${"c" + i} d=${"M" + x(e.t).toFixed(1) + " " + cy.toFixed(1) + " l-3.5 -6 h7 z"} fill=${CAM_COLORS[e.cat] || "#b93a0f"} opacity="0.9"><title>${new Date(e.t).toLocaleString("es-AR", { weekday: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) + " · " + GI.catLabel(e.cat) + " · índice " + Math.round(sim.at(e.t))}</title></path>`; })}
       <line x1=${x(now)} x2=${x(now)} y1="0" y2=${Hh} stroke="#2a78d6" />
     </svg>`;
   }
@@ -223,7 +226,14 @@
             const dev = (r.last.trips[r.last.trips.length - 1] || {}).d, known = cams && cams.size > 0, cs = dev && known && cams.get(dev), on = cs && cs.some(c => /online/i.test(c.status)), unk = cs && cs.every(c => !c.status);
             const btn = html`<button className=${"btn small" + (on ? " primary" : "")} title=${!known ? "Abre el video en vivo de MyGeotab" : on ? "Cámara en línea" : "La cámara no figura en línea"} onClick=${e => { e.stopPropagation(); known ? setWatch({ drv: r.id, dev }) : GI.openLiveVideo(dev); }}>▶ En vivo</button>`;
             return html`<td>${cams == null ? null : !dev ? html`<span className="small muted">–</span>` : !known ? btn : cs ? html`${btn}${on || unk ? null : html`<div className="small muted">sin conexión</div>`}` : html`<span className="small muted">sin cámara</span>`}</td>`; })()}
-        </tr>`; })}</tbody></table></div>`}
+        </tr>`; })}</tbody></table></div>
+        <div className="ft-tl-legend small">
+          <span>En la mini curva, eventos de cámara:</span>
+          <span><i className="tri" style=${{ borderBottomColor: CAM_COLORS.fatiga }}></i>bostezo / fatiga</span>
+          <span><i className="tri" style=${{ borderBottomColor: CAM_COLORS.distraccion }}></i>distracción</span>
+          <span><i className="tri" style=${{ borderBottomColor: CAM_COLORS.salida_carril }}></i>salida de carril</span>
+          <span>· pasá el mouse por un triángulo para ver hora y tipo</span>
+        </div>`}
     ${cams && cams.size && cams.diag && cams.diag.statusErr ? html`<p className="small muted">Cámaras: ${cams.size} vehículos con cámara; el estado de conexión no está disponible (${cams.diag.statusErr}).</p>` : null}
     ${cams && !cams.size ? html`<p className="small muted">Cámaras: ${camErr ? "Geotab Video no respondió (" + camErr + ")" : cams.diag ? "Geotab Video devolvió " + cams.diag.total + " cámara(s), ninguna asociada a un vehículo" + (cams.diag.keys ? " (campos: " + cams.diag.keys + ")" : "") : "sin datos"}. El botón ▶ En vivo abre el reproductor de MyGeotab de cada vehículo.</p>` : null}
     ${watch ? html`<${Modal} wide title=${"Video en vivo · " + drvName(view, watch.drv) + " · " + devName(view, watch.dev)} onClose=${() => setWatch(null)}>
