@@ -723,5 +723,136 @@
     return { current, best, tried: grid.length };
   }
 
-  Object.assign(GI, { commGap, alertsDue, alertConfig, ALERT_DEFAULT, rosterOf, projectIndex, FI_DEFAULT, FI_BANDS, fiExposure, poissonFit, calibrateIndex, FATIGUE_SIGNALS: SIGNALS, FATIGUE_CAM_CATS: CAM_CATS, buildShifts, isMicro, shiftProgress, liveTrips, fatigueLimits, fiLevel, openShiftIndex, nextShiftRisk, _fat: { overlapHours, nightFrac, circ, fiWork, fiRest, simulateDriver, habitual } });
+
+  // ---------- ¿Quién manejó? Relevos sin llave, con pruebas ----------
+  // Una jornada muy larga (j) en un vehículo D suele ser el turno de otro chofer que no pasó su llave.
+  // Se buscan pruebas en los viajes de toda la flota (fin de viaje = stopPoint) y en las llaves:
+  //  · llegada: otro conductor llega en otro vehículo y se detiene junto a D (D parado); D arranca
+  //    después y el vehículo en que llegó se va con otro conductor o queda ahí → ese conductor se quedó.
+  //  · el chofer de la jornada pasa su llave en otro vehículo mientras D anda, o lejos de D.
+  //  · vuelve: se pasa otra vez su llave en D, o llega a D en otro vehículo → fin del tramo.
+  //  · salida: otro conductor pasa su llave en un vehículo junto a D al terminar el tramo.
+  //  · la velocidad media cambia mucho (solo confirma).
+  const NEAR_KM = 0.3, FAR_KM = 2;
+  function distKm(a, b) {
+    if (!a || !b || a.x == null || b.x == null || a.y == null || b.y == null) return null;
+    const r = Math.PI / 180, dLat = (b.y - a.y) * r, dLon = (b.x - a.x) * r;
+    const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.y * r) * Math.cos(b.y * r) * Math.sin(dLon / 2) ** 2;
+    return 2 * 6371 * Math.asin(Math.min(1, Math.sqrt(h)));
+  }
+  // primer índice con t.s > x (viajes ordenados por inicio)
+  function upper(trips, x) { let lo = 0, hi = trips.length; while (lo < hi) { const m = (lo + hi) >> 1; if (trips[m].s <= x) lo = m + 1; else hi = m; } return lo; }
+  // dónde estaba un vehículo en t: detenido al final de su último viaje, o andando (desde / hacia)
+  function posAt(trips, t) {
+    const i = upper(trips, t) - 1;
+    if (i < 0) return null;
+    const tr = trips[i];
+    if (tr.e > t) return { moving: true, from: i > 0 ? trips[i - 1] : null, to: tr };
+    return { moving: false, p: tr, since: tr.e };
+  }
+  const minDist = (pt, pos) => {
+    if (!pos) return null;
+    if (!pos.moving) return distKm(pt, pos.p);
+    const a = distKm(pt, pos.from), b = distKm(pt, pos.to);
+    return a == null ? b : b == null ? a : Math.min(a, b);
+  };
+  function identInfer(j, tripsByDevice, keys, o) {
+    o = o || {};
+    const by = new Map();
+    for (const t of j.trips || []) by.set(t.d, (by.get(t.d) || 0) + (t.dh || 0) + 1e-6);
+    const D = [...by.entries()].sort((a, b) => b[1] - a[1]).map(x => x[0])[0] || (j.devices || [])[0];
+    const dTrips = (tripsByDevice && tripsByDevice.get(D)) || [];
+    if (!D || !dTrips.length) return null;
+    const proofs = [];
+    const drvKeys = (keys || []).filter(k => k.r === j.drv).sort((a, b) => a.t - b.t);
+    // 1) llegadas de otro conductor junto a D parado
+    const arrivals = [];
+    for (const [O, trips] of tripsByDevice) {
+      if (O === D || !trips.length) continue;
+      for (let i = Math.max(0, upper(trips, j.s - 6 * H) - 1); i < trips.length && trips[i].s < j.e; i++) {
+        const t = trips[i];
+        if (!t.r || t.r === j.drv || t.x == null || t.e < j.s + H || t.e > j.e - H) continue;
+        const p = posAt(dTrips, t.e);
+        if (!p || p.moving) continue;
+        const dk = distKm(t, p.p);
+        if (dk == null || dk > NEAR_KM) continue;
+        const dep = dTrips[upper(dTrips, t.e)];
+        if (!dep || dep.s - t.e > 3 * H || dep.s > j.e - H) continue;
+        const next = trips[i + 1];
+        const stays = !next || next.r !== t.r || next.s > dep.s + 30 * MIN;
+        arrivals.push({ t: t.e, dev: O, drv: t.r, km: dk, dep: dep.s, stays, leftWith: next && next.r !== t.r && next.s < dep.s + 30 * MIN ? next.r : null });
+      }
+    }
+    arrivals.sort((a, b) => (b.stays - a.stays) || (a.t - b.t));
+    const arrival = arrivals[0] || null;
+    // 2) el chofer de la jornada en otro vehículo (mientras D anda, o lejos de D)
+    let away = null;
+    const awayFrom = arrival ? arrival.dep : j.s + 2 * H;
+    for (const k of drvKeys) {
+      if (k.d === D || k.t < awayFrom || k.t > j.e + 30 * MIN) continue;
+      const pd = posAt(dTrips, k.t), po = posAt((tripsByDevice && tripsByDevice.get(k.d)) || [], k.t);
+      const here = po && !po.moving ? po.p : null;
+      const km = here ? minDist(here, pd) : null;
+      if ((pd && pd.moving) || (km != null && km > FAR_KM)) { away = { t: k.t, dev: k.d, km, moving: !!(pd && pd.moving) }; break; }
+    }
+    // inicio del tramo
+    let from = arrival ? arrival.dep : null;
+    if (from == null && away) {
+      const pd = posAt(dTrips, away.t);
+      from = pd && pd.moving ? pd.to.s : (dTrips[upper(dTrips, away.t)] || {}).s || null;
+    }
+    if (from == null && o.habit && o.habit.from != null) from = o.habit.from;
+    if (from == null) return { D, conf: "baja", proofs, from: null, to: null, other: o.habit ? o.habit.drv || null : null, candidates: cands([], o) };
+    // 3) fin: vuelve a pasar su llave en D, o llega a D en otro vehículo
+    let back = null;
+    const re = drvKeys.find(k => k.d === D && k.t > from + 30 * MIN && k.t <= j.e + 30 * MIN);
+    if (re) back = { t: re.t, how: "llave" };
+    for (const [O, trips] of tripsByDevice) {
+      if (O === D) continue;
+      for (let i = Math.max(0, upper(trips, from) - 1); i < trips.length && trips[i].s < j.e; i++) {
+        const t = trips[i];
+        if (t.r !== j.drv || t.e <= from + 30 * MIN || t.e > j.e || (back && t.e >= back.t)) continue;
+        const p = posAt(dTrips, t.e);
+        if (p && !p.moving && (distKm(t, p.p) ?? 99) <= NEAR_KM) { back = { t: t.e, how: "llega", dev: O }; break; }
+      }
+    }
+    let to = back ? back.t : o.habit && o.habit.to != null && o.habit.to > from ? o.habit.to : j.e;
+    to = Math.min(to, j.e);
+    // 4) salida: otro conductor pasa su llave junto a D al final del tramo
+    let departure = null;
+    for (const k of keys || []) {
+      if (!k.r || k.r === j.drv || k.d === D || k.t < to - H || k.t > to + 3 * H) continue;
+      const po = posAt((tripsByDevice && tripsByDevice.get(k.d)) || [], k.t), pd = posAt(dTrips, k.t);
+      if (!po || po.moving || !pd) continue;
+      const km = minDist(po.p, pd);
+      if (km != null && km <= NEAR_KM) { departure = { t: k.t, dev: k.d, drv: k.r }; break; }
+    }
+    const other = (arrival && arrival.stays && arrival.drv) || (departure && departure.drv) || (arrival && arrival.drv) || (o.habit && o.habit.drv) || null;
+    // 5) forma de manejar: velocidad media en D antes del tramo y dentro
+    const spd = list => { const km = list.reduce((a, t) => a + (t.km || 0), 0), dh = list.reduce((a, t) => a + (t.dh || 0), 0); return dh > 0.5 ? km / dh : null; };
+    const inJ = dTrips.filter(t => t.s >= j.s - MIN && t.s <= j.e && (t.km || 0) > 1);
+    const vIn = spd(inJ.filter(t => t.s >= from && t.s < to)), vOut = spd(inJ.filter(t => t.s < from || t.s >= to));
+    const style = vIn && vOut && (vIn / vOut >= 1.25 || vIn / vOut <= 0.8) ? { vIn, vOut } : null;
+    // confianza
+    let score = 0;
+    if (arrival) { score += arrival.stays ? 2 : 1; proofs.push({ kind: "llegada", strong: arrival.stays, t: arrival.t, ...arrival }); }
+    if (away) { score += 2; proofs.push({ kind: "lejos", strong: true, ...away }); }
+    if (departure) { if (!other || departure.drv === other) score += 1; proofs.push({ kind: "salida", strong: false, ...departure }); }
+    if (back) { score += 1; proofs.push({ kind: "vuelve", strong: false, ...back }); }
+    if (style) proofs.push({ kind: "estilo", strong: false, ...style });
+    const conf = score >= 4 ? "alta" : score >= 2 ? "media" : "baja";
+    if (!proofs.length && o.habit) proofs.push({ kind: "habito", strong: false, drv: o.habit.drv });
+    const tramo = dTrips.filter(t => t.r === j.drv && t.s >= from - MIN && t.s < to);
+    return { D, from, to, other, conf, score, proofs, arrival, away, back, departure, style,
+      n: tramo.length, km: tramo.reduce((a, t) => a + (t.km || 0), 0), dh: tramo.reduce((a, t) => a + (t.dh || 0), 0),
+      snaps: dTrips.filter(t => t.s >= j.s - MIN && t.s <= j.e).map(t => t.s).concat([j.e]),
+      candidates: cands(arrivals.map(a => ({ drv: a.drv, why: a.stays ? "llego" : "paso", t: a.t, dev: a.dev })).concat(departure ? [{ drv: departure.drv, why: "salio", t: departure.t, dev: departure.dev }] : []), o) };
+  }
+  function cands(list, o) {
+    const out = new Map();
+    for (const c of list) if (c.drv && !out.has(c.drv)) out.set(c.drv, c);
+    for (const h of (o && o.others) || []) if (h.drv && !out.has(h.drv)) out.set(h.drv, { drv: h.drv, why: "habito", h });
+    return [...out.values()];
+  }
+  Object.assign(GI, { identInfer, distKm, commGap, alertsDue, alertConfig, ALERT_DEFAULT, rosterOf, projectIndex, FI_DEFAULT, FI_BANDS, fiExposure, poissonFit, calibrateIndex, FATIGUE_SIGNALS: SIGNALS, FATIGUE_CAM_CATS: CAM_CATS, buildShifts, isMicro, shiftProgress, liveTrips, fatigueLimits, fiLevel, openShiftIndex, nextShiftRisk, _fat: { overlapHours, nightFrac, circ, fiWork, fiRest, simulateDriver, habitual } });
 })(window.GI);

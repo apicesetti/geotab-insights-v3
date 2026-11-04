@@ -209,6 +209,21 @@
       driverChanges.push({ t: base.getTime() + (swap ? 17.48 : 17) * H - 60000, d: dev3.id, r: dm.id });
     }
 
+    // El día del relevo sin llave, Vejar llega en una camioneta al 1871 (05:52) y se queda; Marchan se va
+    // en la camioneta a la base (pasa su llave ahí) y vuelve a la tarde; Vejar se lleva la camioneta.
+    {
+      const pk = { id: "b303", name: "LIV-REL", serialNumber: "G9303", groups: [{ id: "gLiv" }, { id: "GroupGasolinePetrolId" }], _type: "liviano", _svc: "corta", _l100: 11, _fuel: false, _idleL: 1, _drivers: [dm, dv] };
+      devices.push(pk);
+      const b5 = new Date(today); b5.setDate(b5.getDate() - 5); const B = b5.getTime();
+      const baseP = { x: -60.94, y: -32.95 }, truckP = { x: -60.6402, y: -32.9501 };
+      const pt = (drv, s, e, stop) => trips.push({ id: "t" + (++tid), device: { id: pk.id }, driver: { id: drv.id }, start: new Date(B + s * H).toISOString(), stop: new Date(B + e * H).toISOString(),
+        distance: 28, drivingDuration: dur(e - s), idlingDuration: dur(0.02), stopPoint: stop, _a: zc.zRos });
+      pt(dv, 5.33, 5.87, truckP); driverChanges.push({ t: B + 5.3 * H, d: pk.id, r: dv.id });
+      driverChanges.push({ t: B + 6.07 * H, d: pk.id, r: dm.id }); pt(dm, 6.08, 6.67, baseP);
+      driverChanges.push({ t: B + 16.42 * H, d: pk.id, r: dm.id }); pt(dm, 16.43, 16.92, truckP);
+      driverChanges.push({ t: B + 16.97 * H, d: pk.id, r: dv.id }); pt(dv, 17, 17.5, baseP);
+    }
+
     // jornada en curso
     const now = Date.now();
     let t = now - 7 * H;

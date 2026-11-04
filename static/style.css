@@ -1286,3 +1286,47 @@
 #gi3-root .hm-routecta { margin: 6px 0 14px; }
 #gi3-root .hm-detail-cta { display: flex; justify-content: flex-end; margin: -4px 0 8px; }
 #gi3-root .tbl tr.row-warn td { background: #fffbea; }
+
+/* ¿Quién manejó? — conclusión con pruebas */
+#gi3-root .ft-id-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+#gi3-root .ft-id-badge { font-size: 13px; font-weight: 700; padding: 3px 10px; border-radius: 12px; }
+#gi3-root .ft-id-badge.alta, #gi3-root .ft-id-conf.alta { background: #e3f1e8; color: #1d5c34; }
+#gi3-root .ft-id-badge.media, #gi3-root .ft-id-conf.media { background: #fff1d6; color: #6e4a05; }
+#gi3-root .ft-id-badge.baja, #gi3-root .ft-id-conf.baja { background: #eceff3; color: #3d4654; }
+#gi3-root .ft-id-conf { font-size: 12px; font-weight: 700; padding: 2px 9px; border-radius: 10px; }
+#gi3-root .ft-id-done { font-size: 13px; background: #fff; border: 1px solid var(--rule); border-radius: 6px; padding: 6px 10px; }
+#gi3-root .ft-ident p.ft-id-verdict { font-size: 16px; line-height: 1.45; }
+#gi3-root .ft-id-proofs { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; }
+#gi3-root .ft-id-proof { background: #fff; border: 1px solid var(--rule); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 3px; font-size: 13px; line-height: 1.45; }
+#gi3-root .ft-id-proof b { font-size: 14px; }
+#gi3-root .ft-id-tag { font-size: 11px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; color: #6e4a05; }
+#gi3-root .ft-id-tag.strong { color: #1d5c34; }
+#gi3-root .ft-id-tl { background: #fff; border: 1px solid var(--rule); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+#gi3-root .ft-id-row { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 10px; align-items: center; }
+#gi3-root .ft-id-lab { font-size: 13px; font-weight: 600; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#gi3-root .ft-id-track { position: relative; height: 30px; background: var(--sunken); border-radius: 5px; touch-action: none; }
+#gi3-root .ft-id-seg { position: absolute; top: 3px; height: 24px; border-radius: 3px; min-width: 2px; font-size: 11.5px; font-weight: 600; color: #fff; line-height: 24px; padding: 0 6px; box-sizing: border-box; overflow: hidden; white-space: nowrap; }
+#gi3-root .ft-id-seg.same, #gi3-root .ft-id-legend i.same { background: #2a6fdb; }
+#gi3-root .ft-id-seg.inf, #gi3-root .ft-id-legend i.inf { background: repeating-linear-gradient(135deg, #c85f10 0 7px, #e0823a 7px 14px); }
+#gi3-root .ft-id-seg.oth, #gi3-root .ft-id-legend i.oth { background: #c85f10; }
+#gi3-root .ft-id-seg.x, #gi3-root .ft-id-legend i.x { background: #5b6472; }
+#gi3-root .ft-id-seg.none, #gi3-root .ft-id-legend i.none { background: #c3c9d2; color: #3d4654; }
+#gi3-root .ft-id-handle { position: absolute; top: -3px; width: 14px; height: 36px; margin-left: -7px; border: 2px solid #1f2a37; border-radius: 5px; background: #fff; cursor: ew-resize; padding: 0; touch-action: none; z-index: 2; }
+#gi3-root .ft-id-handle:focus-visible { outline: 3px solid #2a78d6; outline-offset: 1px; }
+#gi3-root .ft-id-marks { position: relative; height: 22px; }
+#gi3-root .ft-id-mark { position: absolute; top: 0; transform: translateX(-50%); font-size: 11px; font-weight: 700; color: #1d5c34; white-space: nowrap; display: flex; flex-direction: column; align-items: center; }
+#gi3-root .ft-id-mark i { display: block; width: 2px; height: 8px; background: #1d5c34; }
+#gi3-root .ft-id-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; color: var(--text-2); }
+#gi3-root .ft-id-legend span { display: inline-flex; align-items: center; gap: 5px; }
+#gi3-root .ft-id-legend i { display: inline-block; width: 16px; height: 10px; border-radius: 2px; }
+#gi3-root .ft-id-adjust { display: flex; flex-direction: column; gap: 8px; background: #fff; border: 1px solid var(--rule); border-radius: 8px; padding: 10px 12px; }
+#gi3-root .ft-id-cands { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 8px; }
+#gi3-root .ft-id-cand { display: flex; gap: 8px; align-items: flex-start; border: 1px solid var(--rule-strong); border-radius: 8px; padding: 8px 10px; font-size: 13px; line-height: 1.4; cursor: pointer; }
+#gi3-root .ft-id-cand.on { border: 2px solid #1f2a37; padding: 7px 9px; }
+#gi3-root .ft-id-cand select { margin-top: 4px; max-width: 100%; }
+#gi3-root .ft-id-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; border-top: 1px solid #f2d27a; padding-top: 10px; }
+#gi3-root .ft-id-more summary { cursor: pointer; font-weight: 600; font-size: 13px; }
+#gi3-root .ft-id-more[open] summary { margin-bottom: 8px; }
+#gi3-root .ft-ident-detail { display: flex; flex-direction: column; gap: 8px; }
+#gi3-root .ft-id-bulk { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin: 4px 0 10px; }
+@media (max-width: 640px) { #gi3-root .ft-id-row { grid-template-columns: 80px minmax(0, 1fr); } }

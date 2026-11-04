@@ -396,62 +396,210 @@ ${restFrom != null && restFrom < j.s ? (() => { const g = GAP[restKind(j, fz)]; 
   const minTxt = m => String(Math.floor(m / 60)).padStart(2, "0") + ":" + String(Math.round(m % 60)).padStart(2, "0");
   const circDiff = (a, b) => { const d = Math.abs(a - b) % 1440; return Math.min(d, 1440 - d); };
 
-  function IdentPanel({ view, api, j, shifts, rec, userName, onSaved }) {
+  // Sugerencia por horario habitual (respaldo cuando no hay pruebas): el turno del otro chofer de este
+  // vehículo dentro de la jornada; termina cuando se vuelve a pasar la llave del mismo conductor.
+  function habitSuggest(j, shifts, keys) {
     const dev = j.devices[0];
-    const [keys, setKeys] = useState(null);
-    useEffect(() => {
-      let off = false;
-      if (!GI.loadDriverChanges) { setKeys([]); return; }
-      GI.loadDriverChanges(api, j.devices, j.s - 6 * H, j.e + 2 * H).then(k => { if (!off) setKeys(k); }).catch(() => { if (!off) setKeys([]); });
-      return () => { off = true; };
-    }, [j.key]);
-    const habits = useMemo(() => devHabits(shifts, dev, j.key), [shifts, j.key]);
-    const mine = habits.find(h => h.drv === j.drv), others = habits.filter(h => h.drv !== j.drv);
-    // tramo dudoso: el horario habitual del otro chofer de este vehículo dentro de la jornada; termina
-    // cuando se vuelve a pasar la llave del mismo conductor (empieza su turno) o al cumplirse la jornada habitual del otro
-    const jStartMin = new Date(j.s).getHours() * 60 + new Date(j.s).getMinutes();
+    const habits = devHabits(shifts, dev, j.key);
+    const others = habits.filter(h => h.drv !== j.drv);
     const sugOther = others.slice().sort((a, b) => b.n - a.n)[0];
-    let sugFrom = null, sugTo = null, reswipe = null;
+    let from = null, to = null, reswipe = null;
     if (sugOther) {
-      for (let d = new Date(j.s - 86400000).setHours(0, 0, 0, 0); d < j.e && sugFrom == null; d += 86400000) {
+      for (let d = new Date(j.s - 86400000).setHours(0, 0, 0, 0); d < j.e && from == null; d += 86400000) {
         const hs = d + sugOther.startMin * MIN;
         const st = Math.abs(hs - j.s) <= 2 * H ? j.s : hs;
         if (st < j.s || st > j.e - 2 * H) continue;
-        reswipe = (keys || []).find(k => k.r === j.drv && k.t > st + 3 * H && k.t < j.e - H) || null;
-        sugFrom = st; sugTo = reswipe ? reswipe.t : Math.min(j.e, st + sugOther.span * H);
+        reswipe = (keys || []).find(k => k.d === dev && k.r === j.drv && k.t > st + 3 * H && k.t < j.e - H) || null;
+        from = st; to = reswipe ? reswipe.t : Math.min(j.e, st + sugOther.span * H);
       }
     }
-    const otherKey = sugOther && sugFrom != null && (keys || []).some(k => k.r === sugOther.drv && k.t >= sugFrom - H && k.t <= sugTo);
-    const [outcome, setOutcome] = useState(rec ? rec.outcome : "relevo");
-    const [other, setOther] = useState(rec ? rec.other || "" : "");
-    const [from, setFrom] = useState(rec && rec.from ? isoLocal(rec.from) : "");
-    const [at, setAt] = useState(rec && rec.at ? isoLocal(rec.at) : "");
-    const [touched, setTouched] = useState(false); // si la persona cambió algo, no se pisa con la sugerencia
+    return { habits, others, habit: sugOther && from != null ? { drv: sugOther.drv, from, to } : null, reswipe };
+  }
+  const CONF = { alta: ["Relevo casi seguro", "alta"], media: ["Relevo probable", "media"], baja: ["Sin pruebas claras", "baja"] };
+  const confTag = c => html`<span className=${"ft-id-conf " + c}>${c === "alta" ? "Alta" : c === "media" ? "Media" : "Baja"}</span>`;
+  function inferFor(view, j, shifts, keys, trips) {
+    const hs = habitSuggest(j, shifts, keys);
+    let inf = null;
+    try { inf = GI.identInfer ? GI.identInfer(j, trips || view.model.tripsByDevice, keys, { habit: hs.habit, others: hs.others }) : null; } catch (e) { console.warn("[Geotab Insights] identInfer", e); }
+    return { hs, inf };
+  }
+
+  function IdentPanel({ view, api, j, shifts, rec, userName, onSaved, allTrips }) {
+    const [keys, setKeys] = useState(null);
     useEffect(() => {
-      if (rec || touched) return;
-      if (sugOther) setOther(sugOther.drv);
-      if (sugFrom != null) setFrom(isoLocal(sugFrom));
-      if (sugTo != null) setAt(isoLocal(sugTo));
-    }, [sugOther && sugOther.drv, sugFrom, sugTo, keys]);
+      let off = false;
+      const load = GI.loadDriverChangesWindows ? GI.loadDriverChangesWindows(api, [[j.s - 6 * H, j.e + 3 * H]]).then(r => r[0])
+        : GI.loadDriverChanges ? GI.loadDriverChanges(api, j.devices, j.s - 6 * H, j.e + 2 * H) : Promise.resolve([]);
+      load.then(k => { if (!off) setKeys(k || []); }).catch(e => { console.warn("[Geotab Insights] llaves", e); if (!off) setKeys([]); });
+      return () => { off = true; };
+    }, [j.key]);
+    const trips = allTrips || view.model.tripsByDevice;
+    const { hs, inf } = useMemo(() => (keys ? inferFor(view, j, shifts, keys, trips) : { hs: habitSuggest(j, shifts, []), inf: null }), [keys, j.key, shifts]);
+    const D = (inf && inf.D) || j.devices[0];
+    const A = drvName(view, j.drv);
+    const [mode, setMode] = useState("view");
+    const [from, setFrom] = useState(rec && rec.outcome === "relevo" && rec.from ? rec.from : null);
+    const [to, setTo] = useState(rec && rec.outcome === "relevo" && rec.at ? rec.at : null);
+    const [other, setOther] = useState(rec && rec.outcome === "relevo" ? rec.other || "" : null);
+    const [touched, setTouched] = useState(!!(rec && rec.outcome === "relevo"));
+    const done = !!(rec && rec.outcome === "relevo" && rec.from);
+    useEffect(() => {
+      if (done) { setFrom(rec.from); setTo(rec.at); setOther(rec.other || ""); setTouched(true); return; }
+      if (touched || !inf) return;
+      if (inf.from != null) setFrom(inf.from);
+      if (inf.to != null) setTo(inf.to);
+      setOther(inf.other || "");
+    }, [inf, rec]);
+    // una jornada ya partida por un relevo guardado conserva la clave: se muestra la jornada original
+    const js = done ? rec.s : j.s, je = done ? rec.e : j.e;
     const [busy, setBusy] = useState(false), [msg, setMsg] = useState(null);
-    const atMs = at ? new Date(at).getTime() : null, fromMs = from ? new Date(from).getTime() : null;
-    async function save() {
+    // Cancelar: vuelve a lo guardado o a lo que propone el add-in
+    function reset() {
+      if (rec && rec.outcome === "relevo" && rec.from) { setFrom(rec.from); setTo(rec.at); setOther(rec.other || ""); setTouched(true); return; }
+      setTouched(false); setFrom(inf ? inf.from : null); setTo(inf ? inf.to : null); setOther(inf ? inf.other || "" : null);
+    }
+    async function save(outcome) {
       setBusy(true); setMsg(null);
       try {
-        const r = { id: rec && rec.id, key: j.key, drv: j.drv, d: dev, s: j.s, e: j.e, outcome, other: outcome === "relevo" ? other || null : null, from: outcome === "relevo" ? fromMs : null, at: outcome === "relevo" ? atMs : null, by: userName || "" };
+        const relevo = outcome === "relevo";
+        const r = { id: rec && rec.id, key: j.key, drv: j.drv, d: D, s: js, e: je, outcome, other: relevo ? other || null : null, from: relevo ? from : null, at: relevo ? to : null,
+          conf: inf ? inf.conf : null, auto: relevo && inf && !touched ? true : false, by: userName || "" };
         onSaved(await GI.saveIdent(api, r));
-        setMsg(outcome === "relevo" ? "Guardado: la jornada se partió en el relevo." : "Guardado.");
+        setMsg(relevo ? "Guardado: la jornada se partió en el relevo." : "Guardado.");
+        setMode("view");
       } catch (e) { setMsg("No se pudo guardar: " + ((e && e.message) || e)); }
       setBusy(false);
     }
-    // línea de tiempo
-    const t0 = j.s - 2 * H, t1 = j.e + 2 * H, X = t => (((Math.max(t0, Math.min(t1, t)) - t0) / (t1 - t0)) * 100).toFixed(2) + "%";
+    const B = other ? drvName(view, other) : "otro conductor (sin identificar)";
+    const conf = inf ? inf.conf : "baja";
+    // ---- línea de tiempo por vehículo ----
+    const t0 = js - 2 * H, t1 = je + 2 * H, span = t1 - t0;
+    const pct = t => (((Math.max(t0, Math.min(t1, t)) - t0) / span) * 100);
+    const rowsDev = [D, ...j.devices.filter(d => d !== D)];
+    if (inf) for (const p of inf.proofs) if (p.dev && !rowsDev.includes(p.dev)) rowsDev.push(p.dev);
+    const dTripsAll = (trips.get(D) || []);
+    const segsOf = dev => {
+      const L = (trips.get(dev) || []).filter(t => t.e > t0 && t.s < t1);
+      const blocks = [];
+      for (const t of L) {
+        const inTramo = dev === D && t.r === j.drv && from != null && to != null && t.s >= from - MIN && t.s < to;
+        const who = inTramo ? other || null : t.r || null;
+        const cls = inTramo ? "inf" : t.r === j.drv ? "same" : t.r && t.r === other ? "oth" : t.r ? "x" : "none";
+        const b = blocks[blocks.length - 1];
+        if (b && b.cls === cls && b.who === who && t.s - b.e < 3 * H) { b.e = t.e; b.n++; continue; }
+        blocks.push({ cls, who, s: t.s, e: t.e, n: 1 });
+      }
+      return blocks;
+    };
+    const segLabel = b => {
+      const w = pct(b.e) - pct(b.s);
+      const name = b.cls === "none" ? "sin conductor" : b.who ? drvName(view, b.who).split(/[ ,_]/)[0] : "otro";
+      const txt = name + (b.cls === "inf" ? " · deducido" : b.cls === "same" || b.cls === "oth" ? "" : "") + " · " + hm(b.s) + " → " + hm(b.e);
+      return w > txt.length * 0.62 ? txt : w > name.length * 0.75 ? name : "";
+    };
+    const tm = t => (GI.dayKey(t) !== GI.dayKey(j.s) ? dshort(t) + " " : "") + hm(t);
     const ticks = [];
     for (let t = new Date(t0).setMinutes(0, 0, 0) + H; t < t1; t += H) if (new Date(t).getHours() % 4 === 0) ticks.push(t);
-    // Llaves en franjas: cada llave rige desde que se pasa hasta que se pasa otra (de otro conductor o
-    // "sin conductor"); pasadas seguidas de la misma llave se unen. Un carril por conductor y otro para
-    // "sin conductor". La llave clave (se vuelve a pasar la del mismo conductor) se marca aparte.
-    const allKeys = (keys || []).filter(k => k.t <= t1).sort((a, b) => a.t - b.t);
+    // arrastre de los bordes del tramo (se pegan al inicio de un viaje del vehículo)
+    const trackRef = useRef(null);
+    const snaps = inf && !done ? inf.snaps : dTripsAll.filter(t => t.s >= js - MIN && t.s <= je).map(t => t.s).concat([je]);
+    const onDrag = which => e => {
+      if (!trackRef.current || !(e.buttons & 1)) return;
+      const r = trackRef.current.getBoundingClientRect();
+      const t = t0 + ((e.clientX - r.left) / r.width) * span;
+      let best = null;
+      for (const x of snaps) if (best == null || Math.abs(x - t) < Math.abs(best - t)) best = x;
+      if (best == null) return;
+      setTouched(true);
+      if (which === "from" && (to == null || best < to)) setFrom(best);
+      if (which === "to" && (from == null || best > from)) setTo(best);
+    };
+    const grab = e => { try { e.currentTarget.setPointerCapture(e.pointerId); } catch (x) {} };
+    const tramo = from != null && to != null ? dTripsAll.filter(t => t.r === j.drv && t.s >= from - MIN && t.s < to) : [];
+    const shownProofs = done ? [] : inf ? inf.proofs : [];
+    const tramoKm = tramo.reduce((a, t) => a + (t.km || 0), 0);
+    const proofCards = shownProofs.length ? shownProofs.slice().sort((a, b) => (a.t || Infinity) - (b.t || Infinity)).map(p => {
+      const dn = d => devName(view, d), nm = r => drvName(view, r);
+      const m = p.km != null ? (p.km < 1 ? Math.round(p.km * 1000) + " m" : GI.fmtNum(p.km, 1) + " km") : null;
+      if (p.kind === "llegada") return { tag: p.stays ? "Prueba fuerte" : "Pista", strong: p.stays, title: nm(p.drv) + " llegó al vehículo",
+        text: tm(p.t) + ": " + dn(p.dev) + " con su llave se detuvo junto al " + dn(D) + (m ? " (a " + m + ")" : "") + ". El " + dn(D) + " arrancó a las " + hm(p.dep) + "." + (p.leftWith ? " " + dn(p.dev) + " se fue después con " + nm(p.leftWith) + "." : !p.stays ? " Después se fue en " + dn(p.dev) + ": puede haber sido solo una visita." : "") };
+      if (p.kind === "lejos") return { tag: "Prueba fuerte", strong: true, title: A + " estaba en otro vehículo",
+        text: tm(p.t) + ": pasó su llave en " + dn(p.dev) + (p.moving ? " mientras el " + dn(D) + " andaba." : ", a " + m + " del " + dn(D) + ".") };
+      if (p.kind === "vuelve") return { tag: "Confirma", title: A + " volvió al vehículo",
+        text: p.how === "llave" ? tm(p.t) + ": se volvió a pasar su llave en el " + dn(D) + "." : tm(p.t) + ": llegó al " + dn(D) + " en " + dn(p.dev) + "." };
+      if (p.kind === "salida") return { tag: "Confirma", title: nm(p.drv) + " se fue del vehículo",
+        text: tm(p.t) + ": pasó su llave en " + dn(p.dev) + ", junto al " + dn(D) + "." };
+      if (p.kind === "estilo") return { tag: "Confirma", title: "Cambió la forma de manejar",
+        text: "Velocidad media manejando: " + Math.round(p.vOut) + " km/h el resto de la jornada, " + Math.round(p.vIn) + " km/h en el tramo." };
+      return { tag: "Pista", title: "Horario habitual", text: "En el " + dn(D) + ", " + nm(p.drv) + " suele trabajar en este horario. No hay otras pruebas: puede ser un relevo o un doble turno real." };
+    }) : [];
+    // marcas de las pruebas; las que caen muy cerca se juntan en una sola etiqueta
+    const marks = [];
+    for (const p of shownProofs.filter(p => p.t && p.kind !== "estilo").sort((a, b) => a.t - b.t)) {
+      const m = marks[marks.length - 1];
+      if (m && pct(p.t) - pct(m.t) < 5) { if (!m.lab.includes(hm(p.t))) m.lab += " · " + hm(p.t); } else marks.push({ t: p.t, lab: hm(p.t) });
+    }
+    const cands = inf ? inf.candidates : (hs.others || []).map(h => ({ drv: h.drv, why: "habito", h }));
+    const whyTxt = c => c.why === "llego" ? "Llegó al vehículo a las " + hm(c.t) + " y se quedó." : c.why === "paso" ? "Pasó por el vehículo a las " + hm(c.t) + ", pero se fue enseguida."
+      : c.why === "salio" ? "Se fue del vehículo a las " + hm(c.t) + "." : c.h ? "Suele empezar a las " + minTxt(c.h.startMin) + " en este vehículo (" + c.h.n + " jornadas)." : "";
+    const allDrivers = useMemo(() => [...(view.model.driverName || new Map()).entries()].filter(([id]) => id !== j.drv).sort((a, b) => String(a[1]).localeCompare(String(b[1]))), [view]);
+    const valid = from != null && to != null && to > from;
+    return html`<div className="ft-ident">
+      <div className="ft-id-head"><h3>¿Quién manejó esta jornada?</h3>${done ? html`<span className="ft-id-badge alta">Relevo confirmado</span>` : keys == null ? html`<span className="small muted">Buscando pruebas…</span>` : html`<span className=${"ft-id-badge " + conf}>${CONF[conf][0]}</span>`}</div>
+      ${rec ? html`<div className="ft-id-done">Revisado${rec.by ? " por " + rec.by : ""}${rec.updated_at ? " el " + new Date(rec.updated_at).toLocaleDateString("es-AR") : ""}: <b>${identWord(view, rec)}</b></div>` : null}
+      <p className="ft-id-verdict">El sistema le asignó a ${A} <b>${dur((je - js) / H)}</b> de jornada en el ${devName(view, D)}, sin un corte que la cierre.
+        ${done && valid ? html` Confirmado: <b>desde el ${when(from)} hasta el ${when(to)} manejó ${B}</b>.`
+          : valid && conf !== "baja" ? html` Lo más probable es que <b>desde el ${when(from)} hasta el ${when(to)} manejó ${B}</b>, sin pasar su llave.`
+          : valid ? html` Puede ser un relevo sin identificar o un doble turno real. Si fue relevo, por su horario habitual sería ${B} de ${tm(from)} a ${tm(to)}.`
+          : keys == null ? "" : " No se encontraron pruebas de un relevo: puede ser un doble turno real."}</p>
+      ${proofCards.length ? html`<div className="ft-id-proofs">${proofCards.map((c, i) => html`<div key=${i} className="ft-id-proof">
+        <span className=${"ft-id-tag" + (c.strong ? " strong" : "")}>${c.tag}</span><b>${c.title}</b><span>${c.text}</span></div>`)}</div>` : null}
+      <div className="ft-id-tl">
+        ${rowsDev.slice(0, 5).map(dev => html`<div key=${dev} className="ft-id-row"><span className="ft-id-lab">${devName(view, dev)}</span>
+          <div className="ft-id-track" ref=${dev === D ? trackRef : null}>
+            ${segsOf(dev).map((b, i) => html`<span key=${i} className=${"ft-id-seg " + b.cls} style=${{ left: pct(b.s) + "%", width: Math.max(0.3, pct(b.e) - pct(b.s)) + "%" }}
+              title=${(b.cls === "none" ? "Sin conductor identificado" : (b.who ? drvName(view, b.who) : "Otro conductor") + (b.cls === "inf" ? " (deducido: sin su llave)" : "")) + " · " + tm(b.s) + " → " + tm(b.e) + " · " + b.n + " viaje" + (b.n === 1 ? "" : "s")}>${segLabel(b)}</span>`)}
+            ${dev === D && mode === "adjust" && valid ? html`
+              <button type="button" className="ft-id-handle" style=${{ left: pct(from) + "%" }} aria-label="Mover el inicio del tramo" onPointerDown=${grab} onPointerMove=${onDrag("from")}></button>
+              <button type="button" className="ft-id-handle" style=${{ left: pct(to) + "%" }} aria-label="Mover el fin del tramo" onPointerDown=${grab} onPointerMove=${onDrag("to")}></button>` : null}
+          </div></div>`)}
+        ${marks.length ? html`<div className="ft-id-row"><span></span><div className="ft-id-marks">${marks.map((p, i) => html`<span key=${i} className="ft-id-mark" style=${{ left: pct(p.t) + "%" }}><i></i>${p.lab}</span>`)}</div></div>` : null}
+        <div className="ft-id-row"><span></span><div className="ft-ident-axis">${ticks.map(t => html`<span key=${t} style=${{ left: pct(t) + "%" }}>${new Date(t).getHours() === 0 ? dshort(t) : String(new Date(t).getHours()).padStart(2, "0") + " h"}</span>`)}</div></div>
+        <div className="ft-id-legend small"><span><i className="same"></i>${A.split(/[ ,_]/)[0]} (con llave)</span><span><i className="inf"></i>${other ? drvName(view, other).split(/[ ,_]/)[0] : "Otro"} (deducido)</span><span><i className="oth"></i>${other ? drvName(view, other).split(/[ ,_]/)[0] : "Otro"} (con llave)</span><span><i className="x"></i>otros conductores</span><span><i className="none"></i>sin conductor</span></div>
+      </div>
+      ${mode === "adjust" ? html`<div className="ft-id-adjust">
+        <p className="small muted">Arrastrá los bordes del tramo en la fila del ${devName(view, D)}: se pegan al inicio de un viaje. O escribí la hora.</p>
+        <div className="ft-ident-fields">
+          <label>Desde<input type="datetime-local" value=${from != null ? isoLocal(from) : ""} min=${isoLocal(js)} max=${isoLocal(je)} onInput=${e => { setTouched(true); setFrom(e.target.value ? new Date(e.target.value).getTime() : null); }} /></label>
+          <label>Hasta<input type="datetime-local" value=${to != null ? isoLocal(to) : ""} min=${isoLocal(js)} max=${isoLocal(je)} onInput=${e => { setTouched(true); setTo(e.target.value ? new Date(e.target.value).getTime() : null); }} /></label>
+        </div>
+        <b>¿Quién manejó?</b>
+        <div className="ft-id-cands">
+          ${cands.map(c => html`<label key=${c.drv} className=${"ft-id-cand" + (other === c.drv ? " on" : "")}><input type="radio" name=${"who" + j.key} checked=${other === c.drv} onChange=${() => { setTouched(true); setOther(c.drv); }} />
+            <span><b>${drvName(view, c.drv)}</b>${inf && inf.other === c.drv ? " · sugerido" : ""}<br /><span className="muted">${whyTxt(c)}</span></span></label>`)}
+          <label className=${"ft-id-cand" + (other != null && !cands.some(c => c.drv === other) ? " on" : "")}><input type="radio" name=${"who" + j.key} checked=${other != null && !cands.some(c => c.drv === other)} onChange=${() => { setTouched(true); setOther(""); }} />
+            <span><b>Otro conductor</b><br /><select value=${other && !cands.some(c => c.drv === other) ? other : ""} onChange=${e => { setTouched(true); setOther(e.target.value); }}>
+              <option value="">Sin identificar</option>${allDrivers.map(([id, n]) => html`<option key=${id} value=${id}>${n}</option>`)}</select></span></label>
+        </div>
+      </div>` : null}
+      <div className="ft-id-actions">
+        ${valid && !(done && mode !== "adjust") ? html`<button className="btn primary" disabled=${busy} onClick=${() => save("relevo")}>${mode === "adjust" ? "Guardar" : "Confirmar: " + tm(from) + " → " + tm(to) + " manejó " + (other ? drvName(view, other) : "otro conductor")}</button>` : null}
+        <button className="btn" onClick=${() => { if (mode === "adjust") { setMode("view"); reset(); } else { setMode("adjust"); if (!valid) { setFrom(js + (je - js) / 2); setTo(je); setOther(""); } } }}>${mode === "adjust" ? "Cancelar" : valid ? "Ajustar tramo" : "Marcar un relevo a mano"}</button>
+        <button className="btn" disabled=${busy} onClick=${() => save("doble")}>No es relevo: hizo doble turno</button>
+        <button className="btn" disabled=${busy} onClick=${() => save("nose")}>No sé</button>
+        ${msg ? html`<span className="small">${msg}</span>` : null}
+      </div>
+      ${valid && !done ? html`<p className="small muted">Al confirmar, el tramo (${dur((to - from) / H)}, ${tramo.length} viaje${tramo.length === 1 ? "" : "s"}, ${n0(tramoKm)} km) pasa a <b>${B}</b> y ${A} queda con ${dur((from - j.s) / H)} de jornada antes del relevo. Solo cambia en los cálculos del add-in, no en MyGeotab.</p>` : null}
+      <details className="ft-id-more"><summary>Ver llaves y viajes en detalle</summary>
+        <${IdentKeys} view=${view} j=${j} D=${D} keys=${keys} from=${valid ? from : null} to=${valid ? to : null} hs=${hs} />
+      </details>
+    </div>`;
+  }
+  // Detalle: llaves de los vehículos de la jornada en franjas y lista de cambios (vista anterior)
+  function IdentKeys({ view, j, D, keys, from, to, hs }) {
+    const t0 = j.s - 2 * H, t1 = j.e + 2 * H, X = t => (((Math.max(t0, Math.min(t1, t)) - t0) / (t1 - t0)) * 100).toFixed(2) + "%";
+    const tm = t => (GI.dayKey(t) !== GI.dayKey(j.s) ? dshort(t) + " " : "") + hm(t);
+    const allKeys = (keys || []).filter(k => j.devices.includes(k.d) && k.t <= t1).sort((a, b) => a.t - b.t);
     const groups = [];
     for (const k of allKeys) {
       const g = groups[groups.length - 1];
@@ -462,68 +610,31 @@ ${restFrom != null && restFrom < j.s ? (() => { const g = GAP[restKind(j, fz)]; 
     const shown = groups.filter(g => g.b > t0);
     const otherIds = [...new Set(shown.filter(g => g.r && g.r !== j.drv).map(g => g.r))];
     const lanes = [{ r: j.drv, label: "Llave " + drvName(view, j.drv).split(" ")[0], cls: "same" }, { r: null, label: "Sin conductor", cls: "none" },
-      ...(otherIds.length ? otherIds.map(r => ({ r, label: "Llave " + drvName(view, r).split(" ")[0], cls: "other" })) : [{ r: "__otro", label: "Llave de otro", cls: "other", empty: true }])];
-    const tm = t => (GI.dayKey(t) !== GI.dayKey(j.s) ? dshort(t) + " " : "") + hm(t);
-    // lista: franjas, la llave clave y el tramo que probablemente manejó otro chofer, en orden
-    const rows = shown.map((g, i) => ({ t: Math.max(g.a, t0), txt: (i === 0 ? dshort(Math.max(g.a, t0)) + " " + hm(Math.max(g.a, t0)) : tm(Math.max(g.a, t0))) + " → " + (g.b >= t1 ? "fin" : tm(g.b)), who: g.r ? drvName(view, g.r) : "Sin conductor" }));
-    if (reswipe) rows.push({ t: reswipe.t, txt: tm(reswipe.t), who: "Se vuelve a pasar la llave de " + drvName(view, j.drv) + ": probable inicio de su turno", key: true });
-    if (outcome === "relevo" && fromMs && atMs && atMs > fromMs) {
-      const n = j.trips.filter(t => t.s >= fromMs - MIN && t.s < atMs).length;
-      rows.push({ t: fromMs + 1, txt: tm(fromMs) + " → " + tm(atMs), who: "Probablemente manejó otro chofer (" + n + " viaje" + (n === 1 ? "" : "s") + " sin su llave)", doubt: true });
-    }
+      ...otherIds.map(r => ({ r, label: "Llave " + drvName(view, r).split(" ")[0], cls: "other" }))];
+    const rows = shown.map(g => ({ t: Math.max(g.a, t0), txt: tm(Math.max(g.a, t0)) + " → " + (g.b >= t1 ? "fin" : tm(g.b)), who: g.r ? drvName(view, g.r) : "Sin conductor" }));
+    if (from && to) rows.push({ t: from + 1, txt: tm(from) + " → " + tm(to), who: "Tramo que probablemente manejó otro chofer", doubt: true });
     rows.sort((a, b) => a.t - b.t);
-    const valid = outcome !== "relevo" || (fromMs && atMs && atMs > fromMs && fromMs >= j.s - MIN && atMs <= j.e + MIN);
-    return html`<div className="ft-ident">
-      <h3>¿Quién manejó esta jornada?</h3>
-      <p>Para el sistema, ${drvName(view, j.drv)} manejó ${devName(view, dev)} desde el <b>${when(j.s)}</b> hasta el <b>${when(j.e)}</b> (${dur(j.span)}) sin un corte que cierre la jornada. Con camiones en relevo esto suele pasar cuando el otro chofer no pasa su llave: su turno queda a nombre del anterior.</p>
+    const habits = hs.habits || [];
+    return html`<div className="ft-ident-detail">
       <div className="ft-ident-tl">
-        ${keys == null ? html`<div className="ft-ident-lane"><span className="ft-ident-lab">Llaves</span><span className="muted small">Buscando identificaciones…</span></div>`
-          : !shown.length ? html`<div className="ft-ident-lane"><span className="ft-ident-lab">Llaves</span><span className="muted small">Sin registros de identificación en este rango.</span></div>`
+        ${keys == null ? html`<span className="muted small">Buscando identificaciones…</span>` : !shown.length ? html`<span className="muted small">Sin registros de identificación en ${j.devices.map(d => devName(view, d)).join(", ")} en este rango.</span>`
           : lanes.map(l => html`<div key=${l.r || "none"} className="ft-ident-lane"><span className="ft-ident-lab">${l.label}</span><div className="ft-ident-track kband">
-            ${l.empty ? html`<span className="ft-kband-empty">ninguna en este rango</span>` : shown.filter(g => g.r === l.r).map((g, i) => html`<span key=${i} className=${"ft-kband " + l.cls} style=${{ left: X(g.a), width: "calc(" + X(g.b) + " - " + X(g.a) + ")" }} title=${tm(Math.max(g.a, t0)) + " → " + (g.b >= t1 ? "fin" : tm(g.b)) + " · " + (g.r ? drvName(view, g.r) : "sin conductor identificado")}></span>`)}
-            ${l.r === j.drv && reswipe ? html`<span className="ft-kmark" style=${{ left: X(reswipe.t) }} title=${when(reswipe.t) + " · se vuelve a pasar la llave: probable inicio de su turno"}></span>` : null}
+            ${shown.filter(g => g.r === l.r).map((g, i) => html`<span key=${i} className=${"ft-kband " + l.cls} style=${{ left: X(g.a), width: "calc(" + X(g.b) + " - " + X(g.a) + ")" }} title=${tm(Math.max(g.a, t0)) + " → " + (g.b >= t1 ? "fin" : tm(g.b))}></span>`)}
           </div></div>`)}
         <div className="ft-ident-lane"><span className="ft-ident-lab">Manejo a nombre de ${drvName(view, j.drv).split(" ")[0]}</span><div className="ft-ident-track">
-          ${(outcome === "relevo" && atMs && fromMs && atMs > fromMs) ? html`<span className="ft-ident-doubt" style=${{ left: X(fromMs), width: "calc(" + X(atMs) + " - " + X(fromMs) + ")" }}></span>` : null}
-          ${j.trips.map((t, i) => html`<span key=${i} className="ft-ident-trip" style=${{ left: X(t.s), width: "calc(" + X(t.e) + " - " + X(t.s) + ")" }}></span>`)}
+          ${from && to ? html`<span className="ft-ident-doubt" style=${{ left: X(from), width: "calc(" + X(to) + " - " + X(from) + ")" }}></span>` : null}
+          ${j.trips.map((t, i) => html`<span key=${i} className="ft-ident-trip" style=${{ left: X(t.s), width: "calc(" + X(t.e) + " - " + X(t.s) + ")" }} title=${devName(view, t.d) + " · " + tm(t.s) + " → " + tm(t.e)}></span>`)}
         </div></div>
-        <div className="ft-ident-lane"><span></span><div className="ft-ident-axis">${ticks.map(t => html`<span key=${t} style=${{ left: X(t) }}>${new Date(t).getHours() === 0 ? dshort(t) : String(new Date(t).getHours()).padStart(2, "0") + " h"}</span>`)}</div></div>
       </div>
-      ${rows.length ? html`<div className="ft-klist"><b>Cambios de llave</b>
-        ${rows.map((r, i) => html`<div key=${i} className=${"ft-klist-row" + (r.doubt ? " gap" : r.key ? " key" : "")}><span>${r.txt}</span><span>${r.who}</span></div>`)}
-      </div>` : null}
-      <div className="ft-ident-hints">
-        <b>Pistas</b>
-        ${habits.length ? html`<span>· En ${devName(view, dev)}, los otros días: ${habits.slice(0, 3).map(h => drvName(view, h.drv) + " suele empezar a las " + minTxt(h.startMin) + " (turno " + h.type + ", ~" + dur(h.span) + ", " + h.n + " jornadas)").join("; ")}.</span>` : null}
-        ${sugFrom != null && sugOther ? html`<span>· El tramo de <b>${hm(sugFrom)}</b> a <b>${hm(sugTo)}</b> coincide con el turno habitual de ${drvName(view, sugOther.drv)}.</span>` : null}
-        ${reswipe ? html`<span>· A las <b>${hm(reswipe.t)}</b> se volvió a pasar la llave de ${drvName(view, j.drv)}: lo más probable es que ahí empezara su turno.</span>` : null}
-        ${keys && sugOther && !otherKey ? html`<span>· En ese tramo no se pasó la llave de ${drvName(view, sugOther.drv)} en este vehículo.</span>` : null}
-      </div>
-      <div className="ft-ident-form">
-        <b>¿Qué pasó?</b>
-        <div className="ft-ident-btns">
-          ${[["relevo", "Relevo sin identificar"], ["doble", "Doble turno real"], ["nose", "No se sabe"]].map(([k, l]) => html`<button key=${k} type="button" className=${"btn" + (outcome === k ? " primary" : "")} aria-pressed=${outcome === k} onClick=${() => setOutcome(k)}>${l}</button>`)}
-        </div>
-        ${outcome === "relevo" ? html`<div className="ft-ident-fields">
-          <label>En este tramo manejó<select value=${other} onChange=${e => { setTouched(true); setOther(e.target.value); }}>
-            ${others.map(h => html`<option key=${h.drv} value=${h.drv}>${drvName(view, h.drv)}</option>`)}
-            <option value="">Otro conductor (sin identificar)</option>
-          </select></label>
-          <label>Desde<input type="datetime-local" value=${from} min=${isoLocal(j.s)} max=${isoLocal(j.e)} onInput=${e => { setTouched(true); setFrom(e.target.value); }} /></label>
-          <label>Hasta<input type="datetime-local" value=${at} min=${isoLocal(j.s)} max=${isoLocal(j.e)} onInput=${e => { setTouched(true); setAt(e.target.value); }} /></label>
-        </div>
-        <p className="small muted">${atMs && fromMs && atMs > fromMs ? html`Al guardar, el tramo del ${when(fromMs)} al ${when(atMs)} (${dur((atMs - fromMs) / H)}) pasa a <b>${other ? drvName(view, other) : "conductor sin identificar"}</b> y ${drvName(view, j.drv)} se queda con el resto, que se arma en jornadas aparte. Solo cambia en los cálculos del add-in, no en MyGeotab.` : "Elegí desde y hasta cuándo manejó el otro chofer."}</p>`
-        : outcome === "doble" ? html`<p className="small muted">La jornada queda como está y sigue como un caso de fatiga: conviene revisarlo con el conductor.</p>`
-        : html`<p className="small muted">La jornada queda como está, marcada como revisada.</p>`}
-        <div className="form-actions"><button className="btn primary" disabled=${busy || !valid} onClick=${save}>${busy ? "Guardando…" : "Guardar"}</button>${msg ? html`<span className="small">${msg}</span>` : null}
-          ${rec ? html`<span className="muted small">Revisado${rec.by ? " por " + rec.by : ""}${rec.updated_at ? " el " + new Date(rec.updated_at).toLocaleDateString("es-AR") : ""}</span>` : null}</div>
-      </div>
+      ${rows.length ? html`<div className="ft-klist"><b>Cambios de llave (${j.devices.map(d => devName(view, d)).join(", ")})</b>
+        ${rows.map((r, i) => html`<div key=${i} className=${"ft-klist-row" + (r.doubt ? " gap" : "")}><span>${r.txt}</span><span>${r.who}</span></div>`)}</div>` : null}
+      ${habits.length ? html`<p className="small muted">En ${devName(view, D)}, los otros días: ${habits.slice(0, 3).map(h => drvName(view, h.drv) + " suele empezar a las " + minTxt(h.startMin) + " (turno " + h.type + ", ~" + dur(h.span) + ", " + h.n + " jornadas)").join("; ")}.</p>` : null}
     </div>`;
   }
   const identWord = (view, r) => (!r ? null : r.outcome === "relevo" ? "Relevo: " + (r.other ? drvName(view, r.other) : "sin identificar") + (r.at ? " " + hm(r.from || r.s) + "–" + hm(r.at) : "") : r.outcome === "doble" ? "Doble turno real" : "No se sabe");
 
   // ---------- Ficha de un caso (una jornada) ----------
-  function CaseDetail({ view, api, j, fz, rec, userName, onSaved, onClose, onDriver, shifts, identRec, onIdent }) {
+  function CaseDetail({ view, api, j, fz, rec, userName, onSaved, onClose, onDriver, shifts, identRec, onIdent, allTrips }) {
     const [f, setF] = useState(() => ({ status: (rec && rec.status) || "Detectado", owner: (rec && rec.owner) || "", action: (rec && rec.action) || "", notes: (rec && rec.notes) || [] }));
     const [note, setNote] = useState("");
     const [busy, setBusy] = useState(false), [err, setErr] = useState(null), [ok, setOk] = useState(false);
@@ -556,7 +667,7 @@ ${restFrom != null && restFrom < j.s ? (() => { const g = GAP[restKind(j, fz)]; 
           <button className="btn small" onClick=${() => GI.openEventsPage({ driverIds: [j.drv], deviceIds: j.devices, from: j.dk, to: GI.dayKey(j.e) })}>Eventos en MyGeotab ↗</button>
         </span>
       </div>
-      ${(j.signals.some(x => x.key === "ident") || identRec) && onIdent ? html`<${IdentPanel} view=${view} api=${api} j=${j} shifts=${shifts || []} rec=${identRec} userName=${userName} onSaved=${onIdent} />` : null}
+      ${(j.signals.some(x => x.key === "ident") || identRec) && onIdent ? html`<${IdentPanel} view=${view} api=${api} j=${j} shifts=${shifts || []} rec=${identRec} userName=${userName} onSaved=${onIdent} allTrips=${allTrips} />` : null}
       <p className="ft-story">${shiftStory(j, fz)}</p>
       ${j.signals.length ? html`<ul className="ft-why">${j.signals.map(s => html`<li key=${s.key}><span className=${"ft-sig" + (s.key === "camara" ? " cam" : "")}>${s.label}</span> ${s.text}</li>`)}</ul>` : html`<p className="muted">Esta jornada no tiene señales de fatiga.</p>`}
       <${Timeline} j=${j} fz=${fz} />
@@ -1104,7 +1215,70 @@ ${restFrom != null && restFrom < j.s ? (() => { const g = GAP[restKind(j, fz)]; 
 
   // ---------- Indicadores (BETA): mensuales para HSE + calidad de los datos ----------
   const monthLabel = mk => { const [y, m] = mk.split("-").map(Number); return new Date(y, m - 1, 1).toLocaleDateString("es-AR", { month: "short", year: "2-digit" }); };
-  function KpiSection({ view, res, cases, idents, onCase, onDriver }) {
+  // Lista de jornadas a revisar: con la conclusión del add-in y su confianza; las de confianza alta
+  // se pueden confirmar todas juntas.
+  function IdentReview({ view, res, idents, onCase, onDriver, api, userName, onIdent }) {
+    const pendJ = useMemo(() => res.shifts.filter(j => j.signals.some(x => x.key === "ident") && !(idents && idents.has(j.key))), [res, idents]);
+    const [keys, setKeys] = useState(null); // por jornada
+    useEffect(() => {
+      let off = false;
+      if (!api || !pendJ.length || !GI.loadDriverChangesWindows) { setKeys(new Map()); return; }
+      GI.loadDriverChangesWindows(api, pendJ.map(j => [j.s - 6 * H, j.e + 3 * H]))
+        .then(L => { if (!off) setKeys(new Map(pendJ.map((j, i) => [j.key, L[i]]))); })
+        .catch(e => { console.warn("[Geotab Insights] llaves", e); if (!off) setKeys(new Map()); });
+      return () => { off = true; };
+    }, [api, pendJ.map(j => j.key).join(",")]);
+    const infs = useMemo(() => {
+      const m = new Map();
+      if (keys) for (const j of pendJ) if (keys.has(j.key)) m.set(j.key, inferFor(view, j, res.shifts, keys.get(j.key), view.model.tripsByDevice));
+      return m;
+    }, [keys, pendJ]);
+    const pend = pendJ.map(j => { const x = infs.get(j.key); return { key: j.key, j, drv: j.drv, s: j.s, e: j.e, d: (x && x.inf && x.inf.D) || j.devices[0], span: j.span, rec: null, inf: x ? x.inf : null }; });
+    const done = [...((idents && idents.values()) || [])].map(r => ({ key: r.key, j: null, drv: r.drv, s: r.s, e: r.e, d: r.d, span: (r.e - r.s) / H, rec: r, inf: null }));
+    const rows = [...pend, ...done];
+    const high = pend.filter(r => r.inf && r.inf.conf === "alta" && r.inf.from != null && r.inf.to > r.inf.from);
+    const [busy, setBusy] = useState(false), [msg, setMsg] = useState(null);
+    async function confirmAll() {
+      setBusy(true); setMsg(null);
+      let ok = 0;
+      for (const r of high) {
+        try {
+          const i = r.inf;
+          onIdent(await GI.saveIdent(api, { key: r.key, drv: r.drv, d: i.D, s: r.s, e: r.e, outcome: "relevo", other: i.other || null, from: i.from, at: i.to, conf: i.conf, auto: true, by: userName || "" }));
+          ok++;
+        } catch (e) { setMsg("No se pudo guardar una: " + ((e && e.message) || e)); }
+      }
+      setMsg(ok + " relevo" + (ok === 1 ? "" : "s") + " confirmado" + (ok === 1 ? "" : "s") + ".");
+      setBusy(false);
+    }
+    const what = r => {
+      if (r.rec) return html`<span className=${r.rec.outcome === "doble" ? "delta bad" : r.rec.outcome === "relevo" ? "delta good" : ""}>${identWord(view, r.rec)}</span>${r.rec.by ? html`<div className="small muted">${r.rec.by}</div>` : ""}`;
+      if (!keys) return html`<span className="small muted">Buscando pruebas…</span>`;
+      const i = r.inf;
+      if (!i || i.from == null) return html`<span className="small muted">Sin pruebas de relevo: puede ser un doble turno real</span>`;
+      return html`<span>${i.conf === "baja" ? "Por su horario habitual: " : "Relevo a las " + hm(i.from) + ": "}manejó <b>${i.other ? drvName(view, i.other) : "otro conductor"}</b> hasta ${dshort(i.to)} ${hm(i.to)}</span>`;
+    };
+    return html`<${Panel} title="Jornadas a revisar (identificación)"
+      hint="Jornadas de más de 20 h sin un corte que cierre la jornada. Con camiones en relevo suelen ser el turno de otro chofer que no pasó su llave. El add-in busca pruebas en los viajes y las llaves de toda la flota (quién llegó al vehículo, dónde estaba el chofer) y propone quién manejó. Confianza alta: hay una prueba fuerte. Las de confianza media o baja conviene revisarlas una por una.">
+      <div className="readouts compact inset">
+        <${Kpi} label="A confirmar" value=${n0(pend.length)} tone=${pend.length ? "bad" : null} />
+        <${Kpi} label="De confianza alta" value=${keys ? n0(high.length) : "…"} />
+        <${Kpi} label="Relevos confirmados" value=${n0(done.filter(r => r.rec.outcome === "relevo").length)} />
+        <${Kpi} label="Dobles turnos reales" value=${n0(done.filter(r => r.rec.outcome === "doble").length)} tone=${done.some(r => r.rec.outcome === "doble") ? "bad" : null} />
+      </div>
+      ${high.length && onIdent ? html`<div className="ft-id-bulk"><button className="btn primary" disabled=${busy} onClick=${confirmAll}>${busy ? "Guardando…" : (high.length === 1 ? "Confirmar la de confianza alta" : "Confirmar las " + high.length + " de confianza alta")}</button>
+        <span className="small muted">Se guarda el relevo que propone el add-in en cada una. Se puede cambiar después desde la ficha de la jornada.</span>${msg ? html`<span className="small">${msg}</span>` : null}</div>` : msg ? html`<p className="small">${msg}</p>` : null}
+      <${DataTable} rowKey=${r => r.key} rows=${rows} limit=${15} defaultSort=${{ key: "s", dir: "desc" }} onRowClick=${r => (r.j ? onCase(r.j) : onDriver(r.drv))} rowClass=${r => (r.rec ? "" : "ft-row-ident")} columns=${[
+        { key: "drv", label: "Conductor", value: r => drvName(view, r.drv), fmt: r => html`<b>${drvName(view, r.drv)}</b><div className="small muted">${devName(view, r.d)}</div>` },
+        { key: "s", label: "Jornada", fmt: r => when(r.s) + " → " + when(r.e) },
+        { key: "span", label: "Duración", align: "num", fmt: r => html`<b className="delta bad">${dur(r.span)}</b>` },
+        { key: "what", label: "Qué pasó", value: r => (r.rec ? r.rec.outcome : "a"), fmt: what },
+        { key: "conf", label: "Confianza", value: r => (r.rec ? 9 : r.inf ? { alta: 0, media: 1, baja: 2 }[r.inf.conf] : 3), fmt: r => (r.rec ? html`<span className="small muted">revisada</span>` : r.inf ? confTag(r.inf.conf) : "") },
+      ]} empty="No hay jornadas de más de 20 h en el período." />
+    <//>`;
+  }
+
+  function KpiSection({ view, res, cases, idents, onCase, onDriver, api, userName, onIdent }) {
     const fz = res.limits, model = view.model;
     const months = [...new Set(model.dayKeys.map(dk => dk.slice(0, 7)))];
     const byM = new Map(months.map(m => [m, []]));
@@ -1151,26 +1325,7 @@ ${restFrom != null && restFrom < j.s ? (() => { const g = GAP[restKind(j, fz)]; 
               : html`<span className=${"delta " + ((r.up ? r.delta > 0 : r.delta < 0) ? "good" : "bad")}>${(r.delta > 0 ? "▲ " : "▼ ") + (r.isPct ? GI.fmtNum(Math.abs(r.delta), 1) + " pts" : GI.fmtNum(Math.abs(r.delta) * 100, 0) + " %")}</span>`}</td></tr>`)}</tbody>
         </table></div>
       <//>
-      ${(() => {
-        const pend = res.shifts.filter(j => j.signals.some(x => x.key === "ident") && !(idents && idents.has(j.key))).map(j => ({ key: j.key, j, drv: j.drv, s: j.s, e: j.e, d: j.devices[0], span: j.span, rec: null }));
-        const done = [...((idents && idents.values()) || [])].map(r => ({ key: r.key, j: null, drv: r.drv, s: r.s, e: r.e, d: r.d, span: (r.e - r.s) / H, rec: r }));
-        const rows = [...pend, ...done];
-        return html`<${Panel} title="Jornadas a revisar (identificación)"
-          hint="Jornadas de más de 20 h sin un corte que cierre la jornada. Con camiones en relevo suelen ser el turno de otro chofer que no pasó su llave. El supervisor confirma qué pasó desde la ficha de la jornada; la respuesta queda guardada para todos.">
-          <div className="readouts compact inset">
-            <${Kpi} label="A confirmar" value=${n0(pend.length)} tone=${pend.length ? "bad" : null} />
-            <${Kpi} label="Relevos confirmados" value=${n0(done.filter(r => r.rec.outcome === "relevo").length)} />
-            <${Kpi} label="Dobles turnos reales" value=${n0(done.filter(r => r.rec.outcome === "doble").length)} tone=${done.some(r => r.rec.outcome === "doble") ? "bad" : null} />
-          </div>
-          <${DataTable} rowKey=${r => r.key} rows=${rows} limit=${15} defaultSort=${{ key: "s", dir: "desc" }} onRowClick=${r => (r.j ? onCase(r.j) : onDriver(r.drv))} rowClass=${r => (r.rec ? "" : "ft-row-ident")} columns=${[
-            { key: "drv", label: "Conductor", value: r => drvName(view, r.drv), fmt: r => drvName(view, r.drv) },
-            { key: "s", label: "Jornada", fmt: r => when(r.s) + " → " + when(r.e) },
-            { key: "d", label: "Vehículo", value: r => devName(view, r.d), fmt: r => devName(view, r.d) },
-            { key: "span", label: "Duración", align: "num", fmt: r => html`<b className="delta bad">${dur(r.span)}</b>` },
-            { key: "what", label: "Qué pasó", value: r => (r.rec ? r.rec.outcome : "a"), fmt: r => (r.rec ? html`<span className=${r.rec.outcome === "doble" ? "delta bad" : r.rec.outcome === "relevo" ? "delta good" : ""}>${identWord(view, r.rec)}</span>${r.rec.by ? html`<div className="small muted">${r.rec.by}</div>` : ""}` : html`<span className="ft-st ft-st-ident">A confirmar →</span>`) },
-          ]} empty="No hay jornadas de más de 20 h en el período." />
-        <//>`;
-      })()}
+      <${IdentReview} view=${view} res=${res} idents=${idents} onCase=${onCase} onDriver=${onDriver} api=${api} userName=${userName} onIdent=${onIdent} />
       <${Panel} title="Calidad de los datos"
         hint="El módulo solo ve los viajes con el conductor identificado: si un conductor no se identifica, sus jornadas no existen para el análisis y los casos se subestiman. Las cámaras que dejaron de mandar eventos de fatiga, distracción o carril pueden estar desconectadas, tapadas o mal configuradas.">
         <div className="readouts compact inset">
@@ -1264,11 +1419,12 @@ ${restFrom != null && restFrom < j.s ? (() => { const g = GAP[restKind(j, fz)]; 
       return () => { off = true; clearInterval(t); };
     }, [api]);
     // Seguimiento y fichas: período + viajes en vivo de las últimas horas.
+    const tb = useMemo(() => (live.recent ? GI.liveTrips(view.model, live.recent, live.status, LIVE_HOURS, live.now) : null), [view, live]);
     const res = useMemo(() => {
-      if (!live.recent) return GI.buildShifts(view.model, view.ids, view.driverOk, { now: live.now, rosters: rmap, identFixes: fixes });
-      const tb = GI.liveTrips(view.model, live.recent, live.status, LIVE_HOURS, live.now);
+      if (!tb) return GI.buildShifts(view.model, view.ids, view.driverOk, { now: live.now, rosters: rmap, identFixes: fixes });
       return GI.buildShifts(view.model, view.ids, view.driverOk, { now: live.now, tripsByDevice: tb, rosters: rmap, identFixes: fixes });
-    }, [view, live, rmap, fixes]);
+    }, [view, tb, live.now, rmap, fixes]);
+    const onIdent = GI.saveIdent ? r => setIdents(m => new Map(m).set(r.key, r)) : null;
     const { shifts, limits } = period;
     const findSel = sel && (res.shifts.find(j => j.key === sel.key) || shifts.find(j => j.key === sel.key) || sel);
     const openDriver = id => { setSel(null); setDrv(id); };
@@ -1284,14 +1440,14 @@ ${restFrom != null && restFrom < j.s ? (() => { const g = GAP[restKind(j, fz)]; 
           ${sub === "validacion" && isBeta() ? html`<${ValidationSection} view=${view} res=${period} isAdmin=${isAdmin} settings=${view.settings} onSaveSettings=${onSaveSettings} /><${OutcomePanel} res=${period} />`
             : sub === "descanso" && isBeta() ? html`<${RestSection} view=${view} res=${period} onDriver=${openDriver} />`
             : sub === "operacion" && isBeta() ? html`<${OpsSection} view=${view} res=${period} onDriver=${openDriver} />`
-            : sub === "indicadores" && isBeta() ? html`<${KpiSection} view=${view} res=${period} cases=${cases} idents=${idents} onCase=${setSel} onDriver=${openDriver} />`
+            : sub === "indicadores" && isBeta() ? html`<${KpiSection} view=${view} res=${period} cases=${cases} idents=${idents} onCase=${setSel} onDriver=${openDriver} api=${api} userName=${userName} onIdent=${onIdent} />`
             : html`<${DriversSection} view=${view} onDriver=${openDriver} />`}
         </div>`}
       ${drv && !findSel ? html`<${FatigueDriver} key=${drv} view=${view} id=${drv} res=${res} cases=${cases} now=${live.now} status=${live.status} acks=${live.acks || []}
         api=${api} isAdmin=${isAdmin} userName=${userName} roster=${rosters.get(drv)} onRoster=${r => setRosters(m => { const n = new Map(m); if (r && !r.removed) n.set(r.drv, r); else n.delete(drv); return n; })}
         onClose=${() => setDrv(null)} onCase=${j => setSel(j)} onSafety=${id => { setDrv(null); onDriver(id); }} />` : null}
       ${findSel ? html`<${CaseDetail} key=${findSel.key} view=${view} api=${api} j=${findSel} fz=${limits} rec=${cases.get(findSel.key)} userName=${userName}
-        shifts=${shifts} identRec=${idents.get(findSel.key)} onIdent=${GI.saveIdent ? r => setIdents(m => new Map(m).set(r.key, r)) : null}
+        shifts=${shifts} identRec=${idents.get(findSel.key)} onIdent=${onIdent} allTrips=${tb || view.model.tripsByDevice}
         onDriver=${openDriver}
         onSaved=${c => setCases(m => new Map(m).set(c.key, c))} onClose=${() => setSel(null)} />` : null}
     </div>`;

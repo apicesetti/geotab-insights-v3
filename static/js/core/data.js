@@ -735,6 +735,26 @@
     return out.sort((a, b) => a.t - b.t);
   }
 
+  // Identificaciones de toda la flota en varios rangos (una llamada múltiple): para ver quién llegó o se
+  // fue de un vehículo durante una jornada dudosa. Caché en memoria por rango redondeado a la hora.
+  const _dcCache = new Map();
+  async function loadDriverChangesWindows(api, wins) {
+    const keyOf = w => Math.floor(w[0] / 3600000) + "|" + Math.ceil(w[1] / 3600000);
+    const need = [...new Set(wins.map(keyOf))].filter(k => !_dcCache.has(k));
+    if (need.length) {
+      const calls = need.map(k => { const [a, b] = k.split("|").map(Number); return ["Get", { typeName: "DriverChange", resultsLimit: 50000,
+        search: { fromDate: new Date(a * 3600000).toISOString(), toDate: new Date(b * 3600000).toISOString() } }]; });
+      const res = [];
+      for (let i = 0; i < calls.length; i += 20) res.push(...((await api.multiCall(calls.slice(i, i + 20))) || []));
+      need.forEach((k, i) => {
+        const out = [];
+        for (const c of res[i] || []) { const r = GI.idOf(c.driver); out.push({ t: new Date(c.dateTime).getTime(), d: GI.idOf(c.device), r: r && r !== "UnknownDriverId" && r !== "NoDriverId" ? r : null, type: c.type }); }
+        _dcCache.set(k, out.sort((a, b) => a.t - b.t));
+      });
+    }
+    return wins.map(w => _dcCache.get(keyOf(w)) || []);
+  }
+
   async function loadDriveStatus(api) {
     const recs = (await api.call("Get", { typeName: "DeviceStatusInfo",
       propertySelector: { fields: ["device", "driver", "isDriving", "isDeviceCommunicating", "currentStateDuration", "dateTime"], isIncluded: true } })) || [];
@@ -835,7 +855,7 @@
   }
 
   Object.assign(GI, {
-    loadRuleLimits, loadEventSpeed, loadCameras, loadAllCameras, surfsightToken, surfsightLenses, surfsightConsumption, loadRecentTrips, loadDriveStatus, loadDriverChanges,
+    loadRuleLimits, loadEventSpeed, loadCameras, loadAllCameras, surfsightToken, surfsightLenses, surfsightConsumption, loadRecentTrips, loadDriveStatus, loadDriverChanges, loadDriverChangesWindows,
     loadCatalogs, loadZones, loadZoneTypes, loadPeriod, loadFuel, loadEventLocations, loadTrace, clearCache,
     _idbGetMany: idbGetMany, _idbPutMany: idbPutMany,
     _compactTrips: compactTrips, _compactExceptions: compactExceptions, _compactCounter: compactCounter, _loadFuelBoundaries: loadFuelBoundaries, _missingRuns: missingRuns, _getRangeMulti: getRangeMulti,
