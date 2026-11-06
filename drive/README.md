@@ -16,6 +16,11 @@ El conductor ve en el teléfono, con los **mismos límites y cálculos que Insig
 | Seguís identificado en el vehículo | el teléfono está a más de 200 m del vehículo, el vehículo sigue con su identificación y está detenido. Hacen falta 2 lecturas seguidas (2 min) y no se repite antes de 30 min. Con voz. |
 | Vehículo en movimiento con tu identificación | igual que el anterior, pero el vehículo se mueve: alguien maneja con su llavero o su sesión. |
 
+En la tarjeta **Vehículo** (que pasa arriba de todo cuando el conductor está lejos) hay dos botones:
+
+- **Me desvinculo** → agrega un cambio de conductor a "desconocido" en ese vehículo (`DriverChange` con `UnknownDriverId`). Desde ese momento los viajes y eventos dejan de quedar a su nombre.
+- **Me relevaron** → elige de la lista quién lo reemplazó (conductores activos de sus mismos grupos, con buscador). A ese conductor le llega un **mensaje de usuario** en su Drive (`TextMessage` con `recipient`; solo lo ve él) con la hora y un link a la ubicación del vehículo, pidiéndole que se identifique con su llavero. El vehículo **no** se le asigna. Después el que entregó queda desvinculado, igual que en el botón anterior.
+
 La distancia se calcula entre el GPS del teléfono (`api.mobile.geolocation`) y la última posición del vehículo (`DeviceStatusInfo`). Se descuenta el error de la lectura del teléfono y se descartan las lecturas con más de 150 m de error. "Identificado" = `DeviceStatusInfo.driver` es el conductor (llavero NFC, GO Focus o Drive).
 
 ## De dónde salen los números
@@ -33,7 +38,7 @@ Opcional: en la configuración de Insights se puede agregar una clave `drive` pa
 
 1. GitHub Pages ya publica el repo: la página queda en `https://apicesetti.github.io/geotab-insights-v3/drive/index.html`.
 2. En cada base: *Administración → Sistema → Configuración del sistema → Add-Ins → Nuevo* y pegar `drive/addin-config.json`. Es un add-in **aparte** de Insights (no lleva el `id` de Insights).
-3. **Permisos del perfil con el que entran los conductores a Drive** — tiene que poder ver: *Viajes*, *Excepciones*, *Cambios de conductor*, *Estado de los vehículos* (DeviceStatusInfo), *Vehículos* y *Datos de add-ins* (lectura).
+3. **Permisos del perfil con el que entran los conductores a Drive** — tiene que poder ver: *Viajes*, *Excepciones*, *Cambios de conductor*, *Estado de los vehículos* (DeviceStatusInfo), *Vehículos*, *Usuarios* (para la lista de relevo) y *Datos de add-ins* (lectura). Para los botones: **agregar cambios de conductor** y **enviar mensajes**. Si falta un permiso, el add-in lo dice en pantalla.
 4. **Configuración de Insights visible para los conductores**: Insights guarda la configuración en el grupo de la empresa y en los grupos de acceso de los usuarios **al momento de guardar**. Si un conductor tiene un grupo de acceso nuevo, volver a guardar la configuración desde Insights.
 5. En cada teléfono: entrar a Drive una vez y aceptar los permisos de **ubicación** y **notificaciones**.
 

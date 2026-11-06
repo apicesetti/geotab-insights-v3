@@ -29,6 +29,8 @@
   let last = { config: 0, trips: 0, events: 0, away: 0, fullTrips: 0 };
   let timer = null, busy = false, listening = false, bound = false, error = null;
   let view = null; // resultados calculados
+  let ui = { mode: null, q: "", busy: false, msg: null }; // mode: null | "unassign" | "relief"
+  let drivers = null;
 
   // ---------- utilidades ----------
   const lsGet = (k, d) => { try { const v = localStorage.getItem(LS + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } };
@@ -58,11 +60,11 @@
       try { api.getSession(s => resolve(s && s.userName ? s.userName : "")); } catch (e) { resolve(""); }
     }).then(login => {
       if (!login) return me;
-      if (me && me.login === login && me.id) return me;
-      return wapi.call("Get", { typeName: "User", search: { name: login }, propertySelector: { fields: ["id", "name", "firstName", "lastName"], isIncluded: true } })
+      if (me && me.login === login && me.id && me.groups) return me;
+      return wapi.call("Get", { typeName: "User", search: { name: login }, propertySelector: { fields: ["id", "name", "firstName", "lastName", "driverGroups"], isIncluded: true } })
         .then(list => {
           const u = (list || [])[0];
-          if (u) { me = { id: u.id, login: u.name, name: [u.firstName, u.lastName].filter(Boolean).join(" ") || u.name }; lsSet("me", me); }
+          if (u) { me = { id: u.id, login: u.name, name: D.userName(u), groups: (u.driverGroups || []).map(GI.idOf) }; lsSet("me", me); }
           return me;
         });
     });
@@ -202,9 +204,64 @@
       if (r.alert) {
         const vn = (vehicle && vehicle.name) || "el vehículo";
         if (r.alert.kind === "en_movimiento") notify("Vehículo en movimiento con tu identificación", vn + " se está moviendo con tu identificación y vos estás a " + D.meters(r.dist) + ". Avisá a tu supervisor.", true);
-        else notify("Seguís identificado en " + vn, "Estás a " + D.meters(r.dist) + " del vehículo. Si terminaste, desvinculate; si no, volvé al vehículo.", true);
+        else notify("Seguís identificado en " + vn, "Estás a " + D.meters(r.dist) + " del vehículo. Abrí Mi jornada para desvincularte o avisar quién te relevó.", true);
       }
     });
+  }
+
+  // ---------- desvincularse / relevo ----------
+  function loadDrivers() {
+    const c = lsGet("drivers", null);
+    if (c && c.at > Date.now() - 6 * H && c.me === me.id) { drivers = c.list; return Promise.resolve(); }
+    return wapi.call("Get", { typeName: "User", search: { isDriver: true },
+      propertySelector: { fields: ["id", "name", "firstName", "lastName", "driverGroups", "activeTo", "isDriver"], isIncluded: true } })
+      .then(list => { drivers = D.reliefCandidates(list, me, Date.now()); lsSet("drivers", { at: Date.now(), me: me.id, list: drivers }); })
+      .catch(() => { drivers = drivers || []; });
+  }
+
+  // Cierra mi identificación en el vehículo: cambio de conductor a "desconocido".
+  function unassign() {
+    const v = vehicle;
+    if (!v || v.driver !== me.id) return Promise.reject(new Error("Ya no estás identificado en ningún vehículo."));
+    return wapi.call("Add", { typeName: "DriverChange", entity: {
+      device: { id: v.d }, driver: { id: "UnknownDriverId" }, dateTime: iso(Date.now()), type: "Driver" } })
+      .then(() => { v.driver = null; awayState = null; away = { status: "sin_vehiculo" }; lsSet("away", null); });
+  }
+
+  // Mensaje de usuario de Drive al conductor que me relevó (solo lo ve él).
+  function sendRelief(u) {
+    const msg = D.reliefMessage(me.name, vehicle, Date.now());
+    const now = iso(Date.now());
+    return wapi.call("Add", { typeName: "TextMessage", entity: {
+      user: { id: me.id }, recipient: { id: u.id }, isDirectionToVehicle: false,
+      messageContent: { contentType: "Normal", message: msg }, activeFrom: now, sent: now } });
+  }
+
+  function errMsg(e, what) {
+    const t = (e && (e.message || e.name)) || String(e);
+    return /permission|Unauthorized|Access/i.test(t) ? what + ": tu usuario no tiene permiso. Avisale a tu supervisor." : what + ": " + t;
+  }
+
+  function act(name, arg) {
+    if (ui.busy) return;
+    const vn = (vehicle && vehicle.name) || "el vehículo";
+    if (name === "cancel") { ui = { mode: null, q: "", busy: false, msg: null }; return render(); }
+    if (name === "ask-unassign") { ui.mode = "unassign"; ui.msg = null; return render(); }
+    if (name === "ask-relief") { ui.mode = "relief"; ui.q = ""; ui.msg = null; render(); return loadDrivers().then(render); }
+    ui.busy = true; render();
+    let p;
+    if (name === "unassign") {
+      p = unassign().then(() => ({ ok: "Te desvinculaste de " + vn + "." }), e => ({ err: errMsg(e, "No se pudo desvincular") }));
+    } else if (name === "relief") {
+      const u = (drivers || []).find(x => x.id === arg);
+      if (!u) { ui.busy = false; return render(); }
+      // el aviso sale aunque falle la desvinculación, y viceversa
+      p = sendRelief(u).then(() => null, e => errMsg(e, "No se pudo avisar a " + u.name))
+        .then(e1 => unassign().then(() => null, e => errMsg(e, "No se pudo desvincular"))
+          .then(e2 => (e1 || e2 ? { err: [e1, e2].filter(Boolean).join(" ") + (e1 ? "" : " A " + u.name + " le llegó el aviso.") }
+            : { ok: "Le avisamos a " + u.name + " y te desvinculaste de " + vn + "." })));
+    }
+    return p.then(r => { ui = { mode: null, q: "", busy: false, msg: r }; render(); });
   }
 
   // ---------- ciclo ----------
@@ -226,7 +283,7 @@
 
   function startLoop() {
     if (timer) return;
-    timer = setInterval(() => { check().then(() => { if (root && !root.hidden) render(); }); }, MIN);
+    timer = setInterval(() => { check().then(() => { if (root && !root.hidden && !ui.mode && !ui.busy) render(); }); }, MIN);
     if (!listening && api && api.mobile && typeof api.mobile.listenTo === "function") {
       listening = true;
       try {
@@ -315,12 +372,36 @@
     sin_vehiculo: () => "No estás identificado en ningún vehículo.",
     off: () => "Aviso de alejamiento desactivado.",
   };
+  function usersHtml() {
+    const list = drivers == null ? null : D.filterUsers(drivers, ui.q);
+    return list == null ? `<p class="mj-sub">Cargando conductores…</p>` : list.length ? list.slice(0, 40).map(u => `<button class="mj-user" data-act="relief" data-arg="${esc(u.id)}" ${ui.busy ? "disabled" : ""}>${esc(u.name)}</button>`).join("") : `<p class="mj-sub">No hay conductores con ese nombre.</p>`;
+  }
+  function reliefPicker() {
+    return `<div class="mj-pick">
+      <p class="mj-sub"><b>¿Quién te reemplazó?</b> Le llega un mensaje en su Drive para que se identifique al subir.</p>
+      <input id="mj-q" class="mj-input" type="search" placeholder="Buscar conductor" value="${esc(ui.q)}" autocomplete="off">
+      <div class="mj-users">${usersHtml()}</div>
+      <button class="mj-btn mj-btn-2" data-act="cancel">Cancelar</button>
+    </div>`;
+  }
   function cardVehicle() {
-    const vn = vehicle && vehicle.driver === me.id ? vehicle.name || vehicle.d : null;
+    const mine = vehicle && vehicle.driver === me.id;
+    const vn = mine ? vehicle.name || vehicle.d : null;
     const f = AWAY_TXT[away.status];
-    return `<section class="mj-card"><h2>Vehículo</h2>
+    const far = away.status === "lejos";
+    let actions = "";
+    if (mine && ui.mode === "unassign") {
+      actions = `<div class="mj-pick"><p class="mj-sub"><b>¿Te desvinculás de ${esc(vn)}?</b> Desde ahora los viajes y eventos de este vehículo dejan de quedar a tu nombre.</p>
+        <div class="mj-btns"><button class="mj-btn" data-act="unassign" ${ui.busy ? "disabled" : ""}>Sí, desvincularme</button><button class="mj-btn mj-btn-2" data-act="cancel">Cancelar</button></div></div>`;
+    } else if (mine && ui.mode === "relief") actions = reliefPicker();
+    else if (mine) {
+      actions = `<div class="mj-btns"><button class="mj-btn ${far ? "" : "mj-btn-2"}" data-act="ask-unassign">Me desvinculo</button><button class="mj-btn mj-btn-2" data-act="ask-relief">Me relevaron</button></div>`;
+    }
+    const msg = ui.msg ? `<p class="${ui.msg.ok ? "mj-okm" : "mj-msg"}">${esc(ui.msg.ok || ui.msg.err)}</p>` : "";
+    return `<section class="mj-card ${far && mine ? "mj-card-alert" : ""}" id="mj-vehicle"><h2>Vehículo</h2>
       <p class="mj-big-s">${vn ? esc(vn) : "Sin identificación"}</p>
-      <p class="mj-sub ${away.status === "lejos" ? "mj-badc" : ""}">${f ? f(away.dist) : "Revisando…"}</p>
+      <p class="mj-sub ${far ? "mj-badc" : ""}">${f ? f(away.dist) : "Revisando…"}</p>
+      ${msg}${actions}
       <p class="mj-hint">Si te alejás más de ${cfg.drive.away.distance_m} m mientras seguís identificado, el teléfono te avisa.</p>
     </section>`;
   }
@@ -334,7 +415,9 @@
     const foot = `<p class="mj-foot">${cfg.fromInsights ? "Límites de Insights by Cesetti" : "Límites por defecto (no se pudo leer la configuración de Insights)"} · actualizado ${view ? D.hm(view.at) : "–"}${isOnline() ? "" : " · sin conexión"}</p>`;
     const err = error ? `<div class="mj-msg">${esc(error)}</div>` : "";
     if (!me || !view) { body.innerHTML = err + `<p class="mj-sub mj-loading">Cargando tus datos…</p>`; return; }
-    body.innerHTML = err + cardTime(view.fat) + cardFatigue(view.fat) + cardRisk(view.risk) + cardVehicle() + foot;
+    // con el conductor lejos del vehículo (o eligiendo relevo) la tarjeta del vehículo va primero
+    const top = (away.status === "lejos" && vehicle && vehicle.driver === me.id) || ui.mode || ui.msg;
+    body.innerHTML = err + (top ? cardVehicle() : "") + cardTime(view.fat) + cardFatigue(view.fat) + cardRisk(view.risk) + (top ? "" : cardVehicle()) + foot;
   }
 
   function setup(freshApi, freshState) {
@@ -347,6 +430,12 @@
   function bindEvents() {
     const b = $("#mj-refresh");
     if (b) b.addEventListener("click", () => { b.disabled = true; check({ force: true }).then(() => { b.disabled = false; render(); }); });
+    root.addEventListener("click", e => {
+      const el = e.target.closest && e.target.closest("[data-act]");
+      if (el && !el.disabled) act(el.getAttribute("data-act"), el.getAttribute("data-arg"));
+    });
+    // al buscar solo se redibuja la lista (no se pierde el teclado)
+    root.addEventListener("input", e => { if (e.target.id === "mj-q") { ui.q = e.target.value; const l = $(".mj-users"); if (l) l.innerHTML = usersHtml(); } });
   }
 
   window.geotab = window.geotab || {};
@@ -372,6 +461,7 @@
         setup(freshApi, freshState);
         root = document.getElementById("mjDrive") || root;
         if (root) root.hidden = false;
+        if (!ui.busy) ui = { mode: null, q: "", busy: false, msg: null };
         render();
         startLoop();
         check({ force: true }).then(render);
@@ -383,5 +473,5 @@
       },
     };
   };
-  GI._mj = { get view() { return view; }, get away() { return away; }, check, render };
+  GI._mj = { get view() { return view; }, get away() { return away; }, get ui() { return ui; }, check, render, act };
 })(window.GI);

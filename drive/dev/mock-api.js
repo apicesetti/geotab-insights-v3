@@ -22,7 +22,13 @@
   window.__vehicle = { lat: -38.9505, lon: -68.0580, driving: false, driver: "uMe" };
   window.__notifications = []; window.__spoken = [];
   const db = {
-    User: [{ id: "uMe", name: "jp@cesetti.com.ar", firstName: "Juan", lastName: "Pérez", isDriver: true }],
+    User: [
+      { id: "uMe", name: "jp@cesetti.com.ar", firstName: "Juan", lastName: "Pérez", isDriver: true, driverGroups: [{ id: "gChof" }] },
+      { id: "u2", name: "ma@cesetti.com.ar", firstName: "María", lastName: "Álvarez", isDriver: true, driverGroups: [{ id: "gChof" }] },
+      { id: "u3", name: "cr@cesetti.com.ar", firstName: "Carlos", lastName: "Ruiz", isDriver: true, driverGroups: [{ id: "gChof" }] },
+      { id: "u4", name: "baja@cesetti.com.ar", firstName: "Pedro", lastName: "Baja", isDriver: true, driverGroups: [{ id: "gChof" }], activeTo: "2020-01-01T00:00:00Z" },
+      { id: "u5", name: "llave", firstName: "Llave de mantenimiento", lastName: "", isDriver: true, driverGroups: [{ id: "gMant" }] },
+    ],
     Trip: trips, ExceptionEvent: exceptions,
     Device: [{ id: "b1", name: "Camión 12", licensePlate: "AD123CD" }],
     DriverChange: [{ id: "dc1", device: { id: "b1" }, driver: { id: "uMe" }, dateTime: at(5, 55), type: "DriverKey" }],
@@ -36,6 +42,7 @@
     if (tn === "DeviceStatusInfo") { const v = window.__vehicle; return [{ device: { id: "b1" }, driver: { id: v.driver }, isDriving: v.driving, currentStateDuration: "00:30:00", dateTime: new Date().toISOString(), latitude: v.lat, longitude: v.lon }]; }
     let l = (db[tn] || []).slice();
     if (s.name) l = l.filter(x => x.name === s.name);
+    if (s.isDriver) l = l.filter(x => x.isDriver);
     if (s.id) l = l.filter(x => x.id === s.id);
     if (s.addInId) l = l.filter(x => x.addInId === s.addInId);
     if (s.deviceSearch) l = l.filter(x => x.device && x.device.id === s.deviceSearch.id);
@@ -45,8 +52,15 @@
     if (tk && s.toDate) l = l.filter(x => x[tk] <= s.toDate);
     return JSON.parse(JSON.stringify(l));
   }
+  window.__added = [];
+  function add(p) {
+    window.__added.push(p);
+    if (window.__denyAdd) throw new Error("Unauthorized: missing permission");
+    if (p.typeName === "DriverChange" && p.entity.driver.id === "UnknownDriverId") window.__vehicle.driver = "UnknownDriverId";
+    return "new" + window.__added.length;
+  }
   window.__api = {
-    call: (m, p, ok, err) => setTimeout(() => { try { ok(get(p)); } catch (e) { err(e); } }, 5),
+    call: (m, p, ok, err) => setTimeout(() => { try { ok(m === "Add" ? add(p) : get(p)); } catch (e) { err(e); } }, 5),
     multiCall: (calls, ok, err) => setTimeout(() => { try { ok(calls.map(c => get(c[1]))); } catch (e) { err(e); } }, 5),
     getSession: cb => setTimeout(() => cb({ userName: "jp@cesetti.com.ar", database: "intcesetti" }), 1),
     mobile: {

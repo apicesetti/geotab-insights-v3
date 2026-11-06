@@ -225,6 +225,27 @@
     return { state, status: "lejos", dist, acc, alert };
   }
 
+  // ---------- Relevo ----------
+  const userName = u => [u.firstName, u.lastName].filter(Boolean).join(" ").trim() || u.name || u.id;
+  // Conductores activos que comparten algún grupo de conductor conmigo (si no
+  // comparte ninguno, todos los activos). Ordenados por nombre.
+  function reliefCandidates(users, me, now) {
+    const active = (users || []).filter(u => u && u.id !== me.id && u.isDriver !== false && !(u.activeTo && new Date(u.activeTo).getTime() < now))
+      .map(u => ({ id: u.id, name: userName(u), groups: (u.driverGroups || []).map(GI.idOf) }));
+    const mine = new Set((me.groups || []).filter(g => g && g !== "GroupCompanyId"));
+    const same = mine.size ? active.filter(u => u.groups.some(g => mine.has(g))) : [];
+    return (same.length ? same : active).sort((a, b) => a.name.localeCompare(b.name, "es"));
+  }
+  const norm = s => String(s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+  function filterUsers(list, q) {
+    const w = norm(q).split(/\s+/).filter(Boolean);
+    return w.length ? list.filter(u => w.every(x => norm(u.name).includes(x))) : list;
+  }
+  function reliefMessage(meName, vehicle, t) {
+    const where = vehicle && vehicle.lat != null ? " Ubicación: https://maps.google.com/?q=" + GI.round(vehicle.lat, 5) + "," + GI.round(vehicle.lon, 5) : "";
+    return meName + " te entregó " + ((vehicle && vehicle.name) || "el vehículo") + " a las " + hm(t) + "." + where + " Identificate con tu llavero al subir.";
+  }
+
   // ---------- Formato ----------
   function dur(h) {
     if (h == null || !isFinite(h)) return "–";
@@ -237,5 +258,6 @@
   GI.Drive = {
     DRIVE_DEFAULTS, settingsFrom, compactTrip, compactException, mergeById, myEvents,
     riskSummary, fatigueState, limitAlerts, haversine, awayCheck, dur, hm, meters, realDriver,
+    reliefCandidates, filterUsers, reliefMessage, userName,
   };
 })(window.GI);

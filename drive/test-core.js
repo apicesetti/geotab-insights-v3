@@ -88,4 +88,19 @@ ok(m.alert && m.alert.kind === "en_movimiento", "vehículo en movimiento con mi 
 const mg = D.mergeById([{ i: "a", s: 1 }, { i: "b", s: 5 }], [{ i: "b", s: 6 }, { i: "c", s: 7 }], 2, "s");
 ok(mg.length === 2 && mg[0].s === 6 && mg[1].i === "c", "mergeById pisa y recorta");
 
+// relevo: candidatos del mismo grupo, activos, sin mí; búsqueda sin acentos
+const users = [
+  { id: "me", firstName: "Yo", isDriver: true, driverGroups: [{ id: "g1" }] },
+  { id: "a", firstName: "María", lastName: "Álvarez", isDriver: true, driverGroups: [{ id: "g1" }] },
+  { id: "b", firstName: "Carlos", lastName: "Ruiz", isDriver: true, driverGroups: ["g1"] },
+  { id: "c", firstName: "Baja", isDriver: true, driverGroups: [{ id: "g1" }], activeTo: "2020-01-01T00:00:00Z" },
+  { id: "d", firstName: "Llave", isDriver: true, driverGroups: [{ id: "g9" }] },
+];
+const cands = D.reliefCandidates(users, { id: "me", groups: ["g1"] }, now);
+ok(cands.map(u => u.id).join() === "b,a", "candidatos: mismo grupo, activos, ordenados (" + cands.map(u => u.id) + ")");
+ok(D.reliefCandidates(users, { id: "me", groups: ["gX"] }, now).length === 3, "sin grupo en común: todos los activos");
+ok(D.filterUsers(cands, "alvarez").length === 1 && D.filterUsers(cands, "").length === 2, "búsqueda sin acentos");
+const msg = D.reliefMessage("Juan Pérez", { name: "Camión 12", lat: -38.95, lon: -68.06 }, now);
+ok(/Juan Pérez te entregó Camión 12 a las 14:00/.test(msg) && /maps\.google\.com\/\?q=-38\.95,-68\.06/.test(msg), "mensaje de relevo");
+
 console.log("OK " + pass + " pruebas");

@@ -58,11 +58,40 @@ with sync_playwright() as p:
     page.evaluate("() => window.GI._mj.render()")
     page.screenshot(path=str(OUT / "02-lejos.png"), full_page=True)
 
+    # relevo: elige a María → mensaje de usuario + desvinculación
+    check(page.is_visible("text=Me relevaron") and page.is_visible("text=Me desvinculo"), "botones en la tarjeta del vehículo")
+    page.click("text=Me relevaron")
+    page.wait_for_selector(".mj-user")
+    names = page.eval_on_selector_all(".mj-user", "els => els.map(e => e.textContent)")
+    check(names == ["Carlos Ruiz", "María Álvarez"], "lista de relevo: mismo grupo, activos (%s)" % names)
+    page.fill("#mj-q", "alva")
+    names = page.eval_on_selector_all(".mj-user", "els => els.map(e => e.textContent)")
+    check(names == ["María Álvarez"] and page.evaluate("document.activeElement.id") == "mj-q", "búsqueda sin perder el foco")
+    page.screenshot(path=str(OUT / "03-relevo.png"), full_page=True)
+    page.click("text=María Álvarez")
+    page.wait_for_selector(".mj-okm")
+    added = page.evaluate("window.__added")
+    tm = [a for a in added if a["typeName"] == "TextMessage"]
+    dc = [a for a in added if a["typeName"] == "DriverChange"]
+    check(len(tm) == 1 and tm[0]["entity"]["recipient"]["id"] == "u2" and tm[0]["entity"]["user"]["id"] == "uMe" and "te entregó Camión 12" in tm[0]["entity"]["messageContent"]["message"], "mensaje a María (%s)" % (tm[0]["entity"]["messageContent"]["message"] if tm else None))
+    check(len(dc) == 1 and dc[0]["entity"]["driver"]["id"] == "UnknownDriverId" and dc[0]["entity"]["device"]["id"] == "b1", "desvinculación por DriverChange")
+    check("Le avisamos a María Álvarez" in page.inner_text(".mj-okm"), "confirmación en pantalla")
+    page.screenshot(path=str(OUT / "04-relevo-ok.png"), full_page=True)
+
     # se desvincula → ya no avisa
-    page.evaluate("() => { window.__vehicle.driver = 'UnknownDriverId'; window.__notifications.length = 0; }")
+    page.evaluate("() => { window.__notifications.length = 0; }")
     page.clock.run_for(35 * 60 * 1000)
     page.evaluate("() => window.GI._mj.check({ force: true })")
     check(page.evaluate("window.GI._mj.away.status") == "sin_vehiculo" and not any("identificado" in n["title"] for n in page.evaluate("window.__notifications")), "desvinculado: no avisa")
+
+    # sin permiso para desvincularse: mensaje claro
+    page.evaluate("() => { window.__vehicle.driver = 'uMe'; window.__denyAdd = true; }")
+    page.evaluate("() => window.GI._mj.check({ force: true })")
+    page.evaluate("() => window.GI._mj.act('cancel')")
+    page.click("text=Me desvinculo")
+    page.click("text=Sí, desvincularme")
+    page.wait_for_selector("#mj-vehicle .mj-msg")
+    check("no tiene permiso" in page.inner_text("#mj-vehicle .mj-msg"), "error de permiso explicado")
     b.close()
 
 if errors:

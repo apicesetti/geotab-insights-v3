@@ -53,3 +53,17 @@
 .mj-sb span { font-size: 10px; color: var(--muted); margin-top: 3px; white-space: nowrap; }
 .mj-cats { list-style: none; margin: 8px 0 0; padding: 0; }
 .mj-cats li { display: flex; justify-content: space-between; padding: 6px 0; border-top: 1px solid var(--rule); font-size: 14px; }
+
+/* vehículo: desvincularse / relevo */
+.mj-card-alert { border: 2px solid var(--bad); }
+.mj-btns { display: flex; gap: 8px; margin-top: 12px; }
+.mj-btn { flex: 1; min-height: 48px; border-radius: 10px; border: 1px solid var(--ink); background: var(--ink); color: #fff; font-size: 16px; font-weight: 600; font-family: inherit; }
+.mj-btn-2 { background: var(--surface); color: var(--ink); border-color: var(--rule); }
+.mj-btn:disabled, .mj-user:disabled { opacity: .5; }
+.mj-pick { margin-top: 12px; }
+.mj-pick > .mj-btn { width: 100%; margin-top: 10px; }
+.mj-input { width: 100%; min-height: 46px; border: 1px solid var(--rule); border-radius: 10px; padding: 0 12px; font-size: 16px; font-family: inherit; margin: 8px 0; }
+.mj-users { max-height: 320px; overflow-y: auto; border: 1px solid var(--rule); border-radius: 10px; }
+.mj-user { display: block; width: 100%; text-align: left; min-height: 48px; padding: 0 14px; border: 0; border-bottom: 1px solid var(--rule); background: var(--surface); font-size: 16px; font-family: inherit; color: var(--text); }
+.mj-user:last-child { border-bottom: 0; }
+.mj-okm { background: var(--good-soft); color: var(--good); border-radius: 8px; padding: 10px 12px; font-size: 14px; margin: 10px 0 0; }
