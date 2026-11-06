@@ -11,7 +11,7 @@
     ["combustible", "Combustible y ralentí"],
     ["seguridad", "Seguridad"],
     ["conductores", "Conductores"],
-    ["recorridos", "Recorridos"],
+    // ["recorridos", "Recorridos"], — sacada por ahora (poco útil); el código queda para retomarla
     ["mapa", "Mapa de calor"],
     ["fatiga", "Fatiga"],
     ["corredores", "Corredores"],
