@@ -37,6 +37,8 @@
   const zoneTypes = [{ id: "ztPuerto", name: "Puerto" }];
   // Zona grande y genérica (como "IMSEG"): no debe usarse para nombrar tramos.
   zones.push({ id: "zBig", name: "IMSEG", zoneTypes: [{ id: "ZoneTypeCustomerId" }], points: [[-62, -35.5], [-57.5, -35.5], [-57.5, -31], [-62, -31]].map(([x, y]) => ({ x, y })) });
+  // Corredor angosto a lo largo de la ruta Campana → Rosario (para la pestaña Corredores).
+  zones.push({ id: "zRN9", name: "RN9 Campana - Rosario", zoneTypes: [{ id: "ZoneTypeCustomerId" }], points: [[-59.10, -34.17], [-60.68, -32.99], [-60.60, -32.91], [-59.00, -34.11]].map(([x, y]) => ({ x, y })) });
   // Geocercas creadas por el add-in en esta sesión (sessionStorage).
   try { for (const z of JSON.parse(sessionStorage.getItem("mockZones") || "[]")) zones.push(z); for (const t of JSON.parse(sessionStorage.getItem("mockZoneTypes") || "[]")) zoneTypes.push(t); } catch (e) {}
   const persistZones = () => { try { sessionStorage.setItem("mockZones", JSON.stringify(zones.filter(z => z._created))); sessionStorage.setItem("mockZoneTypes", JSON.stringify(zoneTypes.filter(t => t._created))); } catch (e) {} };
@@ -339,18 +341,18 @@
         case "LogRecord": {
           // Sin deviceSearch (muestreo de corredores): un punto cada 10 s de
           // cada viaje que pase por la ventana, con velocidad.
-          if (!s.deviceSearch) {
+          if (!s.deviceSearch || new Date(s.toDate) - new Date(s.fromDate) > 20 * 60000) {
             const a0 = new Date(s.fromDate).getTime(), a1 = new Date(s.toDate).getTime();
             out = [];
             for (const t of trips) {
               const t0 = new Date(t.start).getTime(), t1 = new Date(t.stop).getTime();
-              if (t1 < a0 || t0 > a1) continue;
+              if (t1 < a0 || t0 > a1 || (s.deviceSearch && t.device.id !== s.deviceSearch.id)) continue;
               const A = t._a, Z = [t.stopPoint.x, t.stopPoint.y];
               const kmh = t.distance / ((t1 - t0) / 3600000);
               for (let k = Math.max(t0, Math.ceil(a0 / 10000) * 10000); k <= Math.min(t1, a1); k += 10000) {
                 const f = (k - t0) / Math.max(1, t1 - t0);
                 const wob = Math.sin(k / 7e5) * 0.15;
-                out.push({ device: { id: t.device.id }, dateTime: new Date(k).toISOString(), latitude: A[1] + (Z[1] - A[1]) * f, longitude: A[0] + (Z[0] - A[0]) * f, speed: Math.max(0, kmh * (1 + wob) - (new Date(k).getHours() >= 17 && new Date(k).getHours() < 20 && (k / 1000) % 180 < 20 ? 35 : 0)) });
+                out.push({ device: { id: t.device.id }, dateTime: new Date(k).toISOString(), latitude: A[1] + (Z[1] - A[1]) * f, longitude: A[0] + (Z[0] - A[0]) * f, speed: Math.max(0, kmh * (1 + wob) - (new Date(k).getHours() >= 17 && new Date(k).getHours() < 20 && (k / 1000) % 180 < 20 ? 35 : 0) + ((k / 1000) % 3600 < 90 ? (t.device.id === "b302" ? 45 : 18) : 0)) * (t0 % 7 === 0 && f > 0.4 && f < 0.4 + 420000 / Math.max(1, t1 - t0) ? 0 : 1) });
               }
             }
             break;

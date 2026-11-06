@@ -770,3 +770,31 @@ tr.ft-row-ident td { background: #fffaeb; }
 .mg-dcoach-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 14px; }
 .mg-many { display: inline-flex; }
 @media (max-width: 900px) { .mg-pareto, .mg-matrix { grid-template-columns: minmax(0, 1fr); } }
+
+/* ---------- Corredores ---------- */
+.cr-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 14px; }
+.cr-bar-act { margin-left: auto; display: flex; gap: 8px; }
+.cr-empty { max-width: 720px; font-size: 14px; }
+.cr-empty ol { padding-left: 20px; }
+.cr-focus { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
+.linklike { border: 0; background: none; padding: 0; font: inherit; font-weight: 500; color: var(--accent); cursor: pointer; text-decoration: underline; }
+.cr-okbar { display: inline-block; vertical-align: middle; width: 90px; height: 8px; border-radius: 4px; background: var(--rule); overflow: hidden; margin-right: 6px; }
+.cr-okfill { display: block; height: 100%; background: var(--accent); }
+.cr-okfill.good { background: var(--good); }
+.cr-okfill.warn { background: var(--warn); }
+.cr-okfill.bad { background: var(--bad); }
+.cr-detail-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px; margin-bottom: 12px; }
+.cr-detail-head h2 { margin: 0; font-size: 20px; }
+.cr-map { height: 260px; border-radius: 8px; border: 1px solid var(--rule); margin-bottom: 8px; }
+.cr-last { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; font-size: 14px; }
+.cr-found { list-style: none; padding: 0; margin: 6px 0 12px; display: flex; flex-wrap: wrap; gap: 6px; }
+.cr-edit { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 10px; }
+.cr-edit th { text-align: left; font-weight: 500; color: var(--muted); padding: 6px; border-bottom: 1px solid var(--rule); }
+.cr-edit td { padding: 6px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+.cr-edit input[type=number] { width: 70px; }
+.cr-edit select[multiple] { min-width: 160px; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.hm-tramo-act { padding: 0 6px 8px 40px; }
+.bad-text { color: #c2381f; font-weight: 500; }
+.hm-spotlist .hm-tramo-act .btn { display: inline-block; width: auto; border: 1px solid var(--rule-strong); background: var(--surface); padding: 3px 10px; min-height: 28px; font-weight: 500; }
+.hm-spotlist .hm-tramo-act .btn:hover { background: var(--sunken); }

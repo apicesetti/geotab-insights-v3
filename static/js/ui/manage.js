@@ -378,5 +378,5 @@ ${focos.length ? `<h2>Focos del período</h2><ol>${focos.map(f => "<li>" + esc(f
     return html`<button className="btn" onClick=${open} title="Abre el informe del período para imprimir o guardar como PDF">Informe mensual (PDF)</button>`;
   }
 
-  Object.assign(GI, { ParetoPanel, MatrixPanel, RecidivismPanel, CoachingPanel, DriverCoaching, CoachButton, ReportButton, loadCoachList, _reportHtml: reportHtml });
+  Object.assign(GI, { CoachMany, ParetoPanel, MatrixPanel, RecidivismPanel, CoachingPanel, DriverCoaching, CoachButton, ReportButton, loadCoachList, _reportHtml: reportHtml });
 })(window.GI);

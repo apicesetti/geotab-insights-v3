@@ -348,10 +348,11 @@
           : tab === "conductores" ? html`<${GI.DriversTab} view=${view} onDriver=${id => setDetail({ type: "d", id })} />`
           : tab === "recorridos" ? html`<${GI.RoutesTab} view=${view} api=${api} onMap=${mapOn ? openMap : null} />`
           : tab === "mapa" ? html`<${GI.MapTab} view=${view} api=${api} preset=${mapPreset} onPresetUsed=${() => setMapPreset(null)} onDriver=${id => setDetail({ type: "d", id, mode: "safety" })}
+              isAdmin=${isAdmin} onSaveSettings=${saveSettings} onCorridors=${() => setTab("corredores")}
               period=${period} presets=${PRESETS} onPeriod=${applyPreset} />`
           : tab === "fatiga" ? (GI.FatigueTab ? html`<${GI.FatigueTab} view=${view} api=${api} userName=${userName} isAdmin=${isAdmin} onSaveSettings=${saveSettings} openDriverId=${fatigueDrv} onOpened=${() => setFatigueDrv(null)} onDriver=${id => setDetail({ type: "d", id, mode: "safety" })} />` : html`<${Info} tone="warn">Se está terminando de cargar la nueva versión. Recargá la página (Ctrl + F5).<//>`)
           : tab === "exposicion" ? html`<${GI.ExposureTab} view=${view} onDriver=${id => setDetail({ type: "d", id })} />`
-          : tab === "corredores" && showBetaTabs() ? (GI.RoadsTab ? html`<${GI.RoadsTab} view=${view} api=${api} database=${database} />` : html`<${Info} tone="warn">Se está terminando de cargar la nueva versión de Corredores. Recargá la página (Ctrl + F5).<//>`)
+          : tab === "corredores" && showBetaTabs() ? (GI.CorridorsTab ? html`<${GI.CorridorsTab} view=${view} api=${api} isAdmin=${isAdmin} onSaveSettings=${saveSettings} />` : html`<${Info} tone="warn">Se está terminando de cargar la nueva versión de Corredores. Recargá la página (Ctrl + F5).<//>`)
           : tab === "hitos" ? html`<${GI.MilestonesTab} view=${view} milestones=${milestones} isAdmin=${isAdmin} groups=${groupsFlat}
               onAdd=${async m => { const r = await GI.addMilestone(api, m); setMilestones(ms => [...ms, r]); }}
               onUpdate=${async m => { await GI.updateMilestone(api, m); setMilestones(ms => ms.map(x => (x.id === m.id ? m : x))); }}

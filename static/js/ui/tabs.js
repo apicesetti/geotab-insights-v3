@@ -937,7 +937,7 @@
   const inBand = (t, b) => { if (!b) return true; const h = new Date(t).getHours(); return b[0] < b[1] ? h >= b[0] && h < b[1] : h >= b[0] || h < b[1]; };
   const minsTxt = h => { const m = Math.round((h || 0) * 60 * 60); return m >= 60 ? Math.floor(m / 60) + " min " + (m % 60) + " s" : m + " s"; };
 
-  function MapTab({ view, api, preset, onPresetUsed, onDriver, period, presets, onPeriod }) {
+  function MapTab({ view, api, preset, onPresetUsed, onDriver, period, presets, onPeriod, isAdmin, onSaveSettings, onCorridors }) {
     const hasSpeed = view.events.some(e => e.cat === "velocidad");
     const [cat, setCat] = useState(hasSpeed ? "velocidad" : "");
     const [sev, setSev] = useState(new Set(SEV_KEYS));
@@ -981,6 +981,17 @@
     }, [sample]);
     const placed = useMemo(() => (locs ? sample.filter(e => locs.get(e.i)) : []), [locs, sample]);
     const spots = useMemo(() => (locs && progress == null ? GI.hotspots(sample, locs) : null), [locs, progress, sample]);
+    const corrIds = useMemo(() => new Set((view.settings.corridors || []).map(c => c.id)), [view.settings]);
+    const tramos = useMemo(() => (layer === "tramos" && locs && progress == null && GI.tramosFromEvents ? GI.tramosFromEvents(sample, locs, view.model.cat.zones, corrIds) : null), [layer, locs, progress, sample, view.model.cat.zones, corrIds]);
+    const [conv, setConv] = useState({});
+    async function toCorridor(t) {
+      setConv(c => ({ ...c, [t.key]: "busy" }));
+      try {
+        const list = [...(view.settings.corridors || []), { id: t.zone.id, name: t.zone.name, limit: GI.limitFromName(t.zone.name), from: 0, to: 24, stops: [], stopMin: 5 }];
+        await onSaveSettings({ ...view.settings, corridors: list });
+        setConv(c => ({ ...c, [t.key]: "ok" }));
+      } catch (e) { setConv(c => ({ ...c, [t.key]: "err" })); }
+    }
     const ensureMap = () => {
       if (!mapObj.current && mapRef.current) {
         mapObj.current = L.map(mapRef.current, { preferCanvas: true });
@@ -993,7 +1004,7 @@
     useEffect(() => {
       const m = ensureMap();
       if (!m) return;
-      for (const k of ["_heat", "_pts", "_spots"]) if (m[k]) { m.removeLayer(m[k]); m[k] = null; }
+      for (const k of ["_heat", "_pts", "_spots", "_tramos"]) if (m[k]) { m.removeLayer(m[k]); m[k] = null; }
       const pts = placed.map(e => [...locs.get(e.i), e.w]);
       if (layer === "heat") m._heat = L.heatLayer(pts, { radius: 14, blur: 18, maxZoom: 12, max: 2 }).addTo(m);
       if (layer === "points") {
@@ -1003,10 +1014,12 @@
       }
       if (layer === "spots" && spots) m._spots = L.layerGroup(spots.slice(0, 15).map((h, i) => L.rectangle(h.bounds, { color: "#fe5a3f", weight: 2, fill: false })
         .bindTooltip(String(i + 1), { permanent: true, direction: "center", className: "spot-label" }))).addTo(m);
+      if (layer === "tramos" && tramos) m._tramos = L.layerGroup(tramos.slice(0, 15).map((t, i) => (t.zone ? L.polygon(t.zone.pts.map(([x, y]) => [y, x]), { color: "#fe5a3f", weight: 2, fillOpacity: 0.08 }) : L.rectangle(t.bounds, { color: "#fe5a3f", weight: 2, dashArray: "4 4", fill: false }))
+        .bindTooltip(String(i + 1), { permanent: true, direction: "center", className: "spot-label" }))).addTo(m);
       const fitKey = sample.length + "|" + (sample[0] ? sample[0].i : "");
       if (pts.length && progress == null && m._fitKey !== fitKey) { m._fitKey = fitKey; m.fitBounds(L.latLngBounds(pts.map(p => [p[0], p[1]])), { padding: [24, 24], maxZoom: 13 }); }
       setTimeout(() => m.invalidateSize(), 0);
-    }, [placed, layer, spots, progress == null]);
+    }, [placed, layer, spots, tramos, progress == null]);
     useEffect(() => { const m = mapObj.current; if (m && focus) m.fitBounds(focus.bounds, { padding: [60, 60], maxZoom: 15 }); }, [focus]);
     // Trazado de un evento con su velocidad real
     const [speed, setSpeed] = useState(null);
@@ -1068,7 +1081,7 @@
       <div className="hm-main">
         <div className="hm-mapbox">
           <div className="hm-maphead">
-            <${Segmented} value=${layer} onChange=${setLayer} options=${[{ value: "heat", label: "Calor" }, { value: "points", label: "Puntos por gravedad" }, { value: "spots", label: "Puntos calientes" }]} />
+            <${Segmented} value=${layer} onChange=${setLayer} options=${[{ value: "heat", label: "Calor" }, { value: "points", label: "Puntos por gravedad" }, { value: "spots", label: "Puntos calientes" }, ...(GI.tramosFromEvents ? [{ value: "tramos", label: "Tramos" }] : [])]} />
             ${layer === "points" ? html`<span className="hm-legend">${cat === "velocidad" || !cat ? SEV_KEYS.map(k => html`<span key=${k}><span className="hm-dot" style=${{ background: SEV[k].color }}></span>${SEV[k].label}</span>`) : null}${cat !== "velocidad" ? html`<span className="muted small">otras categorías: su color</span>` : null}</span>` : null}
           </div>
           <div ref=${mapRef} className="hm-map"></div>
@@ -1092,6 +1105,15 @@
               ${sel.drv ? html`<button className="btn small" onClick=${() => onDriver(sel.drv)}>Ficha del conductor</button>` : null}
               <button className="btn small" onClick=${() => GI.openEventsPage({ ruleIds: [sel.rule], deviceIds: [sel.d], driverIds: sel.drv ? [sel.drv] : null, from: sel.dk, to: sel.dk })}>Evento en MyGeotab ↗</button>
             </div>
+          </div>` : layer === "tramos" ? html`<div className="hm-spots">
+            <div className="hm-side-head"><h3>Tramos con más infracciones</h3></div>
+            <p className="small muted">Infracciones agrupadas por geocerca (o por zona de ~2 km si no caen en ninguna), ordenadas por excesos graves. Una geocerca con muchas infracciones puede pasar a ser un corredor con límite, horario y paradas.</p>
+            ${!tramos ? html`<p className="small muted">${progress != null ? "Calculando…" : "Sin datos."}</p>` : !tramos.length ? html`<p className="small muted">Ningún tramo junta 3 o más infracciones con estos filtros.</p>`
+              : html`<ol className="hm-spotlist">${tramos.slice(0, 15).map((t, i) => html`<li key=${t.key}><button type="button" onClick=${() => setFocus(t)}>
+                  <b>${i + 1}</b><span><span className="hm-spot-n">${t.name || "Sin geocerca"}</span><br/>${n0(t.n)} infracciones${t.grave ? html` · <span className="bad-text">${n0(t.grave)} graves</span>` : ""} · ${n0(t.drivers)} conductores<br/><span className="small muted">${t.cats.slice(0, 2).map(c => GI.catLabel(c.cat) + " " + n0(c.n)).join(" · ")}</span></span></button>
+                  <div className="hm-tramo-act">${t.isCorridor || conv[t.key] === "ok" ? html`<span className="small">Es corredor${onCorridors ? html` · <a href="#" onClick=${e => { e.preventDefault(); onCorridors(); }}>ver cumplimiento</a>` : ""}</span>`
+                    : t.zone ? (isAdmin && onSaveSettings ? html`<button className="btn small" disabled=${conv[t.key] === "busy"} onClick=${() => toCorridor(t)}>${conv[t.key] === "busy" ? "Guardando…" : conv[t.key] === "err" ? "No se pudo, reintentar" : "Convertir en corredor"}</button>` : html`<span className="small muted">Un administrador puede convertirlo en corredor.</span>`)
+                    : html`<button className="btn small ghost" onClick=${() => GI.downloadText("tramo-" + (i + 1) + ".kml", GI.hotspotsKml([{ ...t, cats: t.cats }], "Tramo " + (i + 1)))} title="Importalo con Import KML Zones y después convertilo en corredor">KML para crear la geocerca</button>`}</div></li>`)}</ol>`}
           </div>` : html`<div className="hm-spots">
             <div className="hm-side-head"><h3>Puntos calientes</h3><button className="btn small" disabled=${!spots || !spots.length} onClick=${kml} title="KML con un polígono por punto caliente, para crear zonas con Import KML Zones">Descargar KML</button></div>
             <p className="small muted">Lugares de ~500 m con 5 o más infracciones de 2 o más conductores. Click para centrar el mapa; click en un punto del mapa para ver el evento.</p>
