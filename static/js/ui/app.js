@@ -277,7 +277,7 @@
     if (filter.stype) activeFilters.push({ key: "s", label: filter.stype === "larga" ? "Larga distancia" : "Corta distancia", clear: () => setFilter(f => ({ ...f, stype: "" })) });
     return html`<div className="app">
       <header className="topbar">
-        <div className="brand"><h1>Geotab Insights</h1><span className="sub">Base ${database}${isAdmin ? ", con permisos de administrador" : ""}</span></div>
+        <div className="brand"><h1>Insights <span className="by">by Cesetti</span></h1><span className="sub">Base ${database}${isAdmin ? ", con permisos de administrador" : ""}</span></div>
         <div className="controls">
           <label className="ctl">Período
             <select value=${customDraft ? "custom" : period.preset || "range"} onChange=${e => applyPreset(e.target.value)}>
@@ -314,7 +314,7 @@
         <button className="btn link small" onClick=${() => setFilter({ vtype: "", stype: "" })}>Quitar filtros</button>
       </div>` : null}
       ${loading != null ? html`<${Progress} value=${loading} label=${loadingLabel || "Descargando datos"} />` : null}
-      <nav className="tabs">${(driverMode ? [["mi", "Mi desempeño"]] : TABS.filter(([k]) => !BETA_ONLY.has(k) || showBetaTabs())).map(([k, l]) => html`<button key=${k} className=${tab === k ? "on" : ""} onClick=${() => setTab(k)}>${l}</button>`)}</nav>
+      <nav className="tabs">${(driverMode ? [["mi", "Mi desempeño"]] : TABS.filter(([k]) => !BETA_ONLY.has(k) || showBetaTabs())).map(([k, l]) => html`<button key=${k} className=${tab === k ? "on" : ""} onClick=${() => setTab(k)}>${GI.headline ? GI.headline(l) : l}</button>`)}</nav>
       <div className="gi-main">
         ${view && !driverMode && GI.FatigueAlerts ? html`<${ErrorBoundary}><${GI.FatigueAlerts} view=${view} api=${api} settings=${settings} userName=${userName} /><//>` : null}
         ${error ? html`<${Info} tone="error">${error}<//>` : null}

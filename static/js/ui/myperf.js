@@ -63,8 +63,8 @@
           <${ChartView} height=${240} config=${{
             type: "line",
             data: { labels: series.map(s => s.label), datasets: [
-              { label: "Mi riesgo", data: series.map(s => (s.risk == null ? null : GI.round(s.risk, 2))), borderColor: "#2a78d6", backgroundColor: "#2a78d61f", fill: true, tension: 0.3, spanGaps: true },
-              ...(b ? [{ label: "Empresa", data: series.map(() => GI.round(b.fleetIdx, 2)), borderColor: "#9a9893", borderDash: [6, 4], pointRadius: 0, fill: false }] : []),
+              { label: "Mi riesgo", data: series.map(s => (s.risk == null ? null : GI.round(s.risk, 2))), borderColor: "#0078d3", backgroundColor: "#0078d31f", fill: true, tension: 0.3, spanGaps: true },
+              ...(b ? [{ label: "Empresa", data: series.map(() => GI.round(b.fleetIdx, 2)), borderColor: "#b3bcc7", borderDash: [6, 4], pointRadius: 0, fill: false }] : []),
             ] },
             options: { plugins: { legend: { display: !!b } }, scales: { y: { beginAtZero: true, title: { display: true, text: "pts/100 km" } } } },
           }} />

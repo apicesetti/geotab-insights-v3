@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8" />
-<title>Geotab Insights</title>
+<title>Insights by Cesetti</title>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="robots" content="noindex" />
 <style>
@@ -35,7 +35,7 @@
 <div id="gi3-root"></div>
 
 <script>
-// Geotab Insights fuera de MyGeotab: inicia sesión directamente contra la API
+// Insights by Cesetti fuera de MyGeotab: inicia sesión directamente contra la API
 // de Geotab con el usuario de la persona, y arranca el add-in con esa sesión.
 // No se instala nada en la base y nadie más lo ve. La contraseña solo viaja a
 // los servidores de Geotab; en este navegador se guarda la sesión (no la clave).
@@ -104,7 +104,7 @@
     var dbs = load(DBS) || [];
     root.innerHTML =
       '<form class="sa-login" autocomplete="on">' +
-      '<h1>Geotab Insights</h1>' +
+      '<h1>Insights by Cesetti</h1>' +
       '<p>Ingresá con tu usuario de MyGeotab. El add-in se abre sobre esa base sin instalarse: nadie más lo ve.</p>' +
       '<label for="sa-db">Base de datos</label><input id="sa-db" name="database" list="sa-dbs" required autocapitalize="off" spellcheck="false" value="' + esc(prev && prev.database) + '" />' +
       '<datalist id="sa-dbs">' + dbs.map(function (d) { return '<option value="' + esc(d) + '">'; }).join("") + '</datalist>' +
@@ -158,7 +158,7 @@
     var api = makeApi(sess);
     var state = { getGroupFilter: function () { return sel.length ? sel.map(function (id) { return { id: id }; }) : [{ id: "GroupCompanyId" }]; } };
     bar.className = "sa-bar";
-    bar.innerHTML = '<b>Geotab Insights</b><span>' + esc(sess.credentials.database) + ' · ' + esc(sess.credentials.userName) + '</span>' +
+    bar.innerHTML = '<b>Insights by Cesetti</b><span>' + esc(sess.credentials.database) + ' · ' + esc(sess.credentials.userName) + '</span>' +
       '<label>Grupo <select id="sa-group"><option value="">Toda la flota</option></select></label><span class="sp"></span>' +
       '<button id="sa-mg" type="button">Abrir MyGeotab ↗</button><button id="sa-switch" type="button">Cambiar de base</button><button id="sa-out" type="button">Salir</button>';
     document.getElementById("sa-out").onclick = function () { api.call("Logoff", {}, function () {}, function () {}); store(KEY, null); location.reload(); };

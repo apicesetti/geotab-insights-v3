@@ -271,7 +271,7 @@
     const mapping = draft.rule_mapping || {};
     const usage = k => Object.values(mapping).filter(v => v === k).length;
     let slot = 0;
-    const colorOf = c => (c.kind === "riesgo" && slot < 8 ? ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"][slot++] : GI.OTHER_COLOR);
+    const colorOf = c => (c.kind === "riesgo" && slot < 8 ? ["#0078d3", "#fe5a3f", "#00aa00", "#f9ba00", "#edbbb2", "#00aa00", "#00aeff", "#fe5a3f"][slot++] : GI.OTHER_COLOR);
     const colors = cats.map(colorOf);
     const upd = (i, patch) => set(["categories"], cats.map((c, j) => (j === i ? { ...c, ...patch } : c)));
     const move = (i, d) => { const a = [...cats]; const [x] = a.splice(i, 1); a.splice(i + d, 0, x); set(["categories"], a); };

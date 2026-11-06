@@ -20,8 +20,8 @@
   }
   const STATUS = ["Detectado", "Revisado", "Entrevista", "Cerrado"];
   const ACTIONS = ["", "Charla con el conductor", "Descanso obligatorio", "Cambio de diagrama", "Capacitación", "Derivación a salud ocupacional", "Otra"];
-  const CAM_COLORS = { fatiga: "#b93a0f", distraccion: "#7a4dc2", salida_carril: "#c77700" };
-  const FI_COLORS = { bajo: "#1f2a37", moderado: "#c99400", alto: "#d4561e", "muy alto": "#a3200f" };
+  const CAM_COLORS = { fatiga: "#fe5a3f", distraccion: "#00aeff", salida_carril: "#f9ba00" };
+  const FI_COLORS = { bajo: "#25477b", moderado: "#f9ba00", alto: "#fe5a3f", "muy alto": "#c2381f" };
   const LIVE_HOURS = 36;
 
   const drvName = (view, id) => view.model.driverName.get(id) || id;
@@ -85,39 +85,39 @@
       const t = w > txt.length * 6.2 + 6 ? txt : short && w > short.length * 6.2 + 4 ? short : null;
       return t ? html`<text x=${(x(a) + x(b)) / 2} y=${BY + 13} textAnchor="middle" className=${"ft-tl-bar" + (dark ? " on-dark" : "")}>${t}</text>` : null;
     };
-    const restColor = k => (k === "curso" ? "#a9dcbf" : k === "sincom" ? "#b8bec8" : GAP[k].color);
+    const restColor = k => (k === "curso" ? "#b3e6b3" : k === "sincom" ? "#b3bcc7" : GAP[k].color);
     return html`<div className="ft-tl">
       <svg viewBox=${"0 0 " + W + " " + Hh} role="img" aria-label="Evolución del índice de fatiga">
         ${rests.filter(r => r.b > t0).map((r, i) => html`<rect key=${"rb" + i} x=${x(r.a)} y=${T} width=${Math.max(0, x(r.b) - x(r.a))} height=${B - T} fill=${restColor(r.k)} opacity="0.16" />`)}
-        ${nights.filter(([a, b]) => b > t0 && a < t1).map(([a, b], i) => html`<rect key=${"n" + i} x=${x(a)} y=${T - 8} width=${Math.max(0, x(b) - x(a))} height="5" rx="1" fill="#c9cfe3" />`)}
-        <rect x=${x(now)} y=${T} width=${R - x(now)} height=${B - T} fill="#f4f5f7" opacity="0.8" />
-        ${[0, 40, 80, 120, 160].map(v => html`<g key=${"g" + v}><line x1=${L} x2=${R} y1=${y(v)} y2=${y(v)} stroke="#eceff3" /><text x=${L - 6} y=${y(v) + 4} textAnchor="end" className="ft-tl-tick">${v}</text></g>`)}
-        ${[fz.fi_mod, fz.fi_high].map((v, i) => html`<g key=${"th" + v}><line x1=${L} x2=${R} y1=${y(v)} y2=${y(v)} stroke=${i ? "#d4561e" : "#c99400"} strokeDasharray="5 4" /><text x=${L + 4} y=${y(v) - 4} className="ft-tl-lab">${(i ? "alto " : "moderado ") + v}</text></g>`)}
+        ${nights.filter(([a, b]) => b > t0 && a < t1).map(([a, b], i) => html`<rect key=${"n" + i} x=${x(a)} y=${T - 8} width=${Math.max(0, x(b) - x(a))} height="5" rx="1" fill="#d1d6dd" />`)}
+        <rect x=${x(now)} y=${T} width=${R - x(now)} height=${B - T} fill="#f5f7fa" opacity="0.8" />
+        ${[0, 40, 80, 120, 160].map(v => html`<g key=${"g" + v}><line x1=${L} x2=${R} y1=${y(v)} y2=${y(v)} stroke="#eff2f7" /><text x=${L - 6} y=${y(v) + 4} textAnchor="end" className="ft-tl-tick">${v}</text></g>`)}
+        ${[fz.fi_mod, fz.fi_high].map((v, i) => html`<g key=${"th" + v}><line x1=${L} x2=${R} y1=${y(v)} y2=${y(v)} stroke=${i ? "#fe5a3f" : "#f9ba00"} strokeDasharray="5 4" /><text x=${L + 4} y=${y(v) - 4} className="ft-tl-lab">${(i ? "alto " : "moderado ") + v}</text></g>`)}
 
         ${rests.filter(r => r.b > t0).map((r, i) => html`<g key=${"r" + i}><rect x=${x(r.a)} y=${BY} width=${Math.max(1.5, x(r.b) - x(r.a))} height=${BH} fill=${restColor(r.k)} />
           ${label(r.a, r.b, (r.k === "curso" ? "descansa " : r.k === "sincom" ? "sin datos " : "") + dur(r.h), r.k === "sincom")}
           <title>${(r.k === "sincom" ? "Sin comunicación del vehículo desde " + when(r.a) + " (" + dur(r.h) + "): no se sabe si descansa o sigue manejando" : r.k === "curso" ? "Descansando desde " + when(r.a) + " (" + dur(r.h) + " hasta ahora)" : GAP[r.k].label.split(" (")[0] + ": " + dur(r.h) + " · " + when(r.a) + " → " + when(r.b)) + (r.j && r.j.restPlace ? " · " + placeTxt(r.j.restPlace) : "") + (r.j && r.j.restHandover ? " · el vehículo siguió con " + (r.j.restHandover.drv ? (GI.__drvName ? GI.__drvName(r.j.restHandover.drv) : r.j.restHandover.drv) : "otro conductor") + " desde las " + hm(r.j.restHandover.at) : "") + (r.j && r.j.restMicro && r.j.restMicro.length ? " · " + r.j.restMicro.length + " movimiento(s) mínimo(s) ignorado(s): " + r.j.restMicro.map(t => hm(t.s)).join(", ") : "")}</title></g>`)}
         ${shifts.map(j => html`<g key=${j.key} style=${{ cursor: "pointer" }} onClick=${() => onCase && onCase(j)}>
-          <rect x=${x(j.s)} y=${BY} width=${Math.max(2, x(j.e) - x(j.s))} height=${BH} fill=${FI_COLORS[GI.fiLevel(j.fiPeak, fz)] || "#1f2a37"} />
+          <rect x=${x(j.s)} y=${BY} width=${Math.max(2, x(j.e) - x(j.s))} height=${BH} fill=${FI_COLORS[GI.fiLevel(j.fiPeak, fz)] || "#25477b"} />
           ${label(j.s, j.e, (j.open ? "en curso " : "") + dur(j.open ? (now - j.s) / H : j.span), GI.fiLevel(j.fiPeak, fz) !== "moderado")}
           <title>${"Jornada " + when(j.s) + " → " + (j.open ? "en curso" : when(j.e)) + " · " + dur(j.span) + " (" + dur(j.dh) + " de manejo)"  + " · índice máx. " + Math.round(j.fiPeak) + " (click para ver)"}</title></g>`)}
-        ${proj && proj.nextStart && proj.nextStart < t1 ? html`<g><rect x=${x(proj.nextStart)} y=${BY} width=${Math.max(2, x(proj.nextStart + proj.hb.span * H) - x(proj.nextStart))} height=${BH} fill="none" stroke="#1f2a37" strokeDasharray="3 2" />
+        ${proj && proj.nextStart && proj.nextStart < t1 ? html`<g><rect x=${x(proj.nextStart)} y=${BY} width=${Math.max(2, x(proj.nextStart + proj.hb.span * H) - x(proj.nextStart))} height=${BH} fill="none" stroke="#25477b" strokeDasharray="3 2" />
           ${label(proj.nextStart, proj.nextStart + proj.hb.span * H, "próximo " + dur(proj.hb.span))}<title>${"Próximo turno habitual: " + when(proj.nextStart) + " (" + dur(proj.hb.span) + ")"}</title></g>` : null}
 
-        <path d=${"M" + pts.join("L")} fill="none" stroke="#1f2a37" strokeWidth="2.2" />
-        ${ptsOff.length ? html`<path d=${"M" + ptsOff.join("L")} fill="none" stroke="#8a929e" strokeWidth="2" strokeDasharray="2 4"><title>Sin datos: supone que descansa</title></path>` : null}
-        ${proP.length ? html`<path d=${"M" + proP.join("L")} fill="none" stroke="#1f2a37" strokeWidth="2" strokeDasharray="5 4" opacity="0.7" />` : null}
-        ${cams.map((e, i) => html`<path key=${"c" + i} d=${"M" + x(e.t) + " " + (y(sim.at(e.t)) - 5) + " l-5 -9 h10 z"} fill=${CAM_COLORS[e.cat] || "#b93a0f"} opacity="0.85"><title>${when(e.t) + " · " + GI.catLabel(e.cat) + " · índice " + Math.round(sim.at(e.t))}</title></path>`)}
-        <line x1=${x(now)} x2=${x(now)} y1=${T} y2=${BY + BH} stroke="#2a78d6" strokeWidth="1.5" />
-        <text x=${x(now) + 4} y=${T + 10} className="ft-tl-lab b" fill="#2a78d6">ahora ${proj ? Math.round(proj.Fnow) + (off ? "?" : "") : ""}</text>
-        ${proj && proj.crossAt && proj.crossAt > now ? html`<g><circle cx=${x(proj.crossAt)} cy=${y(fz.fi_high)} r="4.5" fill="#d4561e" /><text x=${x(proj.crossAt) + (x(proj.crossAt) > R - 60 ? -6 : 6)} y=${y(fz.fi_high) - 6} textAnchor=${x(proj.crossAt) > R - 60 ? "end" : "start"} className="ft-tl-lab b">${(GI.dayKey(proj.crossAt) !== GI.dayKey(now) ? dshort(proj.crossAt) + " " : "") + hm(proj.crossAt)}</text></g>` : null}
-        ${ticks.map(t => html`<g key=${"k" + t}><line x1=${x(t)} x2=${x(t)} y1=${BY + BH} y2=${BY + BH + 5} stroke="#7b8492" /><text x=${x(t)} y=${Hh - 8} textAnchor="middle" className="ft-tl-tick">${dshort(t)}</text></g>`)}
+        <path d=${"M" + pts.join("L")} fill="none" stroke="#25477b" strokeWidth="2.2" />
+        ${ptsOff.length ? html`<path d=${"M" + ptsOff.join("L")} fill="none" stroke="#8a97a6" strokeWidth="2" strokeDasharray="2 4"><title>Sin datos: supone que descansa</title></path>` : null}
+        ${proP.length ? html`<path d=${"M" + proP.join("L")} fill="none" stroke="#25477b" strokeWidth="2" strokeDasharray="5 4" opacity="0.7" />` : null}
+        ${cams.map((e, i) => html`<path key=${"c" + i} d=${"M" + x(e.t) + " " + (y(sim.at(e.t)) - 5) + " l-5 -9 h10 z"} fill=${CAM_COLORS[e.cat] || "#fe5a3f"} opacity="0.85"><title>${when(e.t) + " · " + GI.catLabel(e.cat) + " · índice " + Math.round(sim.at(e.t))}</title></path>`)}
+        <line x1=${x(now)} x2=${x(now)} y1=${T} y2=${BY + BH} stroke="#0078d3" strokeWidth="1.5" />
+        <text x=${x(now) + 4} y=${T + 10} className="ft-tl-lab b" fill="#0078d3">ahora ${proj ? Math.round(proj.Fnow) + (off ? "?" : "") : ""}</text>
+        ${proj && proj.crossAt && proj.crossAt > now ? html`<g><circle cx=${x(proj.crossAt)} cy=${y(fz.fi_high)} r="4.5" fill="#fe5a3f" /><text x=${x(proj.crossAt) + (x(proj.crossAt) > R - 60 ? -6 : 6)} y=${y(fz.fi_high) - 6} textAnchor=${x(proj.crossAt) > R - 60 ? "end" : "start"} className="ft-tl-lab b">${(GI.dayKey(proj.crossAt) !== GI.dayKey(now) ? dshort(proj.crossAt) + " " : "") + hm(proj.crossAt)}</text></g>` : null}
+        ${ticks.map(t => html`<g key=${"k" + t}><line x1=${x(t)} x2=${x(t)} y1=${BY + BH} y2=${BY + BH + 5} stroke="#5b6d80" /><text x=${x(t)} y=${Hh - 8} textAnchor="middle" className="ft-tl-tick">${dshort(t)}</text></g>`)}
       </svg>
       <div className="ft-tl-legend small">
-        <span><i style=${{ background: "#1f2a37" }}></i>Índice estimado</span>
-        <span><i style=${{ background: "repeating-linear-gradient(90deg,#1f2a37 0 4px,transparent 4px 7px)" }}></i>Proyección con su horario habitual</span>
-        ${off ? html`<span><i style=${{ background: "#b8bec8" }}></i>Sin comunicación del vehículo (supone descanso)</span>` : null}
-        <span><i style=${{ background: "#c9cfe3", height: "5px" }}></i>00–06 h</span>
+        <span><i style=${{ background: "#25477b" }}></i>Índice estimado</span>
+        <span><i style=${{ background: "repeating-linear-gradient(90deg,#25477b 0 4px,transparent 4px 7px)" }}></i>Proyección con su horario habitual</span>
+        ${off ? html`<span><i style=${{ background: "#b3bcc7" }}></i>Sin comunicación del vehículo (supone descanso)</span>` : null}
+        <span><i style=${{ background: "#d1d6dd", height: "5px" }}></i>00–06 h</span>
         <span>· Barra inferior, jornadas por índice máximo:</span>
         <span><i style=${{ background: FI_COLORS.bajo }}></i>bajo</span>
         <span><i style=${{ background: FI_COLORS.moderado }}></i>moderado</span>
@@ -128,7 +128,7 @@
         <span><i style=${{ background: GAP.dia.color }}></i>de día antes de un turno noche</span>
         <span><i style=${{ background: GAP.motor.color }}></i>con motor en marcha</span>
         <span><i style=${{ background: GAP.corto.color }}></i>más corto que ${fz.min_rest} h</span>
-        <span><i style=${{ background: "#a9dcbf" }}></i>en curso</span>
+        <span><i style=${{ background: "#b3e6b3" }}></i>en curso</span>
         <span>· eventos de cámara (contexto):</span>
         <span><i className="tri" style=${{ borderBottomColor: CAM_COLORS.fatiga }}></i>bostezo / fatiga</span>
         <span><i className="tri" style=${{ borderBottomColor: CAM_COLORS.distraccion }}></i>distracción</span>
@@ -146,14 +146,14 @@
     const cams = [];
     for (const j of entry.list) if (j.e > t0) for (const e of j.cam || []) if (e.t >= t0 && e.t <= now) cams.push(e);
     return html`<svg className="ft-spark" viewBox=${"0 0 " + W + " " + Hh} width="220" height="44" aria-hidden="true">
-      <rect x=${x(now)} y="0" width=${W - x(now)} height=${Hh} fill="#f4f6f9" />
-      ${off && off.at < now ? html`<rect x=${x(Math.max(t0, off.at))} y="0" width=${x(now) - x(Math.max(t0, off.at))} height=${Hh} fill="#b8bec8" opacity="0.35"><title>Sin comunicación del vehículo</title></rect>` : null}
-      <line x1="0" x2=${W} y1=${y(fz.fi_high)} y2=${y(fz.fi_high)} stroke="#d4561e" strokeDasharray="3 3" />
-      <line x1="0" x2=${W} y1=${y(fz.fi_mod)} y2=${y(fz.fi_mod)} stroke="#c99400" strokeDasharray="2 3" opacity="0.6" />
-      ${pts.length ? html`<path d=${"M" + pts.join("L")} fill="none" stroke="#1f2a37" strokeWidth="1.6" />` : null}
-      ${pp.length ? html`<path d=${"M" + pp.join("L")} fill="none" stroke="#1f2a37" strokeWidth="1.4" strokeDasharray="3 2" opacity="0.7" />` : null}
-      ${cams.map((e, i) => { const cy = Math.max(6, y(sim.at(e.t)) - 2); return html`<path key=${"c" + i} d=${"M" + x(e.t).toFixed(1) + " " + cy.toFixed(1) + " l-3.5 -6 h7 z"} fill=${CAM_COLORS[e.cat] || "#b93a0f"} opacity="0.9"><title>${new Date(e.t).toLocaleString("es-AR", { weekday: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) + " · " + GI.catLabel(e.cat) + " · índice " + Math.round(sim.at(e.t))}</title></path>`; })}
-      <line x1=${x(now)} x2=${x(now)} y1="0" y2=${Hh} stroke="#2a78d6" />
+      <rect x=${x(now)} y="0" width=${W - x(now)} height=${Hh} fill="#f5f7fa" />
+      ${off && off.at < now ? html`<rect x=${x(Math.max(t0, off.at))} y="0" width=${x(now) - x(Math.max(t0, off.at))} height=${Hh} fill="#b3bcc7" opacity="0.35"><title>Sin comunicación del vehículo</title></rect>` : null}
+      <line x1="0" x2=${W} y1=${y(fz.fi_high)} y2=${y(fz.fi_high)} stroke="#fe5a3f" strokeDasharray="3 3" />
+      <line x1="0" x2=${W} y1=${y(fz.fi_mod)} y2=${y(fz.fi_mod)} stroke="#f9ba00" strokeDasharray="2 3" opacity="0.6" />
+      ${pts.length ? html`<path d=${"M" + pts.join("L")} fill="none" stroke="#25477b" strokeWidth="1.6" />` : null}
+      ${pp.length ? html`<path d=${"M" + pp.join("L")} fill="none" stroke="#25477b" strokeWidth="1.4" strokeDasharray="3 2" opacity="0.7" />` : null}
+      ${cams.map((e, i) => { const cy = Math.max(6, y(sim.at(e.t)) - 2); return html`<path key=${"c" + i} d=${"M" + x(e.t).toFixed(1) + " " + cy.toFixed(1) + " l-3.5 -6 h7 z"} fill=${CAM_COLORS[e.cat] || "#fe5a3f"} opacity="0.9"><title>${new Date(e.t).toLocaleString("es-AR", { weekday: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) + " · " + GI.catLabel(e.cat) + " · índice " + Math.round(sim.at(e.t))}</title></path>`; })}
+      <line x1=${x(now)} x2=${x(now)} y1="0" y2=${Hh} stroke="#0078d3" />
     </svg>`;
   }
 
@@ -245,13 +245,13 @@
   // Tipos de corte entre viajes: parada breve, pausa, pausa larga (espera) y
   // el descanso entre jornadas (suficiente o corto).
   const GAP = {
-    breve: { color: "#cfd4db", label: "Parada breve (menos de 15 min, no corta el manejo continuo)", word: "parada" },
-    pausa: { color: "#8dbbee", label: "Pausa (15 min a 1 h)", word: "pausa" },
-    larga: { color: "#b9a3e3", label: "Pausa larga o espera (1 h o más, sigue en jornada)", word: "espera" },
-    ok: { color: "#6cc08f", label: "Descanso entre jornadas", word: "descanso" },
-    dia: { color: "#f2c27a", label: "Descanso casi todo de día antes de un turno noche (se recupera menos)", word: "descanso de día" },
-    corto: { color: "#ec7a6f", label: "Descanso más corto que el mínimo", word: "descanso corto" },
-    motor: { color: "#b39478", label: "Descanso con el motor en marcha (durmió en la cabina: se recupera menos)", word: "descanso con motor" },
+    breve: { color: "#d1d6dd", label: "Parada breve (menos de 15 min, no corta el manejo continuo)", word: "parada" },
+    pausa: { color: "#80bbe9", label: "Pausa (15 min a 1 h)", word: "pausa" },
+    larga: { color: "#80d6ff", label: "Pausa larga o espera (1 h o más, sigue en jornada)", word: "espera" },
+    ok: { color: "#66cc66", label: "Descanso entre jornadas", word: "descanso" },
+    dia: { color: "#fcd566", label: "Descanso casi todo de día antes de un turno noche (se recupera menos)", word: "descanso de día" },
+    corto: { color: "#fe8b78", label: "Descanso más corto que el mínimo", word: "descanso corto" },
+    motor: { color: "#b3bcc7", label: "Descanso con el motor en marcha (durmió en la cabina: se recupera menos)", word: "descanso con motor" },
   };
   const restKind = (j, fz) => (j.restBefore < fz.min_rest ? "corto" : j.restEngine ? "motor" : j.type === "noche" && j.restDayFrac >= 0.7 ? "dia" : "ok");
   const PLACE_WORD = { base: "en la base", cliente: "en cliente", zona: "en", ruta: "fuera de geocercas" };
@@ -317,58 +317,58 @@
     const restFrom = j.prevE != null ? Math.max(j.prevE, t0) : null;
     return html`<div className="ft-tl">
       <svg viewBox=${"0 0 " + W + " 238"} role="img" aria-label="Línea de tiempo de la jornada">
-        ${nights.filter(vis).map(([a, b, k], i) => { const [xa, xb] = clipX(a, b); return html`<rect key=${"n" + i} x=${xa} y=${Y.head + 6} width=${Math.max(0, xb - xa)} height=${Y.axis - Y.head - 6} fill=${k === "low" ? "#dfe3f3" : "#eff1f8"} />`; })}
+        ${nights.filter(vis).map(([a, b, k], i) => { const [xa, xb] = clipX(a, b); return html`<rect key=${"n" + i} x=${xa} y=${Y.head + 6} width=${Math.max(0, xb - xa)} height=${Y.axis - Y.head - 6} fill=${k === "low" ? "#e6f1fb" : "#eff2f7"} />`; })}
         ${nights.filter(vis).map(([a, b, k], i) => { const [xa, xb] = clipX(a, b); return xb - xa > 50 ? html`<text key=${"nl" + i} x=${(xa + xb) / 2} y=${Y.axis - 4} textAnchor="middle" className=${"ft-tl-lab" + (k === "low" ? " b" : "")}>${k === "low" ? "02–05 h" : ""}</text>` : null; })}
         ${lane(Y.jor + 4, "Jornada")}
         ${lane(Y.drv + 15, "Manejo")}
         ${lane(Y.ev + 4, "Eventos")}
         ${lane((Y.fi0 + Y.fi1) / 2, "Índice de")}${lane((Y.fi0 + Y.fi1) / 2 + 13, "fatiga")}
-        <line x1=${L} x2=${R} y1=${Y.drv - 8} y2=${Y.drv - 8} stroke="#e3e7ec" />
-        <line x1=${L} x2=${R} y1=${Y.ev - 14} y2=${Y.ev - 14} stroke="#e3e7ec" />
-        <line x1=${L} x2=${R} y1=${Y.fi0 - 10} y2=${Y.fi0 - 10} stroke="#e3e7ec" />
+        <line x1=${L} x2=${R} y1=${Y.drv - 8} y2=${Y.drv - 8} stroke="#d1d6dd" />
+        <line x1=${L} x2=${R} y1=${Y.ev - 14} y2=${Y.ev - 14} stroke="#d1d6dd" />
+        <line x1=${L} x2=${R} y1=${Y.fi0 - 10} y2=${Y.fi0 - 10} stroke="#d1d6dd" />
 
 ${restFrom != null && restFrom < j.s ? (() => { const g = GAP[restKind(j, fz)]; const w = x(j.s) - x(restFrom); return html`<g>
           <rect x=${x(restFrom)} y=${Y.drv} width=${Math.max(1, w)} height=${Y.drvH} fill=${g.color} opacity="0.85" />
           ${w > 70 ? html`<text x=${x(restFrom) + w / 2} y=${Y.drv + 15} textAnchor="middle" className="ft-tl-gap">${(j.prevE < t0 ? "← " : "") + g.word + " " + dur(j.restBefore)}</text>` : null}
           <title>${"Descanso previo de " + dur(j.restBefore) + " (" + when(j.prevE) + " a " + when(j.s) + ")" + (restKind(j, fz) === "corto" ? " — menos que el mínimo de " + fz.min_rest + " h" : restKind(j, fz) === "dia" ? " — casi todo de día, antes de un turno noche" : "")}</title></g>`; })() : null}
         <g>
-          <line x1=${x(j.s)} x2=${x(j.e)} y1=${Y.jor} y2=${Y.jor} stroke="#1f2a37" strokeWidth="2.5" />
-          <line x1=${x(j.s)} x2=${x(j.s)} y1=${Y.jor - 6} y2=${Y.axis} stroke="#1f2a37" strokeDasharray="2 3" />
-          <line x1=${x(j.e)} x2=${x(j.e)} y1=${Y.jor - 6} y2=${Y.axis} stroke="#1f2a37" strokeDasharray="2 3" />
+          <line x1=${x(j.s)} x2=${x(j.e)} y1=${Y.jor} y2=${Y.jor} stroke="#25477b" strokeWidth="2.5" />
+          <line x1=${x(j.s)} x2=${x(j.s)} y1=${Y.jor - 6} y2=${Y.axis} stroke="#25477b" strokeDasharray="2 3" />
+          <line x1=${x(j.e)} x2=${x(j.e)} y1=${Y.jor - 6} y2=${Y.axis} stroke="#25477b" strokeDasharray="2 3" />
           <text x=${(x(j.s) + x(j.e)) / 2} y=${Y.jor - 5} textAnchor="middle" className="ft-tl-lab b">${"Jornada " + dur(j.span) + " · " + (GI.dayKey(j.e) !== j.dk ? when(j.s) + " → " + when(j.e) : hm(j.s) + " a " + hm(j.e))}</text>
         </g>
 
-        ${j.prevE != null && j.prevE > t0 ? html`<g><rect x=${L} y=${Y.drv} width=${Math.max(2, x(j.prevE) - L)} height=${Y.drvH} rx="3" fill="#c3c9d2" /><text x=${L + 4} y=${Y.drv + Y.drvH + 12} className="ft-tl-lab">jornada anterior</text></g>` : null}
+        ${j.prevE != null && j.prevE > t0 ? html`<g><rect x=${L} y=${Y.drv} width=${Math.max(2, x(j.prevE) - L)} height=${Y.drvH} rx="3" fill="#d1d6dd" /><text x=${L + 4} y=${Y.drv + Y.drvH + 12} className="ft-tl-lab">jornada anterior</text></g>` : null}
         ${gaps.map((g, i) => { const w = x(g.b) - x(g.a), G = GAP[g.k]; return html`<g key=${"p" + i}>
           <rect x=${x(g.a)} y=${Y.drv} width=${Math.max(1.5, w)} height=${Y.drvH} fill=${G.color} />
           ${w > 64 ? html`<text x=${x(g.a) + w / 2} y=${Y.drv + 15} textAnchor="middle" className="ft-tl-gap">${G.word + " " + dur((g.b - g.a) / H)}</text>` : null}
           <title>${G.label.split(" (")[0] + ": " + dur((g.b - g.a) / H) + " (" + hm(g.a) + "–" + hm(g.b) + ")"}</title></g>`; })}
-        ${(j.restMicro || []).filter(t => t.e > t0).map((t, i) => html`<g key=${"m" + i}><rect x=${x(Math.max(t.s, t0)) - 1} y=${Y.drv - 3} width=${Math.max(2, x(t.e) - x(Math.max(t.s, t0)))} height=${Y.drvH + 6} fill="#5b6472" opacity="0.55" />
+        ${(j.restMicro || []).filter(t => t.e > t0).map((t, i) => html`<g key=${"m" + i}><rect x=${x(Math.max(t.s, t0)) - 1} y=${Y.drv - 3} width=${Math.max(2, x(t.e) - x(Math.max(t.s, t0)))} height=${Y.drvH + 6} fill="#66788c" opacity="0.55" />
           <title>${"Movimiento mínimo ignorado: " + hm(t.s) + "–" + hm(t.e) + " · " + dur(t.dh) + " de manejo · " + GI.fmtNum(t.km || 0, 1) + " km (no corta el descanso)"}</title></g>`)}
-        ${j.trips.map((t, i) => html`<rect key=${"t" + i} x=${x(t.s)} y=${Y.drv} width=${Math.max(2, x(t.e) - x(t.s))} height=${Y.drvH} rx="3" fill=${t.live ? "#2a78d6" : "#1f2a37"}><title>${"Viaje " + hm(t.s) + "–" + hm(t.e) + " · " + dur(t.dh) + " de manejo · " + n0(t.km) + " km"}</title></rect>`)}
+        ${j.trips.map((t, i) => html`<rect key=${"t" + i} x=${x(t.s)} y=${Y.drv} width=${Math.max(2, x(t.e) - x(t.s))} height=${Y.drvH} rx="3" fill=${t.live ? "#0078d3" : "#25477b"}><title>${"Viaje " + hm(t.s) + "–" + hm(t.e) + " · " + dur(t.dh) + " de manejo · " + n0(t.km) + " km"}</title></rect>`)}
 
-        ${other.map((e, i) => html`<line key=${"o" + i} x1=${x(e.t)} x2=${x(e.t)} y1=${Y.ev - 6} y2=${Y.ev + 6} stroke="#7b8492" strokeWidth="2"><title>${hm(e.t) + " " + GI.catLabel(e.cat)}</title></line>`)}
-        ${cam.map((e, i) => html`<path key=${"c" + i} d=${"M" + x(e.t) + " " + (Y.ev + 6) + " l-6 -11 h12 z"} fill=${CAM_COLORS[e.cat] || "#b93a0f"}><title>${hm(e.t) + " " + GI.catLabel(e.cat)}</title></path>`)}
+        ${other.map((e, i) => html`<line key=${"o" + i} x1=${x(e.t)} x2=${x(e.t)} y1=${Y.ev - 6} y2=${Y.ev + 6} stroke="#5b6d80" strokeWidth="2"><title>${hm(e.t) + " " + GI.catLabel(e.cat)}</title></line>`)}
+        ${cam.map((e, i) => html`<path key=${"c" + i} d=${"M" + x(e.t) + " " + (Y.ev + 6) + " l-6 -11 h12 z"} fill=${CAM_COLORS[e.cat] || "#fe5a3f"}><title>${hm(e.t) + " " + GI.catLabel(e.cat)}</title></path>`)}
         ${!cam.length && !other.length ? html`<text x=${L + 4} y=${Y.ev + 4} className="ft-tl-lab">sin infracciones</text>` : null}
 
-        ${[fz.fi_mod, fz.fi_high].map((v, i) => html`<g key=${"th" + v}><line x1=${L} x2=${R} y1=${fiY(v)} y2=${fiY(v)} stroke=${i ? "#d4561e" : "#c99400"} strokeDasharray="4 4" strokeWidth="1" />
+        ${[fz.fi_mod, fz.fi_high].map((v, i) => html`<g key=${"th" + v}><line x1=${L} x2=${R} y1=${fiY(v)} y2=${fiY(v)} stroke=${i ? "#fe5a3f" : "#f9ba00"} strokeDasharray="4 4" strokeWidth="1" />
           <text x=${L + 4} y=${i ? fiY(v) - 3 : fiY(v) + 11} className="ft-tl-lab">${(i ? "alto " : "moderado ") + v}</text></g>`)}
-        ${fiPath ? html`<path d=${fiPath} fill="none" stroke="#1f2a37" strokeWidth="2" />` : null}
+        ${fiPath ? html`<path d=${fiPath} fill="none" stroke="#25477b" strokeWidth="2" />` : null}
         ${j.fiPeak != null ? html`<g><circle cx=${x(j.fiPeakAt)} cy=${fiY(j.fiPeak)} r="4" fill=${FI_COLORS[GI.fiLevel(j.fiPeak, fz)]} /><text x=${x(j.fiPeakAt) + 6} y=${fiY(j.fiPeak) - 4} className="ft-tl-lab b">${Math.round(j.fiPeak)}</text></g>` : null}
 
-        <line x1=${L} x2=${R} y1=${Y.axis} y2=${Y.axis} stroke="#cdd3db" />
-        ${ticks.map(t => html`<g key=${"k" + t}><line x1=${x(t)} x2=${x(t)} y1=${Y.axis} y2=${Y.axis + 5} stroke="#7b8492" /><text x=${x(t)} y=${Y.axis + 20} textAnchor="middle" className="ft-tl-tick">${new Date(t).getHours() === 0 ? dshort(t) : String(new Date(t).getHours()).padStart(2, "0") + " h"}</text></g>`)}
+        <line x1=${L} x2=${R} y1=${Y.axis} y2=${Y.axis} stroke="#b3bcc7" />
+        ${ticks.map(t => html`<g key=${"k" + t}><line x1=${x(t)} x2=${x(t)} y1=${Y.axis} y2=${Y.axis + 5} stroke="#5b6d80" /><text x=${x(t)} y=${Y.axis + 20} textAnchor="middle" className="ft-tl-tick">${new Date(t).getHours() === 0 ? dshort(t) : String(new Date(t).getHours()).padStart(2, "0") + " h"}</text></g>`)}
       </svg>
       <div className="ft-tl-legend small">
-        <span><i style=${{ background: "#1f2a37" }}></i>Viaje</span>
+        <span><i style=${{ background: "#25477b" }}></i>Viaje</span>
         ${["breve", "pausa", "larga", "ok", "dia", "motor", "corto"].filter(k => gapKinds.has(k)).map(k => html`<span key=${k}><i style=${{ background: GAP[k].color }}></i>${k === "corto" ? "Descanso de menos de " + fz.min_rest + " h" : GAP[k].label}</span>`)}
-        <span><i style=${{ background: "#eff1f8" }}></i>Noche (00–06 h)</span>
-        <span><i style=${{ background: "#dfe3f3" }}></i>02–05 h, cuando más cuesta mantenerse despierto</span>
+        <span><i style=${{ background: "#eff2f7" }}></i>Noche (00–06 h)</span>
+        <span><i style=${{ background: "#e6f1fb" }}></i>02–05 h, cuando más cuesta mantenerse despierto</span>
         <span><i className="tri" style=${{ borderBottomColor: CAM_COLORS.fatiga }}></i>Fatiga</span>
         <span><i className="tri" style=${{ borderBottomColor: CAM_COLORS.distraccion }}></i>Distracción</span>
         <span><i className="tri" style=${{ borderBottomColor: CAM_COLORS.salida_carril }}></i>Salida de carril</span>
-        <span><i style=${{ background: "#7b8492", width: "3px" }}></i>Otras infracciones</span>
-        ${(j.restMicro || []).length ? html`<span><i style=${{ background: "#5b6472", opacity: 0.55, width: "3px" }}></i>Movimiento mínimo ignorado (no corta el descanso)</span>` : null}
+        <span><i style=${{ background: "#5b6d80", width: "3px" }}></i>Otras infracciones</span>
+        ${(j.restMicro || []).length ? html`<span><i style=${{ background: "#66788c", opacity: 0.55, width: "3px" }}></i>Movimiento mínimo ignorado (no corta el descanso)</span>` : null}
       </div>
     </div>`;
   }
@@ -711,7 +711,7 @@ ${restFrom != null && restFrom < j.s ? (() => { const g = GAP[restKind(j, fz)]; 
         const row = dayList.indexOf(d.getTime());
         if (row >= 0) {
           const v = j.sim ? j.sim.at((a + b) / 2) : null;
-          segs.push({ row, h0: (a - d.getTime()) / H, h1: (b - d.getTime()) / H, color: v == null ? "#1f2a37" : FI_COLORS[GI.fiLevel(v, fz)], j, v });
+          segs.push({ row, h0: (a - d.getTime()) / H, h1: (b - d.getTime()) / H, color: v == null ? "#25477b" : FI_COLORS[GI.fiLevel(v, fz)], j, v });
         }
         a = b;
       }
@@ -732,20 +732,20 @@ ${restFrom != null && restFrom < j.s ? (() => { const g = GAP[restKind(j, fz)]; 
     for (const j of list) for (const e of j.cam || []) { const d = new Date(e.t); d.setHours(0, 0, 0, 0); const r = dayList.indexOf(d.getTime()); if (r >= 0) cams.push({ row: r, h: (e.t - d.getTime()) / H, cat: e.cat }); }
     return html`<div className="ft-tl">
       <svg viewBox=${"0 0 " + W + " " + (Ht + 8)} role="img" aria-label="Patrón de jornadas por día">
-        <rect x=${x(0)} y=${H0} width=${x(6) - x(0)} height=${Ht - H0} fill="#eff1f8" />
-        <rect x=${x(2)} y=${H0} width=${x(5) - x(2)} height=${Ht - H0} fill="#dfe3f3" />
-        <rect x=${x(22)} y=${H0} width=${x(24) - x(22)} height=${Ht - H0} fill="#eff1f8" />
-        ${[0, 3, 6, 9, 12, 15, 18, 21, 24].map(h => html`<g key=${"h" + h}><line x1=${x(h)} x2=${x(h)} y1=${H0 - 4} y2=${Ht} stroke="#e3e7ec" /><text x=${x(h)} y=${H0 - 6} textAnchor="middle" className="ft-tl-tick">${String(h).padStart(2, "0")} h</text></g>`)}
+        <rect x=${x(0)} y=${H0} width=${x(6) - x(0)} height=${Ht - H0} fill="#eff2f7" />
+        <rect x=${x(2)} y=${H0} width=${x(5) - x(2)} height=${Ht - H0} fill="#e6f1fb" />
+        <rect x=${x(22)} y=${H0} width=${x(24) - x(22)} height=${Ht - H0} fill="#eff2f7" />
+        ${[0, 3, 6, 9, 12, 15, 18, 21, 24].map(h => html`<g key=${"h" + h}><line x1=${x(h)} x2=${x(h)} y1=${H0 - 4} y2=${Ht} stroke="#d1d6dd" /><text x=${x(h)} y=${H0 - 6} textAnchor="middle" className="ft-tl-tick">${String(h).padStart(2, "0")} h</text></g>`)}
         <text x=${R + 30} y=${H0 - 6} textAnchor="middle" className="ft-tl-tick">índice</text>
         ${dayList.map((d, i) => html`<g key=${"d" + i}>
           <text x="4" y=${H0 + i * RH + 14} className="ft-tl-lane">${dshort(d)}</text>
-          <line x1=${L} x2=${R} y1=${H0 + (i + 1) * RH} y2=${H0 + (i + 1) * RH} stroke="#f0f2f5" />
+          <line x1=${L} x2=${R} y1=${H0 + (i + 1) * RH} y2=${H0 + (i + 1) * RH} stroke="#eff2f7" />
           ${peaks.has(i) ? html`<text x=${R + 30} y=${H0 + i * RH + 14} textAnchor="middle" className="ft-tl-lab b" fill=${FI_COLORS[GI.fiLevel(peaks.get(i), fz)]}>${Math.round(peaks.get(i))}</text>` : null}
         </g>`)}
         ${gsegs.map((s, i) => html`<rect key=${"g" + i} x=${x(s.h0)} y=${H0 + s.row * RH + 7} width=${Math.max(1.5, x(s.h1) - x(s.h0))} height=${RH - 14} fill=${GAP[s.k].color}><title>${GAP[s.k].label.split(" (")[0] + ": " + dur((s.g.b - s.g.a) / H) + " (" + hm(s.g.a) + "–" + hm(s.g.b) + ")"}</title></rect>`)}
         ${segs.map((s, i) => html`<rect key=${"s" + i} x=${x(s.h0)} y=${H0 + s.row * RH + 4} width=${Math.max(1.5, x(s.h1) - x(s.h0))} height=${RH - 8} rx="2" fill=${s.color} style=${{ cursor: "pointer" }} onClick=${() => onCase(s.j)}>
           <title>${"Jornada del " + dshort(s.j.s) + (s.v != null ? " · índice " + Math.round(s.v) : "") + " (click para ver la jornada)"}</title></rect>`)}
-        ${cams.map((c, i) => html`<path key=${"c" + i} d=${"M" + x(c.h) + " " + (H0 + c.row * RH + 3) + " l-4 -7 h8 z"} fill=${CAM_COLORS[c.cat] || "#b93a0f"} />`)}
+        ${cams.map((c, i) => html`<path key=${"c" + i} d=${"M" + x(c.h) + " " + (H0 + c.row * RH + 3) + " l-4 -7 h8 z"} fill=${CAM_COLORS[c.cat] || "#fe5a3f"} />`)}
       </svg>
       <div className="ft-tl-legend small">
         <span>Cada fila es un día y cada barra un viaje, coloreado según el índice de fatiga en ese momento:</span>
@@ -1017,7 +1017,7 @@ ${restFrom != null && restFrom < j.s ? (() => { const g = GAP[restKind(j, fz)]; 
           type: "bar",
           data: { labels: rows.map(r => r.key), datasets: [
             { type: "bar", label: "Eventos de fatiga (× franja baja)", data: rows.map(r => (r.ratio == null ? null : GI.round(r.ratio, 2))), backgroundColor: rows.map(r => FI_COLORS[r.key]), borderRadius: 4, borderSkipped: "start", order: 2 },
-            { type: "line", label: "Otras infracciones (× franja baja)", data: rows.map(r => (r.oratio == null ? null : GI.round(r.oratio, 2))), borderColor: "#7b8492", backgroundColor: "#7b8492", pointRadius: 4, order: 1 },
+            { type: "line", label: "Otras infracciones (× franja baja)", data: rows.map(r => (r.oratio == null ? null : GI.round(r.oratio, 2))), borderColor: "#5b6d80", backgroundColor: "#5b6d80", pointRadius: 4, order: 1 },
           ] },
           options: { plugins: { tooltip: { callbacks: { afterLabel: c => { const r = rows[c.dataIndex]; return c.datasetIndex === 0 ? n0(r.cam) + " eventos en " + n0(r.hours) + " h de manejo" : n0(r.other) + " infracciones"; } } } },
             scales: { x: { title: { display: true, text: "índice de fatiga en el momento del evento" } }, y: { beginAtZero: true, title: { display: true, text: "veces la franja baja" } } } },
@@ -1591,7 +1591,7 @@ ${restFrom != null && restFrom < j.s ? (() => { const g = GAP[restKind(j, fz)]; 
         const code = await GI.surfsightConsumption(imei, tok.current.token);
         if (code < 200 || code >= 300) throw new Error(code === 403 || code === 429 ? "Surfsight no autorizó el video (puede ser el límite mensual de video en vivo del plan)" : "Surfsight respondió " + code + " al registrar el consumo de datos");
         await loadSurfsightUi();
-        try { api.call("Add", { typeName: "Audit", entity: { name: "Video en vivo (Geotab Insights)", comment: devName(view, dev) + " · cámara " + imei + " · lente " + (SURF_LENSES[lens] || lens) } }); } catch (e) { /* la auditoría no frena el video */ }
+        try { api.call("Add", { typeName: "Audit", entity: { name: "Video en vivo (Insights by Cesetti)", comment: devName(view, dev) + " · cámara " + imei + " · lente " + (SURF_LENSES[lens] || lens) } }); } catch (e) { /* la auditoría no frena el video */ }
         secs.current = 0;
         setSt({ phase: "live", token: tok.current.token, org: tok.current.orgId, key: Date.now() });
         tick.current = setInterval(async () => {

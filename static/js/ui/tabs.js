@@ -67,10 +67,10 @@
 
   // ======================= RESUMEN =======================
   const METRICS = {
-    risk: { label: "Índice de riesgo", unit: "pts/100 km", color: "#2a78d6", dec: 2 },
-    idlePct: { label: "Ralentí", unit: "% del tiempo en marcha", color: "#2a78d6", dec: 1 },
-    l100: { label: "Consumo", unit: "L/100 km", color: "#2a78d6", dec: 1 },
-    km: { label: "Kilómetros", unit: "km", color: "#2a78d6", dec: 0 },
+    risk: { label: "Índice de riesgo", unit: "pts/100 km", color: "#0078d3", dec: 2 },
+    idlePct: { label: "Ralentí", unit: "% del tiempo en marcha", color: "#0078d3", dec: 1 },
+    l100: { label: "Consumo", unit: "L/100 km", color: "#0078d3", dec: 1 },
+    km: { label: "Kilómetros", unit: "km", color: "#0078d3", dec: 0 },
   };
 
   function TrendChart({ view, metric, height }) {
@@ -298,11 +298,11 @@
           <${ChartView} config=${idleMode === "pct" ? {
             type: "line",
             data: { labels: view.series.map(s => s.label), datasets: [
-              { label: "% del tiempo en marcha", data: view.series.map(s => s.idlePct == null ? null : rateOf(s, GI.round(s.idlePct, 1))), borderColor: "#2a78d6", backgroundColor: "#2a78d61f", fill: true, tension: 0.3, spanGaps: true, ...partialStyle(view.series, "#2a78d6") }] },
+              { label: "% del tiempo en marcha", data: view.series.map(s => s.idlePct == null ? null : rateOf(s, GI.round(s.idlePct, 1))), borderColor: "#0078d3", backgroundColor: "#0078d31f", fill: true, tension: 0.3, spanGaps: true, ...partialStyle(view.series, "#0078d3") }] },
             options: { plugins: { legend: { display: false }, milestones: marks }, scales: { y: { beginAtZero: true, title: { display: true, text: "%" } } } },
           } : {
             type: "bar",
-            data: { labels: view.series.map(s => s.label), datasets: [{ label: "Litros en ralentí", data: view.series.map(s => GI.round(s.idleL, 0)), backgroundColor: "#2a78d6" }] },
+            data: { labels: view.series.map(s => s.label), datasets: [{ label: "Litros en ralentí", data: view.series.map(s => GI.round(s.idleL, 0)), backgroundColor: "#0078d3" }] },
             options: { plugins: { legend: { display: false }, milestones: marks }, scales: { y: { beginAtZero: true, title: { display: true, text: "L" } } } },
           }} />
         <//>
@@ -382,8 +382,8 @@
       const bEv = base ? evSel(base) : 0, bKm = base ? base.km : 0;
       const idx = (v, b) => (b > 0 ? GI.round((v / b) * 100, 1) : null);
       config = { type: "line", data: { labels: S.map(s => s.label), datasets: [
-        { label: "Kilómetros", data: S.map(s => (s.partial ? null : idx(s.km, bKm))), borderColor: "#2a78d6", backgroundColor: "#2a78d6", tension: 0.3, spanGaps: true },
-        { label: "Eventos", data: S.map(s => (s.partial ? null : idx(evSel(s), bEv))), borderColor: "#eb6834", backgroundColor: "#eb6834", tension: 0.3, spanGaps: true },
+        { label: "Kilómetros", data: S.map(s => (s.partial ? null : idx(s.km, bKm))), borderColor: "#0078d3", backgroundColor: "#0078d3", tension: 0.3, spanGaps: true },
+        { label: "Eventos", data: S.map(s => (s.partial ? null : idx(evSel(s), bEv))), borderColor: "#fe5a3f", backgroundColor: "#fe5a3f", tension: 0.3, spanGaps: true },
       ] }, options: { interaction: { mode: "index", intersect: false },
         plugins: { tooltip: { mode: "index", intersect: false, callbacks: { label: c => c.dataset.label + ": " + GI.fmtNum(c.parsed.y, 0) + " (base 100)" } }, milestones: marks },
         scales: { y: { title: { display: true, text: "índice (" + (base ? base.label : "inicio") + " = 100)" } } } } };
@@ -397,7 +397,7 @@
     // Km recorridos como línea de referencia (eje derecho), a pedido.
     if (showKm && mode !== "index") {
       config.data.datasets.push({ type: "line", label: "Km recorridos", data: S.map(s => (s.partial ? null : GI.round(s.km, 0))), yAxisID: "yKm",
-        borderColor: "#1f2a37", backgroundColor: "#1f2a37", borderDash: [5, 4], tension: 0.3, spanGaps: true, pointRadius: 2, order: -1 });
+        borderColor: "#25477b", backgroundColor: "#25477b", borderDash: [5, 4], tension: 0.3, spanGaps: true, pointRadius: 2, order: -1 });
       config.options.scales.yKm = { position: "right", beginAtZero: true, grid: { drawOnChartArea: false }, title: { display: true, text: "km" } };
     }
 
@@ -823,7 +823,7 @@
       if (!m) return;
       if (m._spots) { m.removeLayer(m._spots); m._spots = null; }
       if (!spots || !spots.length) return;
-      m._spots = L.layerGroup(spots.slice(0, 15).map((h, i) => L.rectangle(h.bounds, { color: "#b02f2e", weight: 2, fill: false })
+      m._spots = L.layerGroup(spots.slice(0, 15).map((h, i) => L.rectangle(h.bounds, { color: "#fe5a3f", weight: 2, fill: false })
         .bindTooltip(String(i + 1), { permanent: true, direction: "center", className: "spot-label" }))).addTo(m);
     }, [spots]);
     useEffect(() => {
@@ -856,10 +856,10 @@
       if (!trace || !trace.pts || !trace.pts.length) return;
       const zones = view.model.cat.zones || [];
       const zo = zones.find(z => z.id === trace.j.o), zd = zones.find(z => z.id === trace.j.dest);
-      const layers = [L.polyline(trace.pts, { color: "#1c5cab", weight: 4, opacity: 0.85 })];
-      for (const [z, color] of [[zo, "#0b7a3e"], [zd, "#b93a0f"]]) if (z) layers.push(L.polygon(z.pts.map(([x, y]) => [y, x]), { color, weight: 2, fillOpacity: 0.12 }).bindTooltip(z.name));
-      layers.push(L.circleMarker(trace.pts[0], { radius: 7, color: "#fff", weight: 2, fillColor: "#0b7a3e", fillOpacity: 1 }).bindTooltip("Salida: " + route.from));
-      layers.push(L.circleMarker(trace.pts[trace.pts.length - 1], { radius: 7, color: "#fff", weight: 2, fillColor: "#b93a0f", fillOpacity: 1 }).bindTooltip("Llegada: " + route.to));
+      const layers = [L.polyline(trace.pts, { color: "#25477b", weight: 4, opacity: 0.85 })];
+      for (const [z, color] of [[zo, "#00aa00"], [zd, "#fe5a3f"]]) if (z) layers.push(L.polygon(z.pts.map(([x, y]) => [y, x]), { color, weight: 2, fillOpacity: 0.12 }).bindTooltip(z.name));
+      layers.push(L.circleMarker(trace.pts[0], { radius: 7, color: "#fff", weight: 2, fillColor: "#00aa00", fillOpacity: 1 }).bindTooltip("Salida: " + route.from));
+      layers.push(L.circleMarker(trace.pts[trace.pts.length - 1], { radius: 7, color: "#fff", weight: 2, fillColor: "#fe5a3f", fillOpacity: 1 }).bindTooltip("Llegada: " + route.to));
       m._trace = L.layerGroup(layers).addTo(m);
       if (!points || !points.length) m.fitBounds(L.latLngBounds(trace.pts), { padding: [30, 30] });
       setTimeout(() => m.invalidateSize(), 0);
@@ -926,7 +926,7 @@
   // Pestaña propia: filtros (período, chofer, vehículo, categoría, gravedad del exceso, franja
   // horaria), tres capas (calor, puntos por gravedad, puntos calientes), ranking lateral y detalle
   // de un evento con la velocidad real a pedido.
-  const SEV = { leve: { label: "Leve", color: "#e8b730", stroke: "#a07a10" }, medio: { label: "Medio", color: "#e0701f", stroke: "#9a4710" }, grave: { label: "Grave", color: "#8f1717", stroke: "#5a0d0d" } };
+  const SEV = { leve: { label: "Leve", color: "#f9ba00", stroke: "#f9ba00" }, medio: { label: "Medio", color: "#fe5a3f", stroke: "#c2381f" }, grave: { label: "Grave", color: "#c2381f", stroke: "#21325e" } };
   const SEV_KEYS = ["leve", "medio", "grave"];
   const BANDS = [["all", "Todo el día", null], ["night", "De noche (22–06 h)", [22, 6]], ["dawn", "Madrugada (02–05 h)", [2, 5]], ["day", "De día (06–22 h)", [6, 22]]];
   const inBand = (t, b) => { if (!b) return true; const h = new Date(t).getHours(); return b[0] < b[1] ? h >= b[0] && h < b[1] : h >= b[0] || h < b[1]; };
@@ -996,7 +996,7 @@
         m._pts = L.layerGroup(order.map(e => L.circleMarker(locs.get(e.i), { radius: e.sev === "grave" ? 7 : 5.5, color: "#fff", weight: 1.5, fillColor: colorOf(e), fillOpacity: 0.95 })
           .on("click", () => setSel(e)).bindTooltip(GI.catLabel(e.cat) + (e.sev ? " · " + SEV[e.sev].label : "") + " · " + new Date(e.t).toLocaleString("es-AR", { dateStyle: "short", timeStyle: "short" })))).addTo(m);
       }
-      if (layer === "spots" && spots) m._spots = L.layerGroup(spots.slice(0, 15).map((h, i) => L.rectangle(h.bounds, { color: "#b02f2e", weight: 2, fill: false })
+      if (layer === "spots" && spots) m._spots = L.layerGroup(spots.slice(0, 15).map((h, i) => L.rectangle(h.bounds, { color: "#fe5a3f", weight: 2, fill: false })
         .bindTooltip(String(i + 1), { permanent: true, direction: "center", className: "spot-label" }))).addTo(m);
       const fitKey = sample.length + "|" + (sample[0] ? sample[0].i : "");
       if (pts.length && progress == null && m._fitKey !== fitKey) { m._fitKey = fitKey; m.fitBounds(L.latLngBounds(pts.map(p => [p[0], p[1]])), { padding: [24, 24], maxZoom: 13 }); }
@@ -1019,7 +1019,7 @@
         const r = await GI.loadEventSpeed(api, sel);
         setSpeed(r);
         const m = mapObj.current;
-        if (m && r.pts.length > 1) { if (m._evTrace) m.removeLayer(m._evTrace); m._evTrace = L.polyline(r.pts, { color: "#8f1717", weight: 5, opacity: 0.85 }).addTo(m); m.fitBounds(L.latLngBounds(r.pts), { padding: [60, 60], maxZoom: 16 }); }
+        if (m && r.pts.length > 1) { if (m._evTrace) m.removeLayer(m._evTrace); m._evTrace = L.polyline(r.pts, { color: "#c2381f", weight: 5, opacity: 0.85 }).addTo(m); m.fitBounds(L.latLngBounds(r.pts), { padding: [60, 60], maxZoom: 16 }); }
       } catch (e) { setSpeed({ error: String((e && e.message) || e) }); }
     }
     // Opciones de los filtros: los conductores y vehículos con eventos en el período
@@ -1104,12 +1104,12 @@
 
   // ======================= DETALLES =======================
   function smallBars(s, key, label, unit) {
-    return { type: "bar", data: { labels: s.map(x => x.label), datasets: [{ label, data: s.map(x => GI.round(x[key] || 0, 0)), backgroundColor: s.map(x => (x.partial ? "#9ec5f4" : "#2a78d6")), borderRadius: 3 }] },
+    return { type: "bar", data: { labels: s.map(x => x.label), datasets: [{ label, data: s.map(x => GI.round(x[key] || 0, 0)), backgroundColor: s.map(x => (x.partial ? "#99c9ed" : "#0078d3")), borderRadius: 3 }] },
       options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, title: { display: true, text: unit } } } } };
   }
   function smallLine(s, key, label, unit, dec) {
     return { type: "line", data: { labels: s.map(x => x.label), datasets: [{ label, data: s.map(x => (x[key] == null ? null : GI.round(x[key], dec))),
-      borderColor: "#2a78d6", backgroundColor: "#2a78d61f", fill: true, tension: 0.3, spanGaps: true }] },
+      borderColor: "#0078d3", backgroundColor: "#0078d31f", fill: true, tension: 0.3, spanGaps: true }] },
       options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, title: { display: true, text: unit } } } } };
   }
 

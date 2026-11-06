@@ -29,8 +29,8 @@
   // tonos, en este orden: tonos vecinos en una pila se distinguen). Se asigna
   // a las primeras 8 categorías de riesgo según el orden de la configuración;
   // el resto se agrupa como "Otras" en gris.
-  const PALETTE = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"];
-  const OTHER_COLOR = "#9a9893";
+  const PALETTE = ["#0078d3", "#fe5a3f", "#25477b", "#f9ba00", "#00aeff", "#00aa00", "#66788c", "#edbbb2"]; // guía de marca: azules primero, extendida para diferenciar
+  const OTHER_COLOR = "#b3bcc7";
   const SERIES_COLORS = PALETTE;
 
   // Estado vivo (se reemplaza en el lugar con applyCategories).
