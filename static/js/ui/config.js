@@ -513,7 +513,7 @@
     const [editors, setEditors] = useState(draft.editors.join(", "));
     return html`<${Panel} title="General">
       <div className="form two-col">
-        <label>Período por defecto<select disabled=${ro} value=${(() => { const d = draft.ui.default_period; if (d) return d; const n = draft.ui.default_days; return !n ? "3m" : n <= 31 ? "month" : n <= 95 ? "3m" : n <= 185 ? "6m" : "12m"; })()} onChange=${e => set(["ui", "default_period"], e.target.value)}>
+        <label>Período por defecto<select disabled=${ro} value=${(() => { const d = draft.ui.default_period; if (d) return d; const n = draft.ui.default_days; return !n ? "3m" : n <= 31 ? "month" : n <= 95 ? "3m" : n <= 185 ? "6m" : "12m"; })()} onChange=${e => { set(["ui", "default_period"], e.target.value); set(["ui", "default_period_set"], true); }}>
           ${[["month", "Este mes"], ["last_month", "Mes pasado"], ["3m", "Últimos 3 meses"], ["6m", "Últimos 6 meses"], ["12m", "Últimos 12 meses"]].map(([k, l]) => html`<option key=${k} value=${k}>${l}</option>`)}</select></label>
         <label>Agrupación por defecto<select disabled=${ro} value=${draft.ui.default_granularity} onChange=${e => set(["ui", "default_granularity"], e.target.value)}>
           <option value="day">Día</option><option value="week">Semana</option><option value="month">Mes</option></select></label>

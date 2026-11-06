@@ -133,30 +133,54 @@
     if (!p) return null;
     const W = n => (n === 1 ? word[0] : word[1]);
     const noCoach = by === "conductores" ? p.top.filter(r => !openCoachOf(coaches, r.id).some(c => c.status === "asignado" || c.status === "hecho")) : [];
-    const shown = p.curve.slice(0, 60);
+    // Curva acumulada de MENOR a MAYOR riesgo: arranca con los que no tienen infracciones y
+    // se dispara al final, donde están los pocos que generan la mayor parte.
+    const zeros = Math.max(0, p.pop - p.curve.length);
+    const asc = [...Array.from({ length: zeros }, () => null), ...[...p.curve].reverse()];
+    let acc = 0;
+    const pts = asc.map((r, i) => { acc += r ? r.share : 0; return { x: i + 1, y: GI.round(Math.min(100, acc), 1), r }; });
+    const N = pts.length, cut = N - p.n50;           // de cut+1 a N: los que generan la mitad
+    const lowShare = cut > 0 ? pts[cut - 1].y : 0;
+    const big = N <= 120;
     const cfg = {
       type: "line",
-      data: { labels: shown.map((r, i) => i + 1), datasets: [{ label: "Riesgo acumulado", data: shown.map(r => GI.round(r.cum, 1)), borderColor: "#0078d3", backgroundColor: "#0078d31f", fill: true, tension: 0.2, pointRadius: shown.map((r, i) => (i < p.n50 ? 3 : 0)), pointBackgroundColor: "#25477b" }] },
-      options: { maintainAspectRatio: false, scales: { y: { min: 0, max: 100, title: { display: true, text: "% del riesgo" } }, x: { title: { display: true, text: W(2) + ", de mayor a menor riesgo" } } },
-        plugins: { legend: { display: false }, tooltip: { callbacks: { title: it => shown[it[0].dataIndex].name, label: it => "acumulado " + n1(shown[it.dataIndex].cum) + "% · este " + n1(shown[it.dataIndex].share) + "%" } } } },
-      plugins: [{ id: "n50", afterDatasetsDraw(ch) { const x = ch.scales.x.getPixelForValue(p.n50 - 1), y = ch.scales.y; const c2 = ch.ctx; c2.save(); c2.strokeStyle = "#25477b"; c2.setLineDash([4, 4]); c2.beginPath(); c2.moveTo(x, y.top); c2.lineTo(x, y.bottom); c2.stroke(); c2.restore(); } }],
+      data: { datasets: [
+        { label: "Riesgo acumulado", data: pts.map(q => ({ x: q.x, y: q.y })), borderColor: "#0078d3", backgroundColor: "#0078d31f", fill: true, tension: 0.15, borderWidth: 3,
+          pointRadius: pts.map((q, i) => (i >= cut && big ? 3.5 : 0)), pointBackgroundColor: "#fe5a3f", pointBorderColor: "#fe5a3f" },
+        { label: "Si todos generaran el mismo riesgo", data: [{ x: 1, y: GI.round(100 / N, 1) }, { x: N, y: 100 }], borderColor: "#b3bcc7", borderDash: [6, 5], borderWidth: 1.5, pointRadius: 0, fill: false }] },
+      options: { maintainAspectRatio: false, interaction: { mode: "nearest", axis: "x", intersect: false },
+        scales: { y: { min: 0, max: 100, title: { display: true, text: "% del riesgo acumulado" }, ticks: { callback: v => v + "%" } },
+          x: { type: "linear", min: 1, max: N, title: { display: true, text: W(2) + ", de menor a mayor riesgo →" }, ticks: { precision: 0, callback: v => n0(v) } } },
+        plugins: { legend: { display: false }, tooltip: { filter: it => it.datasetIndex === 0, callbacks: {
+          title: it => { const q = pts[it[0].dataIndex]; return q.r ? q.r.name : "Sin infracciones"; },
+          label: it => { const q = pts[it.dataIndex]; return "acumulado " + n1(q.y) + "%" + (q.r ? " · este " + n1(q.r.share) + "%" : ""); } } } } },
+      plugins: [{ id: "n50", beforeDatasetsDraw(ch) {
+        const X = ch.scales.x, Y = ch.scales.y, c2 = ch.ctx, x0 = X.getPixelForValue(cut + 0.5);
+        c2.save();
+        c2.fillStyle = "rgba(254,90,63,0.08)"; c2.fillRect(x0, Y.top, X.right - x0, Y.bottom - Y.top);
+        c2.strokeStyle = "#fe5a3f"; c2.setLineDash([4, 4]); c2.beginPath(); c2.moveTo(x0, Y.top); c2.lineTo(x0, Y.bottom); c2.stroke(); c2.setLineDash([]);
+        c2.font = "700 13px Roboto, sans-serif"; c2.fillStyle = "#c2381f"; c2.textAlign = "right";
+        c2.fillText(n0(p.n50) + " " + W(p.n50) + " → " + n0(p.share50) + "% del riesgo", X.right - 8, Y.top + 16);
+        if (cut > 0) { c2.fillStyle = "#3c5164"; c2.textAlign = "left"; c2.font = "500 13px Roboto, sans-serif";
+          const mid = pts[Math.max(0, Math.floor(cut * 0.55) - 1)]; c2.fillText("Los otros " + n0(cut) + " " + W(cut) + " suman solo el " + n0(lowShare) + "%", X.getPixelForValue(Math.max(1, cut * 0.25)), Y.getPixelForValue(mid.y) - 34); }
+        c2.restore(); } }],
     };
     const openRow = r => (by === "conductores" && onDriver ? onDriver(r.id) : by === "vehiculos" && onVehicle ? onVehicle(r.id) : null);
-    return html`<${Panel} title="Dónde se concentra el riesgo"
-      hint="Riesgo = infracciones × peso de su categoría. Se ordena de mayor a menor y se cuenta cuántos hacen falta para llegar a la mitad del riesgo total del período."
+    return html`<${Panel} title="Dónde se concentra el riesgo" className="mg-pareto-panel"
+      hint="Riesgo = infracciones × peso de su categoría. La curva suma el riesgo empezando por los de menor riesgo: queda plana mientras pasan los que casi no tienen infracciones y se dispara al final, donde están los pocos que generan la mayor parte. La zona roja son los que hacen falta para llegar a la mitad del riesgo total."
       actions=${html`<${Segmented} value=${by} onChange=${setBy} options=${[{ value: "conductores", label: "Conductores" }, { value: "vehiculos", label: "Vehículos" }, { value: "reglas", label: "Reglas" }]} />`}>
+      <p className="mg-hero"><b>${n0(p.n50)} ${W(p.n50)}</b> <span>(${n0(p.pct50)}% ${base})</span> generan el <b>${n0(p.share50)}%</b> del riesgo.</p>
       <div className="mg-pareto">
+        <div className="mg-pareto-chart"><${ChartView} config=${cfg} height=${400} /><p className="small muted">Línea gris punteada: cómo sería la curva si todos generaran el mismo riesgo. Cuanto más se aleja la curva azul hacia abajo, más concentrado está el riesgo en pocos.</p></div>
         <div className="mg-pareto-text">
-          <p className="mg-big"><b>${n0(p.n50)} ${W(p.n50)}</b> (${n0(p.pct50)}% ${base}) generan el <b>${n0(p.share50)}%</b> del riesgo.</p>
           <p>El 20% de los ${word[1]} (${n0(p.k20)}) explica el ${n0(p.share20)}%.${p.saving != null && by !== "reglas" ? " Si esos " + n0(p.n50) + " bajaran a la tasa mediana de la flota, el riesgo total bajaría un " + n0(p.saving) + "%." : ""}</p>
           ${by === "conductores" ? html`<p className="small muted">${n0(p.n50 - noCoach.length)} de los ${n0(p.n50)} tienen coaching asignado o hecho.</p>` : null}
           <div className="mg-actions">
             ${by === "conductores" && noCoach.length ? html`<${CoachMany} view=${view} rows=${noCoach} label=${"Asignar coaching a los " + n0(noCoach.length) + " sin acción"} reason=${r => "Está entre los " + p.n50 + " conductores que generan la mitad del riesgo del período."} />` : null}
           </div>
-          <ol className="mg-toplist">${p.top.slice(0, 8).map(r => html`<li key=${r.id}><button className="linkish" onClick=${() => openRow(r)}>${r.name}</button> <span className="muted small">${n1(r.share)}%</span></li>`)}
-            ${p.top.length > 8 ? html`<li className="muted small">y ${n0(p.top.length - 8)} más</li>` : null}</ol>
+          <ol className="mg-toplist">${p.top.slice(0, 10).map(r => html`<li key=${r.id}><button className="linkish" onClick=${() => openRow(r)}>${r.name}</button> <span className="muted small">${n1(r.share)}%</span></li>`)}
+            ${p.top.length > 10 ? html`<li className="muted small">y ${n0(p.top.length - 10)} más</li>` : null}</ol>
         </div>
-        <div className="mg-pareto-chart"><${ChartView} config=${cfg} height=${300} /></div>
       </div>
     <//>`;
   }
@@ -183,6 +207,7 @@
         pointRadius: d.map(p => (p.real > yMax ? 7 : q === "prioridad" ? 6 : 5)), pointStyle: d.map(p => (p.real > yMax ? "triangle" : "circle")), pointHoverRadius: 8 }; }) },
       options: { maintainAspectRatio: false,
         scales: { x: { title: { display: true, text: "Km manejados en el período (exposición) →" }, ticks: { callback: v => n0(v) } }, y: { title: { display: true, text: "Riesgo: puntos cada 100 km →" }, min: 0, max: yMax, ticks: { callback: v => GI.fmtNum(v, v % 1 ? 1 : 0) } } },
+        interaction: { mode: "nearest", intersect: true },
         onClick: (e, els, ch) => { const el = els && els[0]; if (el && onDriver) onDriver(ch.data.datasets[el.datasetIndex].data[el.index].id); },
         plugins: { legend: { display: false }, tooltip: { callbacks: { label: it => it.raw.name + " · " + n0(it.raw.x) + " km · " + n2(it.raw.real) + " pts/100 km" } } } },
       plugins: [{ id: "med", beforeDatasetsDraw(ch) { const { x, y } = ch.scales; const c2 = ch.ctx; c2.save();

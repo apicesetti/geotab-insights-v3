@@ -117,7 +117,11 @@
           // elegido arriba pasa a filtrar en la API (no en el navegador).
           const large = cat.devices.length > LARGE_FLEET;
           setLargeFleet(large);
-          const pre = large && !(s.scope_group_ids || []).length ? "month" : presetFrom(s.ui);
+          // Si un administrador eligió el período por defecto, se respeta siempre; "Este mes" solo es
+          // el arranque automático de las flotas grandes cuando nadie lo eligió.
+          const su = (shared.settings && shared.settings.ui) || {};
+          const chosen = su.default_period_set || (su.default_period && su.default_period !== "3m");
+          const pre = large && !(s.scope_group_ids || []).length && !chosen ? "month" : presetFrom(s.ui);
           const p = { preset: pre, ...rangeFor(pre) };
           setPeriod(p);
           setPhase("ready");

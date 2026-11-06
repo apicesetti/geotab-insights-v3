@@ -184,7 +184,7 @@
       const cfg = { ...config, plugins: [...(config.plugins || []), milestonePlugin] };
       cfg.options = {
         responsive: true, maintainAspectRatio: false, animation: false,
-        interaction: { mode: "index", intersect: false },
+        interaction: config.type === "scatter" || config.type === "bubble" ? { mode: "nearest", intersect: true } : { mode: "index", intersect: false },
         ...(config.options || {}),
         plugins: {
           legend: { position: "bottom", labels: { boxWidth: 12, usePointStyle: true } },

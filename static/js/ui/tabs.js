@@ -232,6 +232,7 @@
       </div>
       ${summarySentence(view, () => setWhy(true))}
       ${why ? html`<${RiskWhy} view=${view} onClose=${() => setWhy(false)} onDriver=${onDriver} />` : null}
+      ${GI.ParetoPanel && !view.driverMode ? html`<${GI.ParetoPanel} view=${view} onDriver=${onDriver} />` : null}
       <div className="grid-2-1">
         <${Panel} title="Evolución" hint=${"Agrupado por " + GRAN_WORD[view.gran] + ". Las líneas amarillas punteadas son hitos. El asterisco, el punto hueco y la línea punteada marcan " + GRAN_PLURAL[view.gran] + " incompletos (al inicio o al final del período): se muestran, pero con pocos días su valor es menos confiable."}
           actions=${html`<${Segmented} value=${metric} onChange=${setMetric} options=${[
@@ -242,7 +243,6 @@
           <${Findings} items=${view.findings.filter(f => f.area !== "tendencia")} onGo=${onGo} />
         <//>
       </div>
-      ${GI.ParetoPanel && !view.driverMode ? html`<${GI.ParetoPanel} view=${view} onDriver=${onDriver} />` : null}
       <${Panel} title="Por perfil de operación" hint="Cada perfil (tipo de vehículo × corta/larga distancia) se compara contra sus propios objetivos, que se definen en Configuración → Objetivos por perfil.">
         <${DataTable} rowKey=${r => r.profile} rows=${view.pRows} defaultSort=${{ key: "km", dir: "desc" }} columns=${[
           { key: "profile", label: "Perfil", fmt: r => GI.profileLabel(view.settings, r.profile), value: r => r.profile },

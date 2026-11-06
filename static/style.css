@@ -1354,7 +1354,11 @@
 #gi3-root .readout.good { box-shadow: inset 0 3px 0 var(--good); }
 
 /* Gestión: Pareto, matriz, reincidencia, coaching */
-#gi3-root .mg-pareto { display: grid; grid-template-columns: minmax(260px, 380px) minmax(0, 1fr); gap: 24px; align-items: start; }
+#gi3-root .mg-pareto { display: grid; grid-template-columns: minmax(0, 1fr) minmax(240px, 320px); gap: 24px; align-items: start; }
+#gi3-root .mg-pareto-panel { box-shadow: inset 4px 0 0 var(--bad); }
+#gi3-root .mg-hero { font-size: 22px; line-height: 1.3; margin: 2px 0 14px; color: var(--ink); }
+#gi3-root .mg-hero b { font-weight: 700; color: #c2381f; }
+#gi3-root .mg-hero span { font-size: 16px; color: var(--muted); }
 #gi3-root .mg-pareto-text { display: flex; flex-direction: column; gap: 10px; }
 #gi3-root .mg-big { font-size: 21px; line-height: 1.35; color: var(--ink); }
 #gi3-root .mg-big b { font-weight: 700; }
