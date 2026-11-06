@@ -171,32 +171,51 @@
     if (!m) return null;
     const P = m.groups.prioridad;
     const noCoach = P.filter(r => !openCoachOf(coaches, r.id).length);
-    const data = q => m.groups[q].map(r => ({ x: GI.round(r.km, 0), y: GI.round(r.risk, 2), name: r.name, id: r.id }));
+    // Eje vertical: hasta el percentil 95 para que el grueso no quede aplastado contra el 0;
+    // los que pasan el tope se dibujan arriba, con un triángulo.
+    const risks = m.pts.map(r => r.risk).sort((a, b) => a - b);
+    const p95 = risks[Math.floor(risks.length * 0.95)] || 1;
+    const yRaw = Math.max(m.mRisk * 2.5, p95 * 1.15, 0.5), yMax = yRaw > 2 ? Math.ceil(yRaw) : Math.ceil(yRaw * 2) / 2;
+    const data = q => m.groups[q].map(r => ({ x: GI.round(r.km, 0), y: Math.min(GI.round(r.risk, 2), yMax), real: r.risk, name: r.name, id: r.id }));
     const cfg = {
       type: "scatter",
-      data: { datasets: ["prioridad", "corregir", "reconocer", "bajo"].map(q => ({ label: QLAB[q], data: data(q), backgroundColor: QCOL[q], borderColor: "#ffffff", borderWidth: 1, pointRadius: q === "prioridad" ? 6 : 5, pointHoverRadius: 8 })) },
-      options: { maintainAspectRatio: false, scales: { x: { title: { display: true, text: "Km en el período (exposición)" } }, y: { title: { display: true, text: "Riesgo (pts/100 km)" }, min: 0 } },
+      data: { datasets: ["prioridad", "corregir", "reconocer", "bajo"].map(q => { const d = data(q); return { label: QLAB[q], data: d, backgroundColor: QCOL[q], borderColor: "#ffffff", borderWidth: 1,
+        pointRadius: d.map(p => (p.real > yMax ? 7 : q === "prioridad" ? 6 : 5)), pointStyle: d.map(p => (p.real > yMax ? "triangle" : "circle")), pointHoverRadius: 8 }; }) },
+      options: { maintainAspectRatio: false,
+        scales: { x: { title: { display: true, text: "Km manejados en el período (exposición) →" }, ticks: { callback: v => n0(v) } }, y: { title: { display: true, text: "Riesgo: puntos cada 100 km →" }, min: 0, max: yMax, ticks: { callback: v => GI.fmtNum(v, v % 1 ? 1 : 0) } } },
         onClick: (e, els, ch) => { const el = els && els[0]; if (el && onDriver) onDriver(ch.data.datasets[el.datasetIndex].data[el.index].id); },
-        plugins: { tooltip: { callbacks: { label: it => it.raw.name + " · " + n0(it.raw.x) + " km · " + n2(it.raw.y) + " pts/100 km" } } } },
-      plugins: [{ id: "med", beforeDatasetsDraw(ch) { const { x, y } = ch.scales; const c2 = ch.ctx; c2.save(); c2.strokeStyle = "#66788c"; c2.setLineDash([5, 4]);
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: it => it.raw.name + " · " + n0(it.raw.x) + " km · " + n2(it.raw.real) + " pts/100 km" } } } },
+      plugins: [{ id: "med", beforeDatasetsDraw(ch) { const { x, y } = ch.scales; const c2 = ch.ctx; c2.save();
         const px = x.getPixelForValue(m.mKm), py = y.getPixelForValue(m.mRisk);
-        c2.beginPath(); c2.moveTo(px, y.top); c2.lineTo(px, y.bottom); c2.moveTo(x.left, py); c2.lineTo(x.right, py); c2.stroke(); c2.restore(); } }],
+        // fondo suave en el cuadrante de prioridad
+        c2.fillStyle = "rgba(254,90,63,0.06)"; c2.fillRect(px, y.top, x.right - px, py - y.top);
+        c2.strokeStyle = "#66788c"; c2.setLineDash([5, 4]);
+        c2.beginPath(); c2.moveTo(px, y.top); c2.lineTo(px, y.bottom); c2.moveTo(x.left, py); c2.lineTo(x.right, py); c2.stroke(); c2.setLineDash([]);
+        c2.font = "500 12px Roboto, sans-serif"; c2.fillStyle = "#3c5164";
+        c2.textAlign = "right"; c2.fillText("Promedio de la flota: " + n2(m.mRisk) + " pts/100 km", x.right - 6, py - 6);
+        c2.textAlign = "left"; c2.fillText("Mitad de la flota: " + n0(m.mKm) + " km", px + 6, y.top + 14);
+        c2.font = "700 12px Roboto, sans-serif";
+        c2.fillStyle = "#c2381f"; c2.textAlign = "right"; c2.fillText("PRIORIDAD 1", x.right - 6, y.top + 14);
+        c2.fillStyle = "#9a6b00"; c2.textAlign = "left"; c2.fillText("CORREGIR CONDUCTA", x.left + 6, y.top + 14);
+        c2.fillStyle = "#0062ad"; c2.textAlign = "right"; c2.fillText("RECONOCER", x.right - 6, y.bottom - 8);
+        c2.fillStyle = "#66788c"; c2.textAlign = "left"; c2.fillText("BAJO RIESGO", x.left + 6, y.bottom - 8);
+        c2.restore(); } }],
     };
+    const over = m.pts.filter(r => r.risk > yMax).length;
+    const card = (q, cls, title, text, extra) => html`<div className=${"mg-q " + cls}><h3><span className="mg-qdot" style=${{ background: QCOL[q] }}></span>${title} · ${n0(m.groups[q].length)}</h3><p>${text}</p>${extra || null}</div>`;
     return html`<${Panel} title="A quién intervenir primero"
-      hint=${"Cada punto es un conductor con al menos " + minKm + " km. Hacia la derecha maneja más km; hacia arriba, más riesgo por km. Las líneas punteadas son las medianas de la flota (" + n0(m.mKm) + " km y " + n2(m.mRisk) + " pts/100 km). Click en un punto para abrir la ficha."}>
-      <div className="mg-matrix">
-        <div className="mg-matrix-chart"><${ChartView} config=${cfg} height=${380} /></div>
-        <div className="mg-matrix-side">
-          <div className="mg-q prio">
-            <h3>Prioridad 1 · ${n0(P.length)} conductores</h3>
-            <p>${m.prioKmShare != null ? "Manejan el " + n0(m.prioKmShare) + "% de los km y generan el " + n0(m.prioRiskShare) + "% del riesgo." : ""}</p>
-            <ul className="mg-plist">${P.slice(0, 6).map(r => html`<li key=${r.id}><button className="linkish" onClick=${() => onDriver && onDriver(r.id)}>${r.name}</button><span className="small muted">${n0(r.km)} km · ${openCoachOf(coaches, r.id).length ? "con coaching" : "sin acción"}</span></li>`)}
-              ${P.length > 6 ? html`<li className="small muted">y ${n0(P.length - 6)} más</li>` : null}</ul>
-            ${noCoach.length ? html`<${CoachMany} view=${view} rows=${noCoach} label=${"Asignar coaching a los " + n0(noCoach.length) + " sin acción"} reason=${() => "Prioridad 1 en la matriz: muchos km y riesgo por km sobre la mediana."} />` : null}
-          </div>
-          <div className="mg-q"><h3>Reconocer · ${n0(m.groups.reconocer.length)}</h3><p>Muchos km y conducta mejor que la mediana: buenos tutores para los nuevos.</p></div>
-          <div className="mg-q"><h3>Corregir conducta · ${n0(m.groups.corregir.length)}</h3><p>Pocos km pero mala conducta: conviene intervenir antes de que sumen km.</p></div>
-        </div>
+      sub=${html`Cada punto es un conductor con al menos ${n0(minKm)} km en el período. <b>Hacia la derecha</b> maneja más km; <b>hacia arriba</b> tiene más puntos de riesgo cada 100 km. Click en un punto para abrir su ficha.`}
+      hint=${"Los puntos de riesgo son las infracciones ponderadas por su peso (Configuración → Reglas y objetivos). Mala conducta = más puntos cada 100 km que el promedio de la flota (" + n2(m.mRisk) + "), que es el total de puntos dividido el total de km. Muchos km = más km que la mitad de los conductores (" + n0(m.mKm) + " km)."}>
+      <div className="mg-matrix-chart"><${ChartView} config=${cfg} height=${420} /></div>
+      <p className="small muted mg-crit"><b>Criterio:</b> la línea horizontal es el promedio de la flota (${n2(m.mRisk)} puntos cada 100 km): arriba de esa línea, la conducta es peor que el promedio. La vertical separa a la mitad de los conductores que más km manejó (${n0(m.mKm)} km o más).${over ? " Los " + n0(over) + " triángulos de arriba superan el tope del gráfico; el valor real está en el detalle al pasar el mouse." : ""}</p>
+      <div className="mg-quads">
+        ${card("prioridad", "prio", "Prioridad 1", (m.prioKmShare != null ? "Muchos km y conducta peor que el promedio. Manejan el " + n0(m.prioKmShare) + "% de los km y generan el " + n0(m.prioRiskShare) + "% del riesgo." : "Muchos km y conducta peor que el promedio."),
+          html`<ul className="mg-plist">${P.slice(0, 5).map(r => html`<li key=${r.id}><button className="linkish" onClick=${() => onDriver && onDriver(r.id)}>${r.name}</button><span className="small muted">${n0(r.km)} km · ${n2(r.risk)} pts · ${openCoachOf(coaches, r.id).length ? "con coaching" : "sin acción"}</span></li>`)}
+            ${P.length > 5 ? html`<li className="small muted">y ${n0(P.length - 5)} más</li>` : null}</ul>
+            ${noCoach.length ? html`<${CoachMany} view=${view} rows=${noCoach} label=${"Asignar coaching a los " + n0(noCoach.length) + " sin acción"} reason=${() => "Prioridad 1 en la matriz: muchos km y riesgo por km sobre el promedio de la flota."} />` : null}`)}
+        ${card("corregir", "", "Corregir conducta", "Pocos km pero conducta peor que el promedio: conviene intervenir antes de que sumen km.")}
+        ${card("reconocer", "", "Reconocer", "Muchos km y conducta mejor que el promedio: buenos tutores para los nuevos.")}
+        ${card("bajo", "", "Bajo riesgo", "Pocos km y conducta mejor que el promedio: seguimiento normal.")}
       </div>
     <//>`;
   }

@@ -35,7 +35,11 @@
   function matrix(rows) {
     const pts = rows.filter(r => r.km > 0 && r.risk != null);
     if (pts.length < 4) return null;
-    const mKm = median(pts.map(r => r.km)), mRisk = median(pts.map(r => r.risk));
+    // Exposición: mediana de km. Conducta: promedio de la flota (puntos totales / km totales); la
+    // mediana del riesgo suele quedar casi en 0 porque muchos conductores no tienen infracciones.
+    const mKm = median(pts.map(r => r.km));
+    const kmT = pts.reduce((s, r) => s + r.km, 0), wT = pts.reduce((s, r) => s + (r.weighted || 0), 0);
+    const mRisk = kmT > 0 ? (wT / kmT) * 100 : median(pts.map(r => r.risk));
     const q = r => (r.km >= mKm ? (r.risk > mRisk ? "prioridad" : "reconocer") : (r.risk > mRisk ? "corregir" : "bajo"));
     const out = { mKm, mRisk, pts: pts.map(r => ({ ...r, q: q(r) })), groups: { prioridad: [], corregir: [], reconocer: [], bajo: [] } };
     for (const p of out.pts) out.groups[p.q].push(p);

@@ -144,7 +144,7 @@ input:disabled, select:disabled { background: var(--sunken); color: var(--muted)
 }
 .hint > .hint-body {
   display: none; position: absolute; z-index: 60; top: 24px; left: -8px; width: 300px; padding: 10px 12px;
-  background: var(--ink); color: #3c5164; border-radius: 6px; font: 400 13px/1.45 var(--sans); letter-spacing: 0; text-transform: none;
+  background: var(--ink); color: #ffffff; border-radius: 6px; font: 400 13px/1.45 var(--sans); letter-spacing: 0; text-transform: none;
   box-shadow: 0 8px 24px rgba(16, 24, 40, .18);
 }
 .hint:hover > .hint-body, .hint > button:focus + .hint-body { display: block; }
@@ -156,7 +156,7 @@ input:disabled, select:disabled { background: var(--sunken); color: var(--muted)
 }
 .th-hint > button:hover, .th-hint > button:focus { border-color: var(--ink); color: var(--ink); }
 .th-hint-body {
-  position: fixed; z-index: 20000; width: 320px; padding: 10px 12px; background: var(--ink); color: #3c5164; border-radius: 6px;
+  position: fixed; z-index: 20000; width: 320px; padding: 10px 12px; background: var(--ink); color: #ffffff; border-radius: 6px;
   font: 400 13px/1.45 var(--sans); letter-spacing: 0; text-transform: none; text-align: left; white-space: normal; pointer-events: none;
   box-shadow: 0 8px 24px rgba(16, 24, 40, .18);
 }
@@ -749,7 +749,11 @@ tr.ft-row-ident td { background: #fffaeb; }
 .mg-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .linkish { background: none; border: 0; padding: 0; color: var(--accent); font: inherit; font-weight: 500; cursor: pointer; text-align: left; }
 .linkish:hover { text-decoration: underline; color: var(--ink); }
-.mg-matrix { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 18px; align-items: start; }
+.mg-matrix-chart { width: 100%; min-width: 0; }
+.mg-crit { margin: 8px 0 12px; }
+.mg-quads { display: grid; grid-template-columns: minmax(0, 1.4fr) repeat(3, minmax(0, 1fr)); gap: 10px; align-items: start; }
+.mg-qdot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: 0; }
+@media (max-width: 1100px) { .mg-quads { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
 .mg-matrix-side { display: flex; flex-direction: column; gap: 10px; }
 .mg-q { border: 1px solid var(--rule); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
 .mg-q h3 { margin: 0; font-size: 15px; }
@@ -769,7 +773,7 @@ tr.ft-row-ident td { background: #fffaeb; }
 .mg-dcoach-head h3 { margin: 0; }
 .mg-dcoach-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 14px; }
 .mg-many { display: inline-flex; }
-@media (max-width: 900px) { .mg-pareto, .mg-matrix { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 900px) { .mg-pareto, .mg-quads { grid-template-columns: minmax(0, 1fr); } }
 
 /* ---------- Corredores ---------- */
 .cr-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 14px; }
