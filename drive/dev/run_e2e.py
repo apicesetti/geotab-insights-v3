@@ -58,6 +58,11 @@ with sync_playwright() as p:
     page.evaluate("() => window.GI._mj.render()")
     page.screenshot(path=str(OUT / "02-lejos.png"), full_page=True)
 
+    # Drive vuelve a insertar el HTML de la página al reabrirla (initialize no se repite)
+    page.evaluate("""() => { const old = document.getElementById('mjDrive'); const n = old.cloneNode(true); old.replaceWith(n);
+      window.__a.blur(); window.__a.focus(window.__api, window.__state); }""")
+    page.wait_for_timeout(300)
+
     # relevo: elige a María → mensaje de usuario + desvinculación
     check(page.is_visible("text=Me relevaron") and page.is_visible("text=Me desvinculo"), "botones en la tarjeta del vehículo")
     page.click("text=Me relevaron")

@@ -27,7 +27,7 @@
   let me = null, cfg = D.settingsFrom(null);
   let trips = [], rawEvents = [], vehicle = null, phone = null, away = { status: "—" }, awayState = null;
   let last = { config: 0, trips: 0, events: 0, away: 0, fullTrips: 0 };
-  let timer = null, busy = false, listening = false, bound = false, error = null;
+  let timer = null, busy = false, listening = false, error = null;
   let view = null; // resultados calculados
   let ui = { mode: null, q: "", busy: false, msg: null }; // mode: null | "unassign" | "relief"
   let drivers = null;
@@ -407,6 +407,7 @@
   }
 
   function render() {
+    root = document.getElementById("mjDrive") || root;
     if (!root) return;
     const who = $("#mj-who");
     if (who) who.textContent = me ? me.name : "";
@@ -427,15 +428,35 @@
     if (!me) loadCache();
   }
 
+  // Drive puede volver a insertar el HTML del add-in cada vez que se abre la
+  // página (initialize corre una sola vez, focus cada vez). Por eso los eventos
+  // se escuchan en el documento, no en un elemento que puede ser reemplazado.
+  function onClick(e) {
+    const t = e.target && e.target.nodeType === 1 ? e.target : e.target && e.target.parentElement;
+    const el = t && t.closest ? t.closest("#mjDrive [data-act], #mj-refresh") : null;
+    if (!el || el.disabled) return;
+    root = document.getElementById("mjDrive") || root;
+    try {
+      if (el.id === "mj-refresh") { el.disabled = true; check({ force: true }).then(() => { el.disabled = false; render(); }); return; }
+      const r = act(el.getAttribute("data-act"), el.getAttribute("data-arg"));
+      if (r && r.catch) r.catch(showActError);
+    } catch (err) { showActError(err); }
+  }
+  function showActError(err) {
+    ui = { mode: null, q: "", busy: false, msg: { err: "Error: " + ((err && err.message) || err) } };
+    render();
+  }
+  function onInput(e) {
+    if (!e.target || e.target.id !== "mj-q") return;
+    ui.q = e.target.value;
+    const l = document.querySelector("#mjDrive .mj-users");
+    if (l) l.innerHTML = usersHtml();
+  }
   function bindEvents() {
-    const b = $("#mj-refresh");
-    if (b) b.addEventListener("click", () => { b.disabled = true; check({ force: true }).then(() => { b.disabled = false; render(); }); });
-    root.addEventListener("click", e => {
-      const el = e.target.closest && e.target.closest("[data-act]");
-      if (el && !el.disabled) act(el.getAttribute("data-act"), el.getAttribute("data-arg"));
-    });
-    // al buscar solo se redibuja la lista (no se pierde el teclado)
-    root.addEventListener("input", e => { if (e.target.id === "mj-q") { ui.q = e.target.value; const l = $(".mj-users"); if (l) l.innerHTML = usersHtml(); } });
+    if (window.__mjBound) return;   // una sola vez por documento
+    window.__mjBound = true;
+    document.addEventListener("click", onClick, true);
+    document.addEventListener("input", onInput, true);
   }
 
   window.geotab = window.geotab || {};
@@ -453,13 +474,14 @@
       initialize(freshApi, freshState, callback) {
         setup(freshApi, freshState);
         root = document.getElementById("mjDrive");
-        if (root && !bound) { bindEvents(); bound = true; }
+        bindEvents();
         compute(); render();
         callback();
       },
       focus(freshApi, freshState) {
         setup(freshApi, freshState);
         root = document.getElementById("mjDrive") || root;
+        bindEvents();
         if (root) root.hidden = false;
         if (!ui.busy) ui = { mode: null, q: "", busy: false, msg: null };
         render();
