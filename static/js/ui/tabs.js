@@ -238,10 +238,11 @@
             { value: "risk", label: "Riesgo" }, { value: "idlePct", label: "Ralentí" }, { value: "l100", label: "Consumo" }, { value: "km", label: "Km" }]} />`}>
           <${TrendChart} view=${view} metric=${metric} />
         <//>
-        <${Panel} title="Qué mirar primero">
+        <${Panel} title="Qué mirar primero" actions=${GI.ReportButton ? html`<${GI.ReportButton} view=${view} />` : null}>
           <${Findings} items=${view.findings.filter(f => f.area !== "tendencia")} onGo=${onGo} />
         <//>
       </div>
+      ${GI.ParetoPanel && !view.driverMode ? html`<${GI.ParetoPanel} view=${view} onDriver=${onDriver} />` : null}
       <${Panel} title="Por perfil de operación" hint="Cada perfil (tipo de vehículo × corta/larga distancia) se compara contra sus propios objetivos, que se definen en Configuración → Objetivos por perfil.">
         <${DataTable} rowKey=${r => r.profile} rows=${view.pRows} defaultSort=${{ key: "km", dir: "desc" }} columns=${[
           { key: "profile", label: "Perfil", fmt: r => GI.profileLabel(view.settings, r.profile), value: r => r.profile },
@@ -639,6 +640,8 @@
           ]} />
         <//>
       </div>
+      ${GI.ParetoPanel ? html`<${GI.ParetoPanel} view=${view} onDriver=${onDriver} onVehicle=${onVehicle} />` : null}
+      ${GI.RecidivismPanel ? html`<${GI.RecidivismPanel} view=${view} onDriver=${onDriver} />` : null}
       <${Panel} title="Qué infracciones pesan más" hint="'% del riesgo' es cuánto aporta cada categoría al índice (cantidad × peso). Click en una categoría para ver qué conductores la generan; click en el número de eventos para verlos en MyGeotab.">
         <${DataTable} rowKey=${r => r.key} rows=${catRows} defaultSort=${{ key: "share", dir: "desc" }} onRowClick=${r => setCatDetail(r.key)} rowClass=${r => (r.on ? "" : "sf-off")} columns=${[
           { key: "label", label: "Categoría", fmt: r => html`<span className="dot" style=${{ background: GI.CHART_SLOTS.includes(r.key) ? GI.catColor(r.key) : GI.OTHER_COLOR }}></span>${r.label}` },
@@ -677,6 +680,7 @@
         <${Kpi} label="Conductores en el ranking" value=${n0(rows.length)} sub=${"de " + known.length + " con actividad (mín. " + minKm + " km)"} />
         <${Kpi} label="Sin identificar" value=${n0(unknown ? unknown.km : 0)} unit="km" sub=${(unknown ? n0(unknown.events) : 0) + " infracciones sin conductor"} />
       </div>
+      ${GI.MatrixPanel ? html`<${GI.MatrixPanel} view=${view} onDriver=${onDriver} />` : null}
       <${Panel} title=${mode === "risk" ? "Conductores con más infracciones por km" : "Conductores con más ralentí"}
         hint=${"Solo conductores con al menos " + minKm + " km, para que pocos km no distorsionen el índice. Filtrá por servicio para comparar corta con corta y larga con larga."}
         actions=${html`
@@ -697,6 +701,7 @@
           { key: "idleL", label: "Litros ralentí", align: "num", fmt: r => html`${n0(r.idleL)}${price ? html` <span className="muted small">${GI.fmtMoney(r.idleCost)}</span>` : ""}` },
         ]} empty="Ningún conductor identificado llega a esos km mínimos. Bajá el mínimo o ampliá el período." />
       <//>
+      ${GI.CoachingPanel ? html`<${GI.CoachingPanel} view=${view} onDriver=${onDriver} />` : null}
     </div>`;
   }
 
@@ -1231,6 +1236,7 @@
     const evRows = Object.entries(r.evByCat).filter(([k]) => (GI.CATEGORY_BY_KEY[k] || {}).kind === "riesgo").map(([k, n]) => ({ k, n }));
     return html`<${Modal} title=${r.name} onClose=${onClose} wide>
       ${onMap ? html`<div className="hm-detail-cta"><button className="btn small" onClick=${() => onMap({ driverId: id })}>Ver sus infracciones en el Mapa de calor →</button></div>` : null}
+      ${GI.DriverCoaching && !view.driverMode ? html`<${GI.DriverCoaching} view=${view} drv=${id} />` : null}
       <div className="readouts compact">
         <${Kpi} label="Km" value=${n0(r.km)} />
         <${Kpi} label="Riesgo del período" value=${n2(r.risk)} unit="pts/100 km"

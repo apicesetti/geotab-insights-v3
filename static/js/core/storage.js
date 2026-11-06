@@ -236,6 +236,22 @@
   }
 
 
+  // Coaching: intervención asignada a un conductor (motivo, tipo, responsable, fecha) y su estado.
+  // El resultado (antes y después) se calcula en el add-in; no se guarda.
+  async function saveCoach(api, r) {
+    const details = { kind: "coach", ...r, updated_at: new Date().toISOString() };
+    delete details.id;
+    const entity = { addInId: ADDIN_ID, groups: await shareGroups(api), details };
+    if (r.id) { await api.call("Set", { typeName: "AddInData", entity: { id: r.id, ...entity } }); return { ...details, id: r.id }; }
+    const id = await api.call("Add", { typeName: "AddInData", entity });
+    return { ...details, id };
+  }
+  async function loadCoaches(api) {
+    const out = [];
+    for (const rec of await getAll(api)) { const d = parseDetails(rec); if (d && d.kind === "coach") out.push({ ...d, id: rec.id }); }
+    return out;
+  }
+
   // Intervenciones por alertas de fatiga (quién, cuándo, qué se hizo). Las ven todos los supervisores.
   async function saveAlertAck(api, r) {
     const details = { kind: "falert", ...r, updated_at: new Date().toISOString() };
@@ -282,5 +298,5 @@
     return saved;
   }
 
-  Object.assign(GI, { saveAlertAck, loadAlertAcks, _deepestOnly: deepestOnly, shareGroups, ADDIN_ID, loadShared, saveSettings, saveBenchmark, currentUser, sharingStatus, shareWithAll, addMilestone, updateMilestone, removeMilestone, resolveIsAdmin, saveFatigueCase, loadFatigueCases, saveRoster, removeRoster, loadRosters, saveIdent, loadIdents });
+  Object.assign(GI, { saveCoach, loadCoaches, saveAlertAck, loadAlertAcks, _deepestOnly: deepestOnly, shareGroups, ADDIN_ID, loadShared, saveSettings, saveBenchmark, currentUser, sharingStatus, shareWithAll, addMilestone, updateMilestone, removeMilestone, resolveIsAdmin, saveFatigueCase, loadFatigueCases, saveRoster, removeRoster, loadRosters, saveIdent, loadIdents });
 })(window.GI);

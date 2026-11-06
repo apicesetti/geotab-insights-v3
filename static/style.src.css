@@ -739,3 +739,34 @@ tr.ft-row-ident td { background: #fffaeb; }
 .brand h1 .by { font-weight: 400; color: var(--accent); }
 .readout.bad { box-shadow: inset 0 3px 0 var(--bad); }
 .readout.good { box-shadow: inset 0 3px 0 var(--good); }
+
+/* Gestión: Pareto, matriz, reincidencia, coaching */
+.mg-pareto { display: grid; grid-template-columns: minmax(260px, 380px) minmax(0, 1fr); gap: 24px; align-items: start; }
+.mg-pareto-text { display: flex; flex-direction: column; gap: 10px; }
+.mg-big { font-size: 21px; line-height: 1.35; color: var(--ink); }
+.mg-big b { font-weight: 700; }
+.mg-toplist { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 3px; font-size: 14px; }
+.mg-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.linkish { background: none; border: 0; padding: 0; color: var(--accent); font: inherit; font-weight: 500; cursor: pointer; text-align: left; }
+.linkish:hover { text-decoration: underline; color: var(--ink); }
+.mg-matrix { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 18px; align-items: start; }
+.mg-matrix-side { display: flex; flex-direction: column; gap: 10px; }
+.mg-q { border: 1px solid var(--rule); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
+.mg-q h3 { margin: 0; font-size: 15px; }
+.mg-q.prio { box-shadow: inset 0 3px 0 var(--bad); }
+.mg-plist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.mg-plist li { display: flex; justify-content: space-between; gap: 8px; }
+.mg-tl { position: relative; display: block; height: 14px; min-width: 200px; background: var(--canvas); border-radius: 7px; }
+.mg-tl i { position: absolute; top: 2px; width: 10px; height: 10px; margin-left: -5px; border-radius: 50%; }
+.mg-tl b { position: absolute; top: -1px; width: 3px; height: 16px; margin-left: -1px; background: var(--ink); border-radius: 1px; }
+.mg-form { display: flex; flex-direction: column; gap: 12px; max-width: 560px; }
+.mg-form label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 500; }
+.mg-form select, .mg-form input, .mg-form textarea { font-size: 14px; }
+.mg-row2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.mg-why { background: var(--canvas); border-radius: 8px; padding: 10px 12px; font-size: 14px; }
+.mg-dcoach { border: 1px solid var(--rule); border-radius: 8px; padding: 10px 12px; margin: 10px 0; display: flex; flex-direction: column; gap: 6px; }
+.mg-dcoach-head { display: flex; align-items: center; gap: 10px; }
+.mg-dcoach-head h3 { margin: 0; }
+.mg-dcoach-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 14px; }
+.mg-many { display: inline-flex; }
+@media (max-width: 900px) { .mg-pareto, .mg-matrix { grid-template-columns: minmax(0, 1fr); } }

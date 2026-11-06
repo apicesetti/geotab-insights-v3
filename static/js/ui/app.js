@@ -227,6 +227,8 @@
       } catch (e) { console.error("[Geotab Insights] view", e); setTimeout(() => setCalcError(e), 0); return null; }
     }, [model, filter, mgGroups, gran, milestones, driverMode, benchmark]);
 
+    // contexto para paneles que guardan datos propios (coaching) o abren el informe
+    GI._ctx = { api, userName, isAdmin, database };
     async function publishBenchmark() {
       const b = GI.buildBenchmark(model);
       const saved = await GI.saveBenchmark(api, b);
