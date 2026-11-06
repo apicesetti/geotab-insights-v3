@@ -1,0 +1,69 @@
+/* Mi jornada — Geotab Drive. Misma paleta que Insights by Cesetti. Todo bajo .mj para no pisar a Drive. */
+.mj {
+  --canvas: #f2f4f6; --surface: #fff; --rule: #e3e7ec; --ink: #1f2a37; --text: #1c2430; --text-2: #4f5866; --muted: #7b8492;
+  --marking: #f2b705; --marking-ink: #7a5a00; --marking-soft: #fff6d6;
+  --good: #0b7a3e; --good-soft: #e3f4ea; --bad: #b93a0f; --bad-soft: #fdebe3;
+  font-family: "Barlow", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color: var(--text); background: var(--canvas); min-height: 100vh; padding: 12px 12px 28px; box-sizing: border-box;
+  -webkit-text-size-adjust: 100%;
+}
+.mj *, .mj *::before, .mj *::after { box-sizing: border-box; }
+.mj-head { display: flex; justify-content: space-between; align-items: center; margin: 0 2px 12px; }
+.mj h1 { font-size: 22px; margin: 0; color: var(--ink); font-weight: 700; }
+.mj h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-2); margin: 0 0 8px; font-weight: 700; }
+.mj h3 { font-size: 14px; margin: 12px 0 6px; color: var(--ink); }
+.mj-icon { width: 44px; height: 44px; border-radius: 22px; border: 1px solid var(--rule); background: var(--surface); font-size: 22px; color: var(--ink); }
+.mj-icon:disabled { opacity: .5; }
+.mj-card { background: var(--surface); border: 1px solid var(--rule); border-radius: 12px; padding: 14px; margin-bottom: 12px; }
+.mj-sub { color: var(--text-2); font-size: 14px; margin: 4px 0; line-height: 1.35; }
+.mj-hint { color: var(--muted); font-size: 12px; margin: 6px 0 0; line-height: 1.35; }
+.mj-foot { color: var(--muted); font-size: 12px; text-align: center; margin-top: 8px; }
+.mj-loading { text-align: center; padding: 40px 0; }
+.mj-msg { background: var(--bad-soft); color: var(--bad); border-radius: 8px; padding: 10px 12px; font-size: 14px; margin-bottom: 12px; }
+.mj-warn { background: var(--marking-soft); color: var(--marking-ink); border-radius: 8px; padding: 8px 10px; font-size: 14px; margin: 10px 0 0; }
+.mj-row { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.mj-big { font-size: 34px; font-weight: 700; color: var(--ink); line-height: 1.1; }
+.mj-big-s { font-size: 22px; font-weight: 700; color: var(--ink); margin: 0; }
+.mj-okc { color: var(--good); } .mj-amc { color: var(--marking-ink); } .mj-badc { color: var(--bad); font-weight: 600; }
+.mj-tag { display: inline-block; font-size: 13px; font-weight: 600; padding: 3px 9px; border-radius: 12px; background: var(--canvas); color: var(--text-2); }
+.mj-okt { background: var(--good-soft); color: var(--good); } .mj-badt { background: var(--bad-soft); color: var(--bad); }
+
+/* barras de tiempo restante */
+.mj-bar { margin: 12px 0 4px; }
+.mj-bar-head { display: flex; justify-content: space-between; align-items: baseline; }
+.mj-bar-name { font-weight: 600; font-size: 16px; color: var(--ink); }
+.mj-bar-val { font-weight: 700; font-size: 16px; } .mj-bar-val small { font-weight: 400; color: var(--muted); font-size: 13px; }
+.mj-track { height: 12px; border-radius: 6px; background: var(--canvas); overflow: hidden; margin: 6px 0 4px; }
+.mj-fill { height: 100%; border-radius: 6px; background: var(--good); transition: width .4s; }
+.mj-amarillo .mj-fill { background: var(--marking); } .mj-rojo .mj-fill { background: var(--bad); }
+.mj-bar-left { font-size: 14px; color: var(--text-2); }
+.mj-rojo .mj-bar-left { color: var(--bad); font-weight: 600; } .mj-amarillo .mj-bar-left b { color: var(--marking-ink); }
+
+/* fatiga */
+.mj-fi-bajo { color: var(--good); } .mj-fi-moderado { color: var(--marking-ink); } .mj-fi-alto, .mj-fi-muy-alto { color: var(--bad); }
+.mj-tag.mj-fi-bajo { background: var(--good-soft); } .mj-tag.mj-fi-moderado { background: var(--marking-soft); }
+.mj-tag.mj-fi-alto, .mj-tag.mj-fi-muy-alto { background: var(--bad-soft); }
+.mj-list { margin: 0; padding-left: 18px; font-size: 14px; color: var(--text-2); } .mj-list li { margin: 4px 0; }
+
+/* riesgo */
+.mj-spark { display: flex; align-items: flex-end; gap: 4px; height: 90px; margin: 12px 0 4px; }
+.mj-sb { flex: 1; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; }
+.mj-sb > div { width: 100%; background: var(--ink); border-radius: 3px 3px 0 0; }
+.mj-sb:last-child > div { background: var(--marking); }
+.mj-sb span { font-size: 10px; color: var(--muted); margin-top: 3px; white-space: nowrap; }
+.mj-cats { list-style: none; margin: 8px 0 0; padding: 0; }
+.mj-cats li { display: flex; justify-content: space-between; padding: 6px 0; border-top: 1px solid var(--rule); font-size: 14px; }
+
+/* vehículo: desvincularse / relevo */
+.mj-card-alert { border: 2px solid var(--bad); }
+.mj-btns { display: flex; gap: 8px; margin-top: 12px; }
+.mj-btn { flex: 1; min-height: 48px; border-radius: 10px; border: 1px solid var(--ink); background: var(--ink); color: #fff; font-size: 16px; font-weight: 600; font-family: inherit; }
+.mj-btn-2 { background: var(--surface); color: var(--ink); border-color: var(--rule); }
+.mj-btn:disabled, .mj-user:disabled { opacity: .5; }
+.mj-pick { margin-top: 12px; }
+.mj-pick > .mj-btn { width: 100%; margin-top: 10px; }
+.mj-input { width: 100%; min-height: 46px; border: 1px solid var(--rule); border-radius: 10px; padding: 0 12px; font-size: 16px; font-family: inherit; margin: 8px 0; }
+.mj-users { max-height: 320px; overflow-y: auto; border: 1px solid var(--rule); border-radius: 10px; }
+.mj-user { display: block; width: 100%; text-align: left; min-height: 48px; padding: 0 14px; border: 0; border-bottom: 1px solid var(--rule); background: var(--surface); font-size: 16px; font-family: inherit; color: var(--text); }
+.mj-user:last-child { border-bottom: 0; }
+.mj-okm { background: var(--good-soft); color: var(--good); border-radius: 8px; padding: 10px 12px; font-size: 14px; margin: 10px 0 0; }
