@@ -755,7 +755,7 @@ tr.ft-row-ident td { background: #fffaeb; }
 .linkish:hover { text-decoration: underline; color: var(--ink); }
 .mg-matrix-chart { width: 100%; min-width: 0; }
 .mg-crit { margin: 8px 0 12px; }
-.mg-quads { display: grid; grid-template-columns: minmax(0, 1.4fr) repeat(3, minmax(0, 1fr)); gap: 10px; align-items: start; }
+.mg-quads { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; align-items: start; }
 .mg-qdot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: 0; }
 @media (max-width: 1100px) { .mg-quads { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
 .mg-matrix-side { display: flex; flex-direction: column; gap: 10px; }
@@ -764,6 +764,11 @@ tr.ft-row-ident td { background: #fffaeb; }
 .mg-q.prio { box-shadow: inset 0 3px 0 var(--bad); }
 .mg-plist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .mg-plist li { display: flex; justify-content: space-between; gap: 8px; }
+.mg-plist li .linkish { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+.mg-plist li > span { white-space: nowrap; flex-shrink: 0; }
+.mg-plist-all { max-height: 320px; overflow-y: auto; padding-right: 4px; }
+.mg-order { margin: 2px 0 6px; }
+.mg-more { display: inline-block; margin: 6px 0 8px; }
 .mg-tl { position: relative; display: block; height: 14px; min-width: 200px; background: var(--canvas); border-radius: 7px; }
 .mg-tl i { position: absolute; top: 2px; width: 10px; height: 10px; margin-left: -5px; border-radius: 50%; }
 .mg-tl b { position: absolute; top: -1px; width: 3px; height: 16px; margin-left: -1px; background: var(--ink); border-radius: 1px; }

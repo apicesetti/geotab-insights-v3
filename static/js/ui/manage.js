@@ -203,11 +203,11 @@
     const data = q => m.groups[q].map(r => ({ x: GI.round(r.km, 0), y: Math.min(GI.round(r.risk, 2), yMax), real: r.risk, name: r.name, id: r.id }));
     const cfg = {
       type: "scatter",
-      data: { datasets: ["prioridad", "corregir", "reconocer", "bajo"].map(q => { const d = data(q); return { label: QLAB[q], data: d, backgroundColor: QCOL[q], borderColor: "#ffffff", borderWidth: 1,
+      data: { datasets: ["prioridad", "corregir", "reconocer", "bajo"].map(q => { const d = data(q); return { label: QLAB[q], data: d, clip: false, backgroundColor: QCOL[q], borderColor: "#ffffff", borderWidth: 1,
         pointRadius: d.map(p => (p.real > yMax ? 7 : q === "prioridad" ? 6 : 5)), pointStyle: d.map(p => (p.real > yMax ? "triangle" : "circle")), pointHoverRadius: 8 }; }) },
       options: { maintainAspectRatio: false,
         scales: { x: { title: { display: true, text: "Km manejados en el período (exposición) →" }, ticks: { callback: v => n0(v) } }, y: { title: { display: true, text: "Riesgo: puntos cada 100 km →" }, min: 0, max: yMax, ticks: { callback: v => GI.fmtNum(v, v % 1 ? 1 : 0) } } },
-        interaction: { mode: "nearest", intersect: true },
+        interaction: { mode: "nearest", intersect: true }, layout: { padding: { top: 12, right: 10 } },
         onClick: (e, els, ch) => { const el = els && els[0]; if (el && onDriver) onDriver(ch.data.datasets[el.datasetIndex].data[el.index].id); },
         plugins: { legend: { display: false }, tooltip: { callbacks: { label: it => it.raw.name + " · " + n0(it.raw.x) + " km · " + n2(it.raw.real) + " pts/100 km" } } } },
       plugins: [{ id: "med", beforeDatasetsDraw(ch) { const { x, y } = ch.scales; const c2 = ch.ctx; c2.save();
@@ -227,22 +227,46 @@
         c2.restore(); } }],
     };
     const over = m.pts.filter(r => r.risk > yMax).length;
-    const card = (q, cls, title, text, extra) => html`<div className=${"mg-q " + cls}><h3><span className="mg-qdot" style=${{ background: QCOL[q] }}></span>${title} · ${n0(m.groups[q].length)}</h3><p>${text}</p>${extra || null}</div>`;
+    const coachTxt = r => (openCoachOf(coaches, r.id).length ? "con coaching" : null);
+    const byRisk = (x, y) => y.risk - x.risk, byKm = (x, y) => y.km - x.km;
+    const Q = [
+      { q: "prioridad", cls: "prio", title: "Prioridad 1", order: "mayor riesgo total primero", rows: P,
+        text: m.prioKmShare != null ? "Muchos km y conducta peor que el promedio. Manejan el " + n0(m.prioKmShare) + "% de los km y generan el " + n0(m.prioRiskShare) + "% del riesgo." : "Muchos km y conducta peor que el promedio.",
+        info: coachTxt, act: noCoach.length ? html`<${CoachMany} view=${view} rows=${noCoach} label=${"Asignar coaching a los " + n0(noCoach.length) + " sin acción"} reason=${() => "Prioridad 1 en la matriz: muchos km y riesgo por km sobre el promedio de la flota."} />` : null },
+      { q: "corregir", cls: "", title: "Corregir conducta", order: "peor conducta primero", rows: [...m.groups.corregir].sort(byRisk),
+        text: "Pocos km pero conducta peor que el promedio: conviene intervenir antes de que sumen km.", info: coachTxt,
+        act: (() => { const nc = m.groups.corregir.filter(r => !openCoachOf(coaches, r.id).length); return nc.length ? html`<${CoachMany} view=${view} rows=${nc} label=${"Asignar coaching a los " + n0(nc.length) + " sin acción"} reason=${() => "Corregir conducta en la matriz: riesgo por km sobre el promedio de la flota."} />` : null; })() },
+      { q: "reconocer", cls: "", title: "Reconocer", order: "más km primero", rows: [...m.groups.reconocer].sort(byKm),
+        text: "Muchos km y conducta mejor que el promedio: buenos tutores para los nuevos.", copy: true },
+      { q: "bajo", cls: "", title: "Bajo riesgo", order: "los más cerca del promedio primero", rows: [...m.groups.bajo].sort(byRisk),
+        text: "Pocos km y conducta mejor que el promedio: seguimiento normal." },
+    ];
     return html`<${Panel} title="A quién intervenir primero"
       sub=${html`Cada punto es un conductor con al menos ${n0(minKm)} km en el período. <b>Hacia la derecha</b> maneja más km; <b>hacia arriba</b> tiene más puntos de riesgo cada 100 km. Click en un punto para abrir su ficha.`}
       hint=${"Los puntos de riesgo son las infracciones ponderadas por su peso (Configuración → Reglas y objetivos). Mala conducta = más puntos cada 100 km que el promedio de la flota (" + n2(m.mRisk) + "), que es el total de puntos dividido el total de km. Muchos km = más km que la mitad de los conductores (" + n0(m.mKm) + " km)."}>
       <div className="mg-matrix-chart"><${ChartView} config=${cfg} height=${420} /></div>
       <p className="small muted mg-crit"><b>Criterio:</b> la línea horizontal es el promedio de la flota (${n2(m.mRisk)} puntos cada 100 km): arriba de esa línea, la conducta es peor que el promedio. La vertical separa a la mitad de los conductores que más km manejó (${n0(m.mKm)} km o más).${over ? " Los " + n0(over) + " triángulos de arriba superan el tope del gráfico; el valor real está en el detalle al pasar el mouse." : ""}</p>
-      <div className="mg-quads">
-        ${card("prioridad", "prio", "Prioridad 1", (m.prioKmShare != null ? "Muchos km y conducta peor que el promedio. Manejan el " + n0(m.prioKmShare) + "% de los km y generan el " + n0(m.prioRiskShare) + "% del riesgo." : "Muchos km y conducta peor que el promedio."),
-          html`<ul className="mg-plist">${P.slice(0, 5).map(r => html`<li key=${r.id}><button className="linkish" onClick=${() => onDriver && onDriver(r.id)}>${r.name}</button><span className="small muted">${n0(r.km)} km · ${n2(r.risk)} pts · ${openCoachOf(coaches, r.id).length ? "con coaching" : "sin acción"}</span></li>`)}
-            ${P.length > 5 ? html`<li className="small muted">y ${n0(P.length - 5)} más</li>` : null}</ul>
-            ${noCoach.length ? html`<${CoachMany} view=${view} rows=${noCoach} label=${"Asignar coaching a los " + n0(noCoach.length) + " sin acción"} reason=${() => "Prioridad 1 en la matriz: muchos km y riesgo por km sobre el promedio de la flota."} />` : null}`)}
-        ${card("corregir", "", "Corregir conducta", "Pocos km pero conducta peor que el promedio: conviene intervenir antes de que sumen km.")}
-        ${card("reconocer", "", "Reconocer", "Muchos km y conducta mejor que el promedio: buenos tutores para los nuevos.")}
-        ${card("bajo", "", "Bajo riesgo", "Pocos km y conducta mejor que el promedio: seguimiento normal.")}
-      </div>
+      <div className="mg-quads">${Q.map(x => html`<${QuadCard} key=${x.q} x=${x} view=${view} onDriver=${onDriver} />`)}</div>
     <//>`;
+  }
+
+  // Tarjeta de un cuadrante con su lista de conductores (5 visibles, "Ver todos" despliega el resto).
+  function QuadCard({ x, view, onDriver }) {
+    const [all, setAll] = useState(false), [copied, setCopied] = useState(false);
+    const rows = all ? x.rows : x.rows.slice(0, 5);
+    function copy() {
+      const t = x.rows.map(r => r.name + "\t" + n0(r.km) + " km\t" + n2(r.risk) + " pts/100 km").join("\n");
+      try { navigator.clipboard.writeText(t).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); }); } catch (e) {}
+    }
+    return html`<div className=${"mg-q " + x.cls}>
+      <h3><span className="mg-qdot" style=${{ background: QCOL[x.q] }}></span>${x.title} · ${n0(x.rows.length)}</h3>
+      <p>${x.text}</p>
+      ${x.rows.length ? html`<div className="small muted mg-order">Orden: ${x.order}</div>
+        <ul className=${"mg-plist" + (all ? " mg-plist-all" : "")}>${rows.map(r => { const inf = x.info && x.info(r); return html`<li key=${r.id} title=${r.name + " · " + n0(r.km) + " km · " + n2(r.risk) + " pts/100 km" + (inf ? " · " + inf : "")}><button className="linkish" onClick=${() => onDriver && onDriver(r.id)}>${r.name}</button><span className="small muted">${n0(r.km)} km · ${n2(r.risk)} pts${inf ? html` · <b>${inf}</b>` : ""}</span></li>`; })}</ul>
+        ${x.rows.length > 5 ? html`<button type="button" className="linklike small mg-more" onClick=${() => setAll(!all)}>${all ? "Ver menos" : "Ver los " + n0(x.rows.length)}</button>` : null}
+        <div className="mg-actions">${x.act || null}${x.copy ? html`<button className="btn small" onClick=${copy}>${copied ? "Copiada" : "Copiar lista"}</button>` : null}</div>`
+      : html`<p className="small muted">Nadie en este grupo.</p>`}
+    </div>`;
   }
 
   // ---------- Reincidencia ----------
