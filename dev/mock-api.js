@@ -37,6 +37,8 @@
   const zoneTypes = [{ id: "ztPuerto", name: "Puerto" }];
   // Zona grande y genérica (como "IMSEG"): no debe usarse para nombrar tramos.
   zones.push({ id: "zBig", name: "IMSEG", zoneTypes: [{ id: "ZoneTypeCustomerId" }], points: [[-62, -35.5], [-57.5, -35.5], [-57.5, -31], [-62, -31]].map(([x, y]) => ({ x, y })) });
+  // Corredor angosto a lo largo de la ruta Campana → Rosario (para la pestaña Corredores).
+  zones.push({ id: "zRN9", name: "RN9 Campana - Rosario", zoneTypes: [{ id: "ZoneTypeCustomerId" }], points: [[-59.10, -34.17], [-60.68, -32.99], [-60.60, -32.91], [-59.00, -34.11]].map(([x, y]) => ({ x, y })) });
   // Geocercas creadas por el add-in en esta sesión (sessionStorage).
   try { for (const z of JSON.parse(sessionStorage.getItem("mockZones") || "[]")) zones.push(z); for (const t of JSON.parse(sessionStorage.getItem("mockZoneTypes") || "[]")) zoneTypes.push(t); } catch (e) {}
   const persistZones = () => { try { sessionStorage.setItem("mockZones", JSON.stringify(zones.filter(z => z._created))); sessionStorage.setItem("mockZoneTypes", JSON.stringify(zoneTypes.filter(t => t._created))); } catch (e) {} };
@@ -78,7 +80,7 @@
   }
   devices.push({ id: "bOut", name: "OUT-99", serialNumber: "G99999", groups: [{ id: "gOut" }], _type: "camion", _svc: "corta", _l100: 30, _fuel: true, _idleL: 2, _drivers: [drivers[0]] });
 
-  const trips = [], exceptions = [], status = [], logs = new Map();
+  const trips = [], exceptions = [], status = [], logs = new Map(), driverChanges = [];
   const today = new Date(); today.setHours(0, 0, 0, 0);
   const DAYS = 200;
   const MILESTONE_DAY = 45; // hace 45 días: capacitación cinturón + ralentí
@@ -134,6 +136,12 @@
               ? { latitude: (zc[pos][1] + end[1]) / 2 + (rnd() - 0.5) * 0.002, longitude: (zc[pos][0] + end[0]) / 2 + (rnd() - 0.5) * 0.002, dateTime: new Date(et).toISOString() }
               : { latitude: zc[pos][1] + (end[1] - zc[pos][1]) * fr, longitude: zc[pos][0] + (end[0] - zc[pos][0]) * fr, dateTime: new Date(et).toISOString() });
           }
+          // Bostezos / salida de carril (cámara): más con horas acumuladas en el día y de madrugada.
+          if (drv) {
+            const hh = new Date(start).getHours(), lam = 0.05 * dh * (1 + leg + p) * (hh >= 22 || hh < 6 ? 3 : 1);
+            if (rnd() < lam) { const et = start + rnd() * (stop - start); exceptions.push({ id: "e" + (++eid), rule: { id: rnd() < 0.7 ? "aYawn" : "aLane" }, device: { id: d.id }, driver: { id: drv.id },
+              activeFrom: new Date(et).toISOString(), activeTo: new Date(et + 5000).toISOString(), duration: "00:00:05", state: "ExceptionEventStateValidId" }); }
+          }
           if (ih > 0.2) exceptions.push({ id: "e" + (++eid), rule: { id: "RuleIdlingId" }, device: { id: d.id }, driver: drv ? { id: drv.id } : "UnknownDriverId",
             activeFrom: new Date(start + 600000).toISOString(), duration: dur(ih), state: "ExceptionEventStateValidId" });
           if (d._fuel) {
@@ -163,10 +171,10 @@
     const dev = { id: "b300", name: "BIT-NOC", serialNumber: "G9300", groups: [{ id: "gBit" }, { id: "gPes" }, { id: "GroupDieselId" }], _type: "bitren", _svc: "larga", _l100: 48, _fuel: false, _idleL: 2.6, _drivers: [nd] };
     const dev2 = { id: "b301", name: "CAM-HOY", serialNumber: "G9301", groups: [{ id: "gPes" }, { id: "GroupDieselId" }], _type: "camion", _svc: "larga", _l100: 33, _fuel: false, _idleL: 2.6, _drivers: [od] };
     devices.push(dev, dev2);
-    const addTrip = (d, drv, s, hours) => {
+    const addTrip = (d, drv, s, hours, stop) => {
       const km = hours * 72;
       trips.push({ id: "t" + (++tid), device: { id: d.id }, driver: { id: drv.id }, start: new Date(s).toISOString(), stop: new Date(s + hours * H).toISOString(),
-        distance: km, drivingDuration: dur(hours), idlingDuration: dur(hours * 0.05), stopPoint: { x: zc.zRos[0], y: zc.zRos[1] }, _a: zc.zCam });
+        distance: km, drivingDuration: dur(hours), idlingDuration: dur(hours * 0.05), stopPoint: stop || { x: zc.zRos[0], y: zc.zRos[1] }, _a: zc.zCam });
       return s + hours * H;
     };
     const addEv = (d, drv, t, rule) => exceptions.push({ id: "e" + (++eid), rule: { id: rule }, device: { id: d.id }, driver: { id: drv.id },
@@ -176,18 +184,54 @@
       if (day >= 15) { // turno día 06–16
         if (base.getDay() === 0) continue;
         let t = base.getTime() + 6 * H;
-        t = addTrip(dev, nd, t, 3) + 0.5 * H; t = addTrip(dev, nd, t, 3) + 0.75 * H; addTrip(dev, nd, t, 2.5);
-      } else if (day >= 8) { // turno noche 21–08: tirada larga y madrugada
+        t = addTrip(dev, nd, t, 3) + 0.5 * H; t = addTrip(dev, nd, t, 3) + 0.75 * H; addTrip(dev, nd, t, 2.5, { x: zc.zCam[0], y: zc.zCam[1] });
+      } else { // turno noche 21–08 hasta anoche: tirada larga y madrugada
         let t = base.getTime() + (day === 14 ? -2 : 21) * H; // el primero, 6 h después del último turno día
-        t = addTrip(dev, nd, t, 4.6) + 0.4 * H; t = addTrip(dev, nd, t, 4) + 0.6 * H; addTrip(dev, nd, t, 1.8);
+        t = addTrip(dev, nd, t, 4.6) + 0.4 * H; t = addTrip(dev, nd, t, 4) + 0.6 * H; t = addTrip(dev, nd, t, 1.8, { x: -60.2, y: -33.6 }); // termina en un parador de la ruta
+        if (day % 4 === 1) trips.push({ id: "t" + (++tid), device: { id: dev.id }, driver: { id: nd.id }, start: new Date(t + 4 * H).toISOString(), stop: new Date(t + 4 * H + 180000).toISOString(),
+          distance: 0, drivingDuration: dur(0.05), idlingDuration: dur(0.02), stopPoint: { x: -60.2, y: -33.6 }, _a: zc.zCam }); // encendió el camión durante el descanso
+        if (day % 3 !== 0) exceptions.push({ id: "e" + (++eid), rule: { id: "RuleIdlingId" }, device: { id: dev.id }, driver: { id: nd.id }, activeFrom: new Date(t + 0.3 * H).toISOString(), duration: dur(5.5), state: "ExceptionEventStateValidId" });
         if (day % 2 === 0) { const c = base.getTime() + 27.2 * H; ["aYawn", "aLane", "aYawn", "aYawn"].forEach((r, i) => addEv(dev, nd, c + i * 13 * 60000, r)); }
       }
     }
+    // Relevo 24 h (como el 1871 de tsbsa): Marchan de noche (17 → 06) y Vejar de día (06 → 17).
+    // Hace 5 días Vejar no pasó su llave: todo el día quedó a nombre de Marchan (jornada de ~25 h).
+    const dm = { id: "u52", name: "chofer52", firstName: "MARCHAN VICTOR", lastName: "ALEJANDRO", isDriver: true, viewDriversOwnDataOnly: true, risk: 1, idleBias: 1, driverGroups: [{ id: "gCond" }], companyGroups: [{ id: "GroupCompanyId" }] };
+    const dv = { id: "u53", name: "chofer53", firstName: "VEJAR NELSON", lastName: "ORLANDO", isDriver: true, viewDriversOwnDataOnly: true, risk: 1, idleBias: 1, driverGroups: [{ id: "gCond" }], companyGroups: [{ id: "GroupCompanyId" }] };
+    drivers.push(dm, dv);
+    const dev3 = { id: "b302", name: "1871", serialNumber: "G9302", groups: [{ id: "gPes" }, { id: "GroupDieselId" }], _type: "camion", _svc: "corta", _l100: 33, _fuel: false, _idleL: 2.6, _drivers: [dm, dv] };
+    devices.push(dev3);
+    const block = (drv, s, hours) => { let t = s; const end = s + hours * H; while (t < end - 0.5 * H) { const du = Math.min(0.9, (end - t) / H - 0.1); t = addTrip(dev3, drv, t, du) + 0.15 * H; } };
+    for (let day = 12; day >= 1; day--) {
+      const base = new Date(today); base.setDate(base.getDate() - day);
+      const swap = day === 5; // Vejar sin llave
+      block(swap ? dm : dv, base.getTime() + 6 * H, 10.7);           // día
+      block(dm, base.getTime() + 17 * H, 12.8);                      // noche hasta 05:50 del día siguiente
+      driverChanges.push({ t: base.getTime() + 6 * H - 60000, d: dev3.id, r: swap ? dm.id : dv.id });
+      driverChanges.push({ t: base.getTime() + (swap ? 17.48 : 17) * H - 60000, d: dev3.id, r: dm.id });
+    }
+
+    // El día del relevo sin llave, Vejar llega en una camioneta al 1871 (05:52) y se queda; Marchan se va
+    // en la camioneta a la base (pasa su llave ahí) y vuelve a la tarde; Vejar se lleva la camioneta.
+    {
+      const pk = { id: "b303", name: "LIV-REL", serialNumber: "G9303", groups: [{ id: "gLiv" }, { id: "GroupGasolinePetrolId" }], _type: "liviano", _svc: "corta", _l100: 11, _fuel: false, _idleL: 1, _drivers: [dm, dv] };
+      devices.push(pk);
+      const b5 = new Date(today); b5.setDate(b5.getDate() - 5); const B = b5.getTime();
+      const baseP = { x: -60.94, y: -32.95 }, truckP = { x: -60.6402, y: -32.9501 };
+      const pt = (drv, s, e, stop) => trips.push({ id: "t" + (++tid), device: { id: pk.id }, driver: { id: drv.id }, start: new Date(B + s * H).toISOString(), stop: new Date(B + e * H).toISOString(),
+        distance: 28, drivingDuration: dur(e - s), idlingDuration: dur(0.02), stopPoint: stop, _a: zc.zRos });
+      pt(dv, 5.33, 5.87, truckP); driverChanges.push({ t: B + 5.3 * H, d: pk.id, r: dv.id });
+      driverChanges.push({ t: B + 6.07 * H, d: pk.id, r: dm.id }); pt(dm, 6.08, 6.67, baseP);
+      driverChanges.push({ t: B + 16.42 * H, d: pk.id, r: dm.id }); pt(dm, 16.43, 16.92, truckP);
+      driverChanges.push({ t: B + 16.97 * H, d: pk.id, r: dv.id }); pt(dv, 17, 17.5, baseP);
+    }
+
     // jornada en curso
     const now = Date.now();
     let t = now - 7 * H;
     t = addTrip(dev2, od, t, 3.4) + 0.3 * H; addTrip(dev2, od, t, 3.13); // terminó hace 10 min; vuelve a manejar hace 8 min
-    for (let day = 10; day >= 1; day--) { const base = new Date(today); base.setDate(base.getDate() - day); let x = base.getTime() + 7 * H; x = addTrip(dev2, od, x, 4) + H; addTrip(dev2, od, x, 4); }
+    // diagrama 14x7 (hoy es el día 7 de la vuelta); una vuelta se extendió 3 días
+    for (let day = 90; day >= 1; day--) { const pos = (90 - day) % 21; if (pos >= 14 && !(day >= 40 && day <= 42)) continue; const base = new Date(today); base.setDate(base.getDate() - day); let x = base.getTime() + 7 * H; x = addTrip(dev2, od, x, 4) + H; addTrip(dev2, od, x, 4); }
   }
 
   // AddInData persiste en sessionStorage para poder probar admin → conductor recargando la página.
@@ -285,24 +329,30 @@
             break;
           }
           out = status.filter(r => inRange(r.dateTime, s) && inGroups(r.device, s) && (!s.diagnosticSearch || r.diagnostic.id === s.diagnosticSearch.id)); break;
+        case "DriverChange": { const f0 = s.fromDate ? new Date(s.fromDate).getTime() : 0, f1 = s.toDate ? new Date(s.toDate).getTime() : Infinity;
+          out = driverChanges.filter(c => c.t >= f0 && c.t <= f1 && (!s.deviceSearch || c.d === s.deviceSearch.id)).map(c => ({ dateTime: new Date(c.t).toISOString(), device: { id: c.d }, driver: c.r ? { id: c.r } : "UnknownDriverId", type: "DriverKey" })); break; }
         case "DeviceStatusInfo": out = devices.map(d => ({ device: { id: d.id }, driver: d.id === "b301" ? { id: "u51" } : "UnknownDriverId",
-          isDriving: d.id === "b301", currentStateDuration: d.id === "b301" ? "00:08:00" : "05:00:00", dateTime: new Date().toISOString() })); break;
+          isDriving: d.id === "b301", currentStateDuration: d.id === "b301" ? "00:08:00" : "05:00:00", dateTime: new Date().toISOString(),
+          // BIT-NOC dejó de comunicar al terminar su último viaje (como el AA409BH de tsbsa)
+          ...(d.id === "b300" ? { isDeviceCommunicating: false, dateTime: trips.filter(t => t.device.id === "b300" && t.stop <= new Date().toISOString()).map(t => t.stop).sort().pop() } : { isDeviceCommunicating: true }) })); break;
         case "AddInData": out = addInData.filter(a => a.addInId === s.addInId); break;
+        case "Camera": { const ids = (s.deviceSearch && s.deviceSearch.deviceIds) || devices.map(d => d.id);
+          out = devices.filter(d => ids.includes(d.id) && ["b300", "b301", "b302"].includes(d.id)).map(d => ({ cameraSerialNumber: "CAM" + d.serialNumber, deviceSerialNumber: d.serialNumber, vendor: d.id === "b301" ? "Gofocus" : "Surfsight", model: d.id === "b301" ? "GO Focus Plus" : "AI-12", activeFrom: "2026-01-01T00:00:00Z", activeTo: "2050-01-01T00:00:00Z", id: "c" + d.id })); break; }
         case "LogRecord": {
           // Sin deviceSearch (muestreo de corredores): un punto cada 10 s de
           // cada viaje que pase por la ventana, con velocidad.
-          if (!s.deviceSearch) {
+          if (!s.deviceSearch || new Date(s.toDate) - new Date(s.fromDate) > 20 * 60000) {
             const a0 = new Date(s.fromDate).getTime(), a1 = new Date(s.toDate).getTime();
             out = [];
             for (const t of trips) {
               const t0 = new Date(t.start).getTime(), t1 = new Date(t.stop).getTime();
-              if (t1 < a0 || t0 > a1) continue;
+              if (t1 < a0 || t0 > a1 || (s.deviceSearch && t.device.id !== s.deviceSearch.id)) continue;
               const A = t._a, Z = [t.stopPoint.x, t.stopPoint.y];
               const kmh = t.distance / ((t1 - t0) / 3600000);
               for (let k = Math.max(t0, Math.ceil(a0 / 10000) * 10000); k <= Math.min(t1, a1); k += 10000) {
                 const f = (k - t0) / Math.max(1, t1 - t0);
                 const wob = Math.sin(k / 7e5) * 0.15;
-                out.push({ device: { id: t.device.id }, dateTime: new Date(k).toISOString(), latitude: A[1] + (Z[1] - A[1]) * f, longitude: A[0] + (Z[0] - A[0]) * f, speed: Math.max(0, kmh * (1 + wob) - (new Date(k).getHours() >= 17 && new Date(k).getHours() < 20 && (k / 1000) % 180 < 20 ? 35 : 0)) });
+                out.push({ device: { id: t.device.id }, dateTime: new Date(k).toISOString(), latitude: A[1] + (Z[1] - A[1]) * f, longitude: A[0] + (Z[0] - A[0]) * f, speed: Math.max(0, kmh * (1 + wob) - (new Date(k).getHours() >= 17 && new Date(k).getHours() < 20 && (k / 1000) % 180 < 20 ? 35 : 0) + ((k / 1000) % 3600 < 90 ? (t.device.id === "b302" ? 45 : 18) : 0)) * (t0 % 7 === 0 && f > 0.4 && f < 0.4 + 420000 / Math.max(1, t1 - t0) ? 0 : 1) });
               }
             }
             break;

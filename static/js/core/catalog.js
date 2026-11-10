@@ -29,8 +29,8 @@
   // tonos, en este orden: tonos vecinos en una pila se distinguen). Se asigna
   // a las primeras 8 categorías de riesgo según el orden de la configuración;
   // el resto se agrupa como "Otras" en gris.
-  const PALETTE = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"];
-  const OTHER_COLOR = "#9a9893";
+  const PALETTE = ["#0078d3", "#fe5a3f", "#25477b", "#f9ba00", "#00aeff", "#00aa00", "#66788c", "#edbbb2"]; // guía de marca: azules primero, extendida para diferenciar
+  const OTHER_COLOR = "#b3bcc7";
   const SERIES_COLORS = PALETTE;
 
   // Estado vivo (se reemplaza en el lugar con applyCategories).
@@ -108,6 +108,12 @@
   // Reglas que se descargan: solo las mapeadas a una categoría de riesgo.
   function riskRuleIds(mapping) {
     return Object.keys(mapping || {}).filter(id => (CATEGORY_BY_KEY[mapping[id]] || {}).kind === "riesgo");
+  }
+
+  // Reglas cuyos eventos se descargan: las de riesgo y las de ralentí (para
+  // saber si un conductor descansó con el motor en marcha).
+  function loadRuleIds(mapping) {
+    return Object.keys(mapping || {}).filter(id => { const c = CATEGORY_BY_KEY[mapping[id]] || {}; return c.kind === "riesgo" || mapping[id] === "ralenti"; });
   }
 
   function isNoiseRule(rule) {
@@ -201,16 +207,20 @@
       journeys: { break_hours: 10, min_km_route: 300, min_journeys_route: 3, min_stop_minutes: 20, zone_type_ids: [] },
       drivers: { min_km_ranking: 300, exclude_unknown: false },
       // Fatiga: valores de referencia, se ajustan a la política de la empresa.
-      fatigue: { max_drive_day: 9, max_span: 12, min_rest: 8, max_continuous: 4, max_days_row: 6, rest_split: 4, fi_mod: 80, fi_high: 100 },
+      fatigue: { max_drive_day: 9, max_span: 12, min_rest: 8, max_continuous: 4, max_days_row: 6, rest_split: 4, fi_mod: 80, fi_high: 100, micro_km: 0.5, micro_min: 10 },
+      // Gravedad de los excesos de velocidad: nivel por regla (leve | medio | grave; sin asignar = leve),
+      // la duración sube un nivel, y opcionalmente pesa en el índice de riesgo.
+      speed_sev: { levels: {}, up_leve_min: 5, up_medio_min: 5, weigh: false, mult: { leve: 1, medio: 1.5, grave: 2.5 } },
+      fatigue_alerts: { on: false, warn: 90, crit: 100, re_rise: 10, re_hours: 1, noanswer_min: 15, users: "", beep_sec: 20 },
       // Gravedad: ponderar cada infracción por su duración (opcional).
       severity: { by_duration: false, per_minute: 0.5, max: 3, long_minutes: 1 },
-      ui: { default_days: 90, default_granularity: "week", milestone_window_days: 28 },
+      ui: { default_period: "3m", default_granularity: "week", milestone_window_days: 28 },
       editors: [],
     };
   }
 
   Object.assign(GI, {
     CATEGORIES, CATEGORY_BY_KEY, CHART_SLOTS, OTHER_COLOR, SERIES_COLORS, DEFAULT_CATEGORIES, applyCategories, STOCK_RULES, SERVICE_TYPES,
-    suggestCategory, isNoiseRule, riskRuleIds, defaultFuelTypes, FUEL_SYSTEM_GROUPS, defaultSettings, defaultProfileTargets, profileKey,
+    suggestCategory, isNoiseRule, riskRuleIds, loadRuleIds, defaultFuelTypes, FUEL_SYSTEM_GROUPS, defaultSettings, defaultProfileTargets, profileKey,
   });
 })(window.GI);

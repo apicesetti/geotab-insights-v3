@@ -119,7 +119,7 @@
             data: { labels: daily.map(d => d.label), datasets: [{
               label: (metric === "idlePct" ? "% ralentí" : "Eventos/100 km") + " (media móvil 7 días)",
               data: rolling(daily, metric === "idlePct" ? "idlePct" : "rate", 7),
-              borderColor: "#b45309", backgroundColor: "#f59e0b22", fill: true, tension: 0.3, spanGaps: true, pointRadius: 0 }] },
+              borderColor: "#fe5a3f", backgroundColor: "#fe5a3f22", fill: true, tension: 0.3, spanGaps: true, pointRadius: 0 }] },
             options: { plugins: { milestones: { items: [{ index: daily.findIndex(d => d.dk === m.date), label: "hito" }] } }, scales: { y: { beginAtZero: true } } },
           }} />
         </div>`}

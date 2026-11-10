@@ -260,21 +260,19 @@
         const arr = out.get(c.key);
         for (const r of page) arr.push(r);
         // El servidor puede cortar antes del resultsLimit pedido (Trip: 25.000),
-        // así que una página "redonda" se toma como cortada. Se sigue desde la
-        // fecha del último registro (los duplicados se descartan por id).
+        // así que una página "redonda" se toma como cortada. Se parte el rango
+        // en tramos de tiempo y se vuelven a pedir (los duplicados se
+        // descartan por id). No se sigue "desde el último registro": sin
+        // filtro de vehículo la API ordena por vehículo y no por fecha, y
+        // seguir desde esa fecha perdía los datos de los demás vehículos.
         const cut = page.length >= LIMIT || (page.length >= CAP_STEP() && page.length % CAP_STEP() === 0);
-        if (!cut) return;
-        const lastT = c.dateOf ? (c.dateOf(page[page.length - 1]) || new Date(NaN)).getTime() : NaN;
-        if (lastT > c.from.getTime() && lastT < c.to.getTime()) {
-          pending.push({ ...c, from: new Date(lastT) });
-        } else if (c.to - c.from > 60000) {
-          // Sin avance posible: se parte en 4 tramos.
-          const step = Math.floor((c.to - c.from) / 4);
-          for (let q = 0; q < 4; q++) {
-            const f = new Date(c.from.getTime() + q * step);
-            const t = q === 3 ? c.to : new Date(c.from.getTime() + (q + 1) * step);
-            pending.push({ ...c, from: f, to: t });
-          }
+        if (!cut || c.to - c.from <= 60000) return;
+        const parts = c.to - c.from > 6 * 3600000 ? 4 : 2;
+        const step = Math.floor((c.to - c.from) / parts);
+        for (let q = 0; q < parts; q++) {
+          const f = new Date(c.from.getTime() + q * step);
+          const t = q === parts - 1 ? c.to : new Date(c.from.getTime() + (q + 1) * step);
+          pending.push({ ...c, from: f, to: t });
         }
       });
       if (onProgress) onProgress();
@@ -307,7 +305,7 @@
   // Genérico: datasets = [{scope, typeName, search, dateOf(rec)->Date, compact(recs)->value}]
   // Devuelve { [scope]: Map(dayKey -> compact value) }.
   async function fetchDaily(api, database, datasets, dayKeys, progress) {
-    const keyOf = (scope, dk) => database + "|v3|" + scope + "|" + dk;
+    const keyOf = (scope, dk) => database + "|v4|" + scope + "|" + dk;
     const allKeys = [];
     for (const ds of datasets) for (const dk of dayKeys) allKeys.push(keyOf(ds.scope, dk));
     const cached = await idbGetMany("days", allKeys);
@@ -688,6 +686,35 @@
     return out;
   }
 
+  // Límites de velocidad de las reglas (valores "más de X" de su condición), por regla.
+  async function loadRuleLimits(api, ruleIds) {
+    const ids = [...new Set(ruleIds)].filter(Boolean);
+    const out = new Map();
+    if (!ids.length) return out;
+    const res = await api.multiCall(ids.map(id => ["Get", { typeName: "Rule", search: { id } }]));
+    ids.forEach((id, i) => {
+      const r = (res[i] || [])[0];
+      const vals = [];
+      const walk = c => { if (!c || typeof c !== "object") return; if (/IsValueMoreThan/.test(c.conditionType || "") && c.value > 0) vals.push(+c.value); (c.children || []).forEach(walk); };
+      walk(r && r.condition);
+      out.set(id, [...new Set(vals)].sort((a, b) => a - b));
+    });
+    return out;
+  }
+  // Velocidad real de un evento: GPS del vehículo mientras duró (máxima y trazado).
+  async function loadEventSpeed(api, ev) {
+    const from = ev.t - 5000, to = ev.t + Math.max(30, (ev.h || 0) * 3600) * 1000 + 5000;
+    const recs = (await api.call("Get", { typeName: "LogRecord", resultsLimit: 5000,
+      search: { deviceSearch: { id: ev.d }, fromDate: new Date(from).toISOString(), toDate: new Date(to).toISOString() } })) || [];
+    let max = null, at = null;
+    const pts = [];
+    for (const r of recs) {
+      if (r.latitude || r.longitude) pts.push([r.latitude, r.longitude]);
+      if (r.speed != null && (max == null || r.speed > max)) { max = r.speed; at = new Date(r.dateTime).getTime(); }
+    }
+    return { max, at, pts, n: recs.length };
+  }
+
   // Fatiga "Ahora": viajes de las últimas horas (sin caché, toda la flota
   // visible) y estado en vivo de cada vehículo (¿está manejando? ¿desde cuándo?).
   async function loadRecentTrips(api, hours) {
@@ -699,20 +726,138 @@
     return compactTrips(res.get("t").filter(r => !seen.has(r.id) && seen.add(r.id)));
   }
 
+  // Identificaciones de conductor (llave, NFC, app) de unos vehículos en un rango.
+  async function loadDriverChanges(api, devIds, from, to) {
+    const calls = devIds.map(d => ["Get", { typeName: "DriverChange", resultsLimit: 5000, search: { deviceSearch: { id: d }, fromDate: new Date(from).toISOString(), toDate: new Date(to).toISOString() } }]);
+    const res = calls.length ? await api.multiCall(calls) : [];
+    const out = [];
+    res.forEach(list => { for (const c of list || []) { const r = GI.idOf(c.driver); out.push({ t: new Date(c.dateTime).getTime(), d: GI.idOf(c.device), r: r && r !== "UnknownDriverId" && r !== "NoDriverId" ? r : null, type: c.type }); } });
+    return out.sort((a, b) => a.t - b.t);
+  }
+
+  // Identificaciones de toda la flota en varios rangos (una llamada múltiple): para ver quién llegó o se
+  // fue de un vehículo durante una jornada dudosa. Caché en memoria por rango redondeado a la hora.
+  const _dcCache = new Map();
+  async function loadDriverChangesWindows(api, wins) {
+    const keyOf = w => Math.floor(w[0] / 3600000) + "|" + Math.ceil(w[1] / 3600000);
+    const need = [...new Set(wins.map(keyOf))].filter(k => !_dcCache.has(k));
+    if (need.length) {
+      const calls = need.map(k => { const [a, b] = k.split("|").map(Number); return ["Get", { typeName: "DriverChange", resultsLimit: 50000,
+        search: { fromDate: new Date(a * 3600000).toISOString(), toDate: new Date(b * 3600000).toISOString() } }]; });
+      const res = [];
+      for (let i = 0; i < calls.length; i += 20) res.push(...((await api.multiCall(calls.slice(i, i + 20))) || []));
+      need.forEach((k, i) => {
+        const out = [];
+        for (const c of res[i] || []) { const r = GI.idOf(c.driver); out.push({ t: new Date(c.dateTime).getTime(), d: GI.idOf(c.device), r: r && r !== "UnknownDriverId" && r !== "NoDriverId" ? r : null, type: c.type }); }
+        _dcCache.set(k, out.sort((a, b) => a.t - b.t));
+      });
+    }
+    return wins.map(w => _dcCache.get(keyOf(w)) || []);
+  }
+
   async function loadDriveStatus(api) {
     const recs = (await api.call("Get", { typeName: "DeviceStatusInfo",
-      propertySelector: { fields: ["device", "driver", "isDriving", "currentStateDuration", "dateTime"], isIncluded: true } })) || [];
+      propertySelector: { fields: ["device", "driver", "isDriving", "isDeviceCommunicating", "currentStateDuration", "dateTime"], isIncluded: true } })) || [];
     return recs.map(r => {
       const drv = GI.idOf(r.driver);
       return { d: GI.idOf(r.device), r: drv && drv !== "UnknownDriverId" && drv !== "NoDriverId" ? drv : null,
-        driving: !!r.isDriving, since: Date.now() - GI.durationToHours(r.currentStateDuration) * 3600000, at: r.dateTime ? new Date(r.dateTime).getTime() : null };
+        driving: !!r.isDriving, since: Date.now() - GI.durationToHours(r.currentStateDuration) * 3600000, at: r.dateTime ? new Date(r.dateTime).getTime() : null,
+        comm: r.isDeviceCommunicating !== false };
     });
   }
 
+
+  // Cámaras asociadas a un vehículo (Geotab Video: GO Focus y cámaras de partners como Surfsight).
+  // Camera (Geotab Video): trae cameraSerialNumber, vendor, model, deviceSerialNumber (serie del GO
+  // del vehículo), activeFrom/activeTo. El vehículo se encuentra por la serie del GO.
+  const camOf = c => ({ serial: c.cameraSerialNumber, name: c.model || c.cameraSerialNumber, model: c.model || "", status: String(c.status || ""), vendor: c.vendor || c.cameraVendor || "",
+    dev: GI.idOf(c.device) || c.deviceId || null, goSerial: c.deviceSerialNumber || null, devName: c.deviceName || null,
+    active: !c.activeTo || Date.parse(c.activeTo) > Date.now() });
+  let camCache = null; // { at, devKey, map }
+  // Todas las cámaras activas de la base, por vehículo.
+  async function loadAllCameras(api, devices) {
+    const devKey = (devices || []).length;
+    if (camCache && camCache.devKey === devKey && Date.now() - camCache.at < 10 * 60000) return camCache.map;
+    const raw = (await api.call("Get", { typeName: "Camera", search: {} })) || [];
+    const r = raw.map(camOf).filter(c => c.serial && c.active);
+    const bySerial = new Map((devices || []).filter(d => d.serial).map(d => [String(d.serial).toUpperCase(), d.id]));
+    const byName = new Map((devices || []).map(d => [d.name, d.id]));
+    const out = new Map();
+    out.diag = { total: raw.length, withSerial: r.length, keys: raw[0] ? Object.keys(raw[0]).join(", ") : "" };
+    for (const c of r) {
+      const id = c.dev || (c.goSerial && bySerial.get(String(c.goSerial).toUpperCase())) || byName.get(c.devName);
+      if (!id) continue;
+      if (!out.has(id)) out.set(id, []);
+      out.get(id).push(c);
+    }
+    // Estado de conexión: el servicio de cámaras de Geotab (el mismo que usa el add-in de configuración
+    // de cámaras) informa por cámara el estado y la última conexión real. Si no responde, queda sin estado.
+    try {
+      const st = await cameraStatusByGo();
+      for (const list of out.values()) for (const c of list) {
+        const m = st.get(String(c.goSerial || "").toUpperCase() + "|" + (/surf|lytx/i.test(c.vendor) ? "surfsight" : "smarterai"));
+        if (m) { c.status = m.status || c.status; c.lastConn = m.lastConn || null; c.imei = m.imei || null; }
+      }
+      out.diag.status = st.size;
+    } catch (e) { out.diag.statusErr = String((e && e.message) || e); }
+    camCache = { at: Date.now(), devKey, map: out };
+    return out;
+  }
+  // Servicio de cámaras de Geotab (interno, el que usa MyGeotab): se autentica con la sesión de MyGeotab.
+  const MEDIA = "https://media-services.geotab.com/api";
+  function mediaHeaders() {
+    const ss = GI._mgSession;
+    if (!ss || !ss.sessionId) throw new Error("sin sesión de MyGeotab");
+    return { "X-MyGeotab-Database": encodeURIComponent(ss.database), "X-MyGeotab-Username": ss.userName,
+      "X-MyGeotab-SessionId": ss.sessionId, "X-MyGeotab-Path": ss.server || "my.geotab.com" };
+  }
+  // Algunas llamadas del servicio son GET y otras POST (OrganizationToken responde 405 a GET):
+  // se prueba GET y, si el método no está permitido, POST sin cuerpo.
+  async function mediaGet(path) {
+    let res = await fetch(MEDIA + path, { headers: mediaHeaders() });
+    if (res.status === 405) res = await fetch(MEDIA + path, { method: "POST", headers: { ...mediaHeaders(), "Content-Type": "application/json" }, body: "{}" });
+    if (!res.ok) throw new Error("HTTP " + res.status + " en " + path);
+    return res.json();
+  }
+  // Video en vivo Surfsight: token de la organización (MyGeotab lo pide igual) y lentes activas.
+  async function surfsightToken() {
+    const r = await mediaGet("/OrganizationToken");
+    const d = (r && r.data) || r || {};
+    if (!d.token || !d.organizationId) throw new Error("el servicio de cámaras no devolvió el token");
+    return { token: d.token, orgId: d.organizationId };
+  }
+  async function surfsightLenses(imei) {
+    const r = await mediaGet("/Surfsight/ActiveCameras/" + encodeURIComponent(imei));
+    return ((r && r.data) || r || []).map(x => x.cameraId).filter(x => x != null);
+  }
+  // Consumo de datos del video en vivo (como MyGeotab: cada ~30 s por lente, para el límite del plan).
+  async function surfsightConsumption(imei, token) {
+    const res = await fetch("https://api-prod.surfsight.net/mediacore_api/api/device-data-consumption/" + encodeURIComponent(imei) + "/live-video", {
+      method: "PATCH", headers: { "Content-Type": "application/json", Authorization: "Bearer " + token },
+      body: JSON.stringify({ videoSessionInSeconds: 30, validation: true }) });
+    return res.status;
+  }
+  async function cameraStatusByGo() {
+    const res = await fetch(MEDIA + "/DeviceMappings", { headers: mediaHeaders() });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const out = new Map();
+    for (const m of (await res.json()) || []) {
+      if (!m.associatedDeviceSerialNumber) continue;
+      const lastConn = (m.partnerMetaData && m.partnerMetaData.LastConnectedAt) || null;
+      out.set(String(m.associatedDeviceSerialNumber).toUpperCase() + "|" + String(m.partnerId || "").toLowerCase(), { status: String(m.deviceStatus || ""), lastConn, imei: m.partnerDeviceId || null });
+    }
+    return out;
+  }
+  // Cámaras de un vehículo (de la lista completa, que queda en memoria 10 min).
+  async function loadCameras(api, devId, devices) {
+    const m = await loadAllCameras(api, devices);
+    return m.get(devId) || [];
+  }
+
   Object.assign(GI, {
-    loadRecentTrips, loadDriveStatus,
+    loadRuleLimits, loadEventSpeed, loadCameras, loadAllCameras, surfsightToken, surfsightLenses, surfsightConsumption, loadRecentTrips, loadDriveStatus, loadDriverChanges, loadDriverChangesWindows,
     loadCatalogs, loadZones, loadZoneTypes, loadPeriod, loadFuel, loadEventLocations, loadTrace, clearCache,
     _idbGetMany: idbGetMany, _idbPutMany: idbPutMany,
-    _compactTrips: compactTrips, _compactExceptions: compactExceptions, _compactCounter: compactCounter, _loadFuelBoundaries: loadFuelBoundaries, _missingRuns: missingRuns,
+    _compactTrips: compactTrips, _compactExceptions: compactExceptions, _compactCounter: compactCounter, _loadFuelBoundaries: loadFuelBoundaries, _missingRuns: missingRuns, _getRangeMulti: getRangeMulti,
   });
 })(window.GI);

@@ -20,9 +20,18 @@
   const GRAN_WORD = { day: "día", week: "semana", month: "mes" };
   const GRAN_PLURAL = { day: "días", week: "semanas", month: "meses" };
   const VS = "vs 1.ª mitad";
-  // En tasas, un período incompleto (ej. un solo domingo al inicio) da
-  // valores engañosos: no se dibuja.
-  const rateOf = (s, v) => (s.partial ? null : v);
+  // Un período incompleto (ej. una semana con solo el sábado y el domingo del
+  // período) se dibuja igual, pero con el punto hueco y la línea punteada, y
+  // el tooltip avisa cuántos días tiene: su valor es menos confiable.
+  const rateOf = (s, v) => v;
+  function partialStyle(series, color) {
+    const p = series.map(s => !!s.partial);
+    return {
+      pointBackgroundColor: p.map(x => (x ? "#ffffff" : color)), pointBorderColor: color, pointRadius: p.map(x => (x ? 4 : 3)),
+      segment: { borderDash: ctx => (p[ctx.p0DataIndex] || p[ctx.p1DataIndex] ? [5, 4] : undefined) },
+    };
+  }
+  const partialTip = series => ({ afterLabel: c => { const s = series[c.dataIndex]; return s && s.partial ? "Período incompleto: " + (s.days || 0) + " de " + (s.expectedDays || "?") + " días" : ""; } });
 
   // Comparación 1.ª vs 2.ª mitad del período, solo con buckets completos.
   // num/den: funciones sobre un bucket; el resultado es Σnum/Σden de cada mitad.
@@ -58,10 +67,10 @@
 
   // ======================= RESUMEN =======================
   const METRICS = {
-    risk: { label: "Índice de riesgo", unit: "pts/100 km", color: "#2a78d6", dec: 2 },
-    idlePct: { label: "Ralentí", unit: "% del tiempo en marcha", color: "#2a78d6", dec: 1 },
-    l100: { label: "Consumo", unit: "L/100 km", color: "#2a78d6", dec: 1 },
-    km: { label: "Kilómetros", unit: "km", color: "#2a78d6", dec: 0 },
+    risk: { label: "Índice de riesgo", unit: "pts/100 km", color: "#0078d3", dec: 2 },
+    idlePct: { label: "Ralentí", unit: "% del tiempo en marcha", color: "#0078d3", dec: 1 },
+    l100: { label: "Consumo", unit: "L/100 km", color: "#0078d3", dec: 1 },
+    km: { label: "Kilómetros", unit: "km", color: "#0078d3", dec: 0 },
   };
 
   function TrendChart({ view, metric, height }) {
@@ -72,10 +81,11 @@
       data: {
         labels: view.series.map(s => s.label),
         datasets: [{ label: m.label + " (" + m.unit + ")", data: view.series.map(s => s[metric] == null ? null : bar ? GI.round(s[metric], m.dec) : rateOf(s, GI.round(s[metric], m.dec))),
-          borderColor: m.color, backgroundColor: bar ? m.color : m.color + "1f", fill: !bar, tension: 0.3, spanGaps: true }],
+          borderColor: m.color, backgroundColor: bar ? view.series.map(s => (s.partial ? m.color + "80" : m.color)) : m.color + "1f", fill: !bar, tension: 0.3, spanGaps: true,
+          ...(bar ? {} : partialStyle(view.series, m.color)) }],
       },
       options: {
-        plugins: { legend: { display: false }, milestones: { items: GI.milestoneMarks(view.milestones, view.series, view.gran) } },
+        plugins: { legend: { display: false }, tooltip: { callbacks: partialTip(view.series) }, milestones: { items: GI.milestoneMarks(view.milestones, view.series, view.gran) } },
         scales: { y: { beginAtZero: true, title: { display: true, text: m.unit } } },
       },
     }} />`;
@@ -222,13 +232,14 @@
       </div>
       ${summarySentence(view, () => setWhy(true))}
       ${why ? html`<${RiskWhy} view=${view} onClose=${() => setWhy(false)} onDriver=${onDriver} />` : null}
+      ${GI.ParetoPanel && !view.driverMode ? html`<${GI.ParetoPanel} view=${view} onDriver=${onDriver} />` : null}
       <div className="grid-2-1">
-        <${Panel} title="Evolución" hint=${"Agrupado por " + GRAN_WORD[view.gran] + ". Las líneas amarillas punteadas son hitos. El asterisco marca " + GRAN_PLURAL[view.gran] + " incompletos (inicio o fin del período)."}
+        <${Panel} title="Evolución" hint=${"Agrupado por " + GRAN_WORD[view.gran] + ". Las líneas amarillas punteadas son hitos. El asterisco, el punto hueco y la línea punteada marcan " + GRAN_PLURAL[view.gran] + " incompletos (al inicio o al final del período): se muestran, pero con pocos días su valor es menos confiable."}
           actions=${html`<${Segmented} value=${metric} onChange=${setMetric} options=${[
             { value: "risk", label: "Riesgo" }, { value: "idlePct", label: "Ralentí" }, { value: "l100", label: "Consumo" }, { value: "km", label: "Km" }]} />`}>
           <${TrendChart} view=${view} metric=${metric} />
         <//>
-        <${Panel} title="Qué mirar primero">
+        <${Panel} title="Qué mirar primero" actions=${GI.ReportButton ? html`<${GI.ReportButton} view=${view} />` : null}>
           <${Findings} items=${view.findings.filter(f => f.area !== "tendencia")} onGo=${onGo} />
         <//>
       </div>
@@ -288,11 +299,11 @@
           <${ChartView} config=${idleMode === "pct" ? {
             type: "line",
             data: { labels: view.series.map(s => s.label), datasets: [
-              { label: "% del tiempo en marcha", data: view.series.map(s => s.idlePct == null ? null : rateOf(s, GI.round(s.idlePct, 1))), borderColor: "#2a78d6", backgroundColor: "#2a78d61f", fill: true, tension: 0.3, spanGaps: true }] },
+              { label: "% del tiempo en marcha", data: view.series.map(s => s.idlePct == null ? null : rateOf(s, GI.round(s.idlePct, 1))), borderColor: "#0078d3", backgroundColor: "#0078d31f", fill: true, tension: 0.3, spanGaps: true, ...partialStyle(view.series, "#0078d3") }] },
             options: { plugins: { legend: { display: false }, milestones: marks }, scales: { y: { beginAtZero: true, title: { display: true, text: "%" } } } },
           } : {
             type: "bar",
-            data: { labels: view.series.map(s => s.label), datasets: [{ label: "Litros en ralentí", data: view.series.map(s => GI.round(s.idleL, 0)), backgroundColor: "#2a78d6" }] },
+            data: { labels: view.series.map(s => s.label), datasets: [{ label: "Litros en ralentí", data: view.series.map(s => GI.round(s.idleL, 0)), backgroundColor: "#0078d3" }] },
             options: { plugins: { legend: { display: false }, milestones: marks }, scales: { y: { beginAtZero: true, title: { display: true, text: "L" } } } },
           }} />
         <//>
@@ -301,7 +312,7 @@
             type: "line",
             data: { labels: view.series.map(s => s.label), datasets: typeSeries.map(t => ({
               label: GI.vtypeLabel(view.settings, t.vt), data: t.s.map(x => x.l100 == null ? null : rateOf(x, GI.round(x.l100, 1))),
-              borderColor: t.color, backgroundColor: t.color, tension: 0.3, spanGaps: true })) },
+              borderColor: t.color, backgroundColor: t.color, tension: 0.3, spanGaps: true, ...partialStyle(t.s, t.color) })) },
             options: { plugins: { milestones: marks }, scales: { y: { beginAtZero: true, title: { display: true, text: "L/100 km" } } } },
           }} />
         <//>
@@ -328,9 +339,11 @@
 
   // ======================= SEGURIDAD =======================
   // Evolución de eventos: selector de categorías + 3 vistas.
-  function EventsEvolution({ view, riskCats, onDriver }) {
+  function EventsEvolution({ view, riskCats, onDriver, sel: selP, setSel: setSelP }) {
     const allKeys = riskCats.map(c => c.key);
-    const [sel, setSel] = useState(allKeys);
+    const [selL, setSelL] = useState(allKeys);
+    // la selección la puede manejar la pestaña (para filtrar el resto de los cuadros)
+    const sel = selP || selL, setSel = setSelP || setSelL;
     const [mode, setMode] = useState("count");
     const [showKm, setShowKm] = useState(true);
     const [why, setWhy] = useState(false);
@@ -370,8 +383,8 @@
       const bEv = base ? evSel(base) : 0, bKm = base ? base.km : 0;
       const idx = (v, b) => (b > 0 ? GI.round((v / b) * 100, 1) : null);
       config = { type: "line", data: { labels: S.map(s => s.label), datasets: [
-        { label: "Kilómetros", data: S.map(s => (s.partial ? null : idx(s.km, bKm))), borderColor: "#2a78d6", backgroundColor: "#2a78d6", tension: 0.3, spanGaps: true },
-        { label: "Eventos", data: S.map(s => (s.partial ? null : idx(evSel(s), bEv))), borderColor: "#eb6834", backgroundColor: "#eb6834", tension: 0.3, spanGaps: true },
+        { label: "Kilómetros", data: S.map(s => (s.partial ? null : idx(s.km, bKm))), borderColor: "#0078d3", backgroundColor: "#0078d3", tension: 0.3, spanGaps: true },
+        { label: "Eventos", data: S.map(s => (s.partial ? null : idx(evSel(s), bEv))), borderColor: "#fe5a3f", backgroundColor: "#fe5a3f", tension: 0.3, spanGaps: true },
       ] }, options: { interaction: { mode: "index", intersect: false },
         plugins: { tooltip: { mode: "index", intersect: false, callbacks: { label: c => c.dataset.label + ": " + GI.fmtNum(c.parsed.y, 0) + " (base 100)" } }, milestones: marks },
         scales: { y: { title: { display: true, text: "índice (" + (base ? base.label : "inicio") + " = 100)" } } } } };
@@ -385,7 +398,7 @@
     // Km recorridos como línea de referencia (eje derecho), a pedido.
     if (showKm && mode !== "index") {
       config.data.datasets.push({ type: "line", label: "Km recorridos", data: S.map(s => (s.partial ? null : GI.round(s.km, 0))), yAxisID: "yKm",
-        borderColor: "#1f2a37", backgroundColor: "#1f2a37", borderDash: [5, 4], tension: 0.3, spanGaps: true, pointRadius: 2, order: -1 });
+        borderColor: "#25477b", backgroundColor: "#25477b", borderDash: [5, 4], tension: 0.3, spanGaps: true, pointRadius: 2, order: -1 });
       config.options.scales.yKm = { position: "right", beginAtZero: true, grid: { drawOnChartArea: false }, title: { display: true, text: "km" } };
     }
 
@@ -400,8 +413,8 @@
         <button className="btn small" onClick=${() => setSel([])}>Ninguna</button>
         <span className="sep"></span>
         ${riskCats.map(c => html`<button key=${c.key} className=${"catchip" + (sel.includes(c.key) ? " on" : "")} aria-pressed=${sel.includes(c.key)}
-          onClick=${e => (e.altKey ? only(c.key) : toggle(c.key))} onDoubleClick=${() => only(c.key)}
-          title="Click: mostrar u ocultar. Doble click: ver solo esta."><span className="dot" style=${{ background: GI.CHART_SLOTS.includes(c.key) ? c.color : GI.OTHER_COLOR }}></span>${c.label}</button>`)}
+          onClick=${e => (e.altKey || sel.length === allKeys.length ? only(c.key) : toggle(c.key))} onDoubleClick=${() => only(c.key)}
+          title="Con todas visibles, un click deja solo esta. Después, cada click suma o quita una. Doble click: solo esta."><span className="dot" style=${{ background: GI.CHART_SLOTS.includes(c.key) ? c.color : GI.OTHER_COLOR }}></span>${c.label}</button>`)}
       </div>
       ${active.length ? html`
         <div className="readouts compact inset">
@@ -428,11 +441,11 @@
   }
 
   // Conductores: tasa por período (pts/100 km) y tendencia lineal.
-  function driverTrendMap(view) {
+  function driverTrendMap(view, wOf) {
     const out = new Map();
     for (const [drv, cells] of view.model.drvCells) {
       if (drv === "_unknown" || (view.driverOk && !view.driverOk(drv))) continue;
-      const ser = GI.rateSeries(view.model, view.ids, view.gran, c => c.w, cells).filter(x => !x.partial);
+      const ser = GI.rateSeries(view.model, view.ids, view.gran, wOf || (c => c.w), cells).filter(x => !x.partial);
       out.set(drv, { tr: GI.linearTrend(ser.map(x => (x.km >= 50 ? x.rate : null))), ser });
     }
     return out;
@@ -488,11 +501,11 @@
   }
 
   // ---------- Pronóstico y objetivos por regla ----------
-  function ForecastPanel({ view, driverTrends }) {
+  function ForecastPanel({ view, driverTrends, cats, wOf }) {
     const unit = GRAN_WORD[view.gran];
     const horizon = view.gran === "day" ? 14 : view.gran === "week" ? 4 : 2;
     const targets = view.settings.rule_targets || {};
-    const rules = riskRuleRows(view);
+    const rules = riskRuleRows(view).filter(r => !cats || cats.includes(r.cat));
     const rows = rules.map(r => {
       const ser = GI.rateSeries(view.model, view.ids, view.gran, c => c.er[r.id] || 0).filter(x => !x.partial);
       const tr = GI.linearTrend(ser.map(x => (x.km >= 100 ? x.rate : null)));
@@ -507,7 +520,7 @@
     }).filter(r => r.n > 0 || r.target);
     const warn = rows.filter(r => r.status === "va a superar" || r.status === "sobre y subiendo");
     // Índice de riesgo total proyectado
-    const riskSer = GI.rateSeries(view.model, view.ids, view.gran, c => c.w).filter(x => !x.partial);
+    const riskSer = GI.rateSeries(view.model, view.ids, view.gran, wOf || (c => c.w)).filter(x => !x.partial);
     const riskTr = GI.linearTrend(riskSer.map(x => (x.km >= 100 ? x.rate : null)));
     const rising = [...driverTrends.values()].filter(d => d.tr && d.tr.slopePct > 15 && d.tr.current > 0).length;
     const statusCell = r => {
@@ -519,7 +532,7 @@
     return html`<${Panel} title="Pronóstico"
       hint=${"Proyección lineal con los últimos " + GRAN_PLURAL[view.gran] + " completos (hasta 8). Indica hacia dónde va cada regla si nada cambia. Los objetivos por regla se definen en Configuración → Reglas (eventos cada 100 km)."}>
       <div className="readouts compact inset">
-        <${Kpi} label=${"Índice de riesgo en " + horizon + " " + GRAN_PLURAL[view.gran]} value=${riskTr ? n2(riskTr.at(horizon)) : "–"} unit="pts/100 km"
+        <${Kpi} label=${(cats ? "Índice de lo elegido en " : "Índice de riesgo en ") + horizon + " " + GRAN_PLURAL[view.gran]} value=${riskTr ? n2(riskTr.at(horizon)) : "–"} unit="pts/100 km"
           sub=${riskTr ? html`hoy ${n2(riskTr.current)} <${TrendCell} tr=${riskTr} unit=${unit} />` : "pocos datos"} />
         <${Kpi} label="Reglas que van a superar su objetivo" value=${n0(warn.length)} sub=${rows.filter(r => r.target).length ? "de " + rows.filter(r => r.target).length + " con objetivo" : "Cargá objetivos en Configuración → Reglas"} />
         <${Kpi} label="Conductores con riesgo en aumento" value=${n0(rising)} sub="tendencia de más de 15% por período" />
@@ -542,6 +555,15 @@
     const slotIdx = k => (GI.CHART_SLOTS.includes(k) ? GI.CHART_SLOTS.indexOf(k) : 99);
     const riskCats = GI.CATEGORIES.filter(c => c.kind === "riesgo" && view.series.some(s => (s.evByCat[c.key] || 0) > 0))
       .sort((a, b) => slotIdx(a.key) - slotIdx(b.key));
+    const allKeys = riskCats.map(c => c.key);
+    // Categorías elegidas en "Evolución de las infracciones": filtran el resto de la pestaña.
+    const [sel, setSel] = useState(allKeys);
+    useEffect(() => { setSel(s => (s.length ? s.filter(k => allKeys.includes(k)) : allKeys)); }, [allKeys.join()]);
+    const selKeys = sel.filter(k => allKeys.includes(k));
+    const filtered = selKeys.length > 0 && selKeys.length < allKeys.length;
+    const W = view.settings.category_weights || {};
+    const wOf = filtered ? (c => GI.sum(selKeys, k => (c.ev[k] || 0) * (W[k] != null ? W[k] : 1))) : null;
+    const nOf = c => (filtered ? GI.sum(selKeys, k => c.ev[k] || 0) : c.n);
     const total = view.total;
     const unit = GRAN_WORD[view.gran];
     const ruleRows = riskRuleRows(view);
@@ -550,44 +572,56 @@
       const w = n * (view.settings.category_weights[c.key] || 0);
       const tr = halves(view, s => (s.evByCat[c.key] || 0) * 100, s => s.km);
       return { key: c.key, label: c.label, n, per100: total.km ? (n / total.km) * 100 : null,
-        share: total.weighted ? (w / total.weighted) * 100 : 0, trend: tr.ch };
+        share: total.weighted ? (w / total.weighted) * 100 : 0, trend: tr.ch, on: !filtered || selKeys.includes(c.key) };
     });
-    const driverTrends = useMemo(() => driverTrendMap(view), [view]);
+    const driverTrends = useMemo(() => driverTrendMap(view, wOf), [view, filtered ? selKeys.join() : ""]);
     const minKm = view.settings.drivers.min_km_ranking;
-    const drivers = view.dRows.filter(r => !r.unknown && r.km >= minKm).map(r => ({ ...r, tr: (driverTrends.get(r.id) || {}).tr }));
+    // conductores y vehículos con el riesgo de las categorías elegidas
+    const drivers = useMemo(() => {
+      const base = view.dRows.filter(r => !r.unknown && r.km >= minKm);
+      if (!filtered) return base.map(r => ({ ...r, tr: (driverTrends.get(r.id) || {}).tr }));
+      return base.map(r => {
+        let n = 0, w = 0, km = 0;
+        for (const [ck, c] of view.model.drvCells.get(r.id) || []) { if (!view.ids.has(ck.split("|")[0])) continue; km += c.km; n += nOf(c); w += wOf(c); }
+        return { ...r, events: n, risk: km > 0 ? (w / km) * 100 : null, tr: (driverTrends.get(r.id) || {}).tr };
+      });
+    }, [view, driverTrends]);
+    const vehicles = useMemo(() => {
+      const base = view.vRows.filter(r => r.km >= 100);
+      if (!filtered) return base;
+      return base.map(r => {
+        let n = 0, w = 0, km = 0;
+        for (const c of (view.model.dd.get(r.id) || new Map()).values()) { km += c.km; n += nOf(c); w += wOf(c); }
+        return { ...r, events: n, risk: km > 0 ? (w / km) * 100 : null, riskMax: null };
+      });
+    }, [view, filtered ? selKeys.join() : ""]);
     const risingDrivers = drivers.filter(d => d.tr && d.tr.slopePct > 15 && d.tr.current > 0);
     const lastValue = r => { const t = driverTrends.get(r.id); const x = t && [...t.ser].reverse().find(p => p.km >= 50); return x ? x.rate : null; };
     if (!GI.riskRuleIds(view.settings.rule_mapping).length) return html`<${Info} tone="warn">Todavía no hay reglas asignadas a categorías de riesgo, así que no hay infracciones para analizar. Un administrador las asigna en Configuración → Reglas y objetivos.<//>`;
+    const what = filtered ? (selKeys.length <= 3 ? selKeys.map(k => GI.catLabel(k)).join(", ") : selKeys.length + " categorías") : null;
+    const riskLabel = filtered ? "Riesgo (lo elegido)" : "Riesgo";
+    const sub = t => (filtered ? t + " · solo " + what : t);
     return html`<div>
-      <${EventsEvolution} view=${view} riskCats=${riskCats} onDriver=${onDriver} />
-      <${ForecastPanel} view=${view} driverTrends=${driverTrends} />
+      <${EventsEvolution} view=${view} riskCats=${riskCats} onDriver=${onDriver} sel=${sel} setSel=${setSel} />
+      ${filtered ? html`<div className="filterbar sf-filter" role="status"><span>Los cuadros de abajo muestran solo:</span>
+        ${selKeys.map(k => html`<span key=${k} className="fchip"><span className="dot" style=${{ background: GI.CHART_SLOTS.includes(k) ? GI.catColor(k) : GI.OTHER_COLOR }}></span>${GI.catLabel(k)}<button aria-label=${"Quitar " + GI.catLabel(k)} onClick=${() => setSel(s => (s.length > 1 ? s.filter(x => x !== k) : allKeys))}>×</button></span>`)}
+        <button className="btn link small" onClick=${() => setSel(allKeys)}>Ver todas</button></div>` : null}
+      <${Panel} title=${sub("Conductores con más infracciones por km")} hint=${"Índice de riesgo de cada conductor con al menos " + minKm + " km" + (filtered ? ", contando solo las categorías elegidas en Evolución" : "") + ". La tendencia es la pendiente de su índice en los últimos " + GRAN_PLURAL[view.gran] + ". Click para ver el detalle."}>
+        <${DataTable} rowKey=${r => r.id} rows=${drivers} limit=${10} onRowClick=${r => onDriver(r.id)} defaultSort=${{ key: "risk", dir: "desc" }} columns=${[
+          { key: "name", label: "Conductor" },
+          { key: "km", label: "Km", align: "num", fmt: r => n0(r.km) },
+          { key: "events", label: filtered ? "Eventos" : "Infracciones", align: "num", fmt: r => n0(r.events) },
+          { key: "risk", label: riskLabel, align: "num", fmt: r => n2(r.risk), title: "Puntos cada 100 km" },
+          { key: "trend", label: "Tendencia", value: r => (r.tr ? r.tr.slopePct : null), fmt: r => html`<${TrendCell} tr=${r.tr} unit=${unit} />` },
+        ]} empty="No hay conductores identificados con suficientes km." />
+      <//>
+      <${ForecastPanel} view=${view} driverTrends=${driverTrends} cats=${filtered ? selKeys : null} wOf=${wOf} />
       <div className="grid-2">
-        <${Panel} title="Qué infracciones pesan más" hint="'% del riesgo' es cuánto aporta cada categoría al índice (cantidad × peso). Click en una categoría para ver qué conductores la generan; click en el número de eventos para verlos en MyGeotab.">
-          <${DataTable} rowKey=${r => r.key} rows=${catRows} defaultSort=${{ key: "share", dir: "desc" }} onRowClick=${r => setCatDetail(r.key)} columns=${[
-            { key: "label", label: "Categoría", fmt: r => html`<span className="dot" style=${{ background: GI.CHART_SLOTS.includes(r.key) ? GI.catColor(r.key) : GI.OTHER_COLOR }}></span>${r.label}` },
-            { key: "n", label: "Eventos", align: "num",
-              fmt: r => html`<button className="btn link" title="Ver estos eventos en MyGeotab" onClick=${e => { e.stopPropagation(); openEvents(view, { ruleIds: ruleRows.filter(x => x.cat === r.key).map(x => x.id), deviceIds: [...view.ids] }); }}>${n0(r.n)}</button>` },
-            { key: "per100", label: "Cada 100 km", align: "num", fmt: r => n2(r.per100) },
-            { key: "share", label: "% del riesgo", align: "num", fmt: r => n0(r.share) + "%" },
-            { key: "trend", label: "Tendencia", align: "num", fmt: r => html`<${Delta} value=${r.trend} goodWhenDown />` },
-          ]} />
-        <//>
-        <${Panel} title="Conductores con más infracciones por km" hint=${"Índice de riesgo de cada conductor con al menos " + minKm + " km. La tendencia es la pendiente de su índice en los últimos " + GRAN_PLURAL[view.gran] + ". Click para ver el detalle."}>
-          <${DataTable} rowKey=${r => r.id} rows=${drivers} limit=${10} onRowClick=${r => onDriver(r.id)} defaultSort=${{ key: "risk", dir: "desc" }} columns=${[
-            { key: "name", label: "Conductor" },
-            { key: "km", label: "Km", align: "num", fmt: r => n0(r.km) },
-            { key: "events", label: "Infracciones", align: "num" },
-            { key: "risk", label: "Riesgo", align: "num", fmt: r => n2(r.risk), title: "Puntos cada 100 km" },
-            { key: "trend", label: "Tendencia", value: r => (r.tr ? r.tr.slopePct : null), fmt: r => html`<${TrendCell} tr=${r.tr} unit=${unit} />` },
-          ]} empty="No hay conductores identificados con suficientes km." />
-        <//>
-      </div>
-      <div className="grid-2">
-        <${Panel} title="Conductores con riesgo en aumento" hint="Alerta temprana: conductores cuyo índice de riesgo viene subiendo más de 15% por período. Conviene intervenir antes de que lleguen al tope del ranking.">
+        <${Panel} title=${sub("Conductores con riesgo en aumento")} hint="Alerta temprana: conductores cuyo índice de riesgo viene subiendo más de 15% por período. Conviene intervenir antes de que lleguen al tope del ranking.">
           <${DataTable} rowKey=${r => r.id} rows=${risingDrivers} limit=${10} onRowClick=${r => onDriver(r.id)} defaultSort=${{ key: "proj", dir: "desc" }} columns=${[
             { key: "name", label: "Conductor" },
             { key: "avg", label: "Período", align: "num", value: r => r.risk, fmt: r => n2(r.risk),
-              help: "Índice de riesgo promedio del conductor en todo el período cargado (el mismo que muestra su ficha)." },
+              help: "Índice de riesgo promedio del conductor en todo el período cargado" + (filtered ? ", con las categorías elegidas." : " (el mismo que muestra su ficha).") },
             { key: "last", label: (unit === "semana" ? "Última " : "Último ") + unit, align: "num", value: r => lastValue(r), fmt: r => n2(lastValue(r)),
               help: "Índice de riesgo real del conductor en " + (unit === "semana" ? "la última semana completa" : "el último " + unit + " completo") + " con al menos 50 km (sin contar " + (unit === "semana" ? "la semana" : "el " + unit) + " en curso)." },
             { key: "proj", label: "Proyectado", align: "num", value: r => r.tr.at(view.gran === "day" ? 14 : view.gran === "week" ? 4 : 2), fmt: r => n2(r.tr.at(view.gran === "day" ? 14 : view.gran === "week" ? 4 : 2)),
@@ -595,17 +629,29 @@
             { key: "trend", label: "Tendencia", value: r => r.tr.slopePct, fmt: r => html`<${TrendCell} tr=${r.tr} unit=${unit} />` },
           ]} empty="Ningún conductor muestra una tendencia de aumento clara." />
         <//>
-        <${Panel} title="Vehículos con más infracciones por km" hint="Índice de riesgo de cada vehículo con al menos 100 km en el período. Click para ver el detalle.">
-          <${DataTable} rowKey=${r => r.id} rows=${view.vRows.filter(r => r.km >= 100)} limit=${10} onRowClick=${r => onVehicle(r.id)}
+        <${Panel} title=${sub("Vehículos con más infracciones por km")} hint="Índice de riesgo de cada vehículo con al menos 100 km en el período. Click para ver el detalle.">
+          <${DataTable} rowKey=${r => r.id} rows=${vehicles} limit=${10} onRowClick=${r => onVehicle(r.id)}
             defaultSort=${{ key: "risk", dir: "desc" }} columns=${[
             { key: "name", label: "Vehículo" },
             { key: "profile", label: "Perfil", fmt: r => GI.profileLabel(view.settings, r.profile) },
             { key: "km", label: "Km", align: "num", fmt: r => n0(r.km) },
-            { key: "events", label: "Infracciones", align: "num" },
-            { key: "risk", label: "Riesgo", align: "num", fmt: r => html`<${TargetCell} value=${r.risk} max=${r.riskMax} fmt=${n2} />` },
+            { key: "events", label: filtered ? "Eventos" : "Infracciones", align: "num", fmt: r => n0(r.events) },
+            { key: "risk", label: riskLabel, align: "num", fmt: r => (filtered ? n2(r.risk) : html`<${TargetCell} value=${r.risk} max=${r.riskMax} fmt=${n2} />`) },
           ]} />
         <//>
       </div>
+      ${GI.ParetoPanel ? html`<${GI.ParetoPanel} view=${view} onDriver=${onDriver} onVehicle=${onVehicle} />` : null}
+      ${GI.RecidivismPanel ? html`<${GI.RecidivismPanel} view=${view} onDriver=${onDriver} />` : null}
+      <${Panel} title="Qué infracciones pesan más" hint="'% del riesgo' es cuánto aporta cada categoría al índice (cantidad × peso). Click en una categoría para ver qué conductores la generan; click en el número de eventos para verlos en MyGeotab.">
+        <${DataTable} rowKey=${r => r.key} rows=${catRows} defaultSort=${{ key: "share", dir: "desc" }} onRowClick=${r => setCatDetail(r.key)} rowClass=${r => (r.on ? "" : "sf-off")} columns=${[
+          { key: "label", label: "Categoría", fmt: r => html`<span className="dot" style=${{ background: GI.CHART_SLOTS.includes(r.key) ? GI.catColor(r.key) : GI.OTHER_COLOR }}></span>${r.label}` },
+          { key: "n", label: "Eventos", align: "num",
+            fmt: r => html`<button className="btn link" title="Ver estos eventos en MyGeotab" onClick=${e => { e.stopPropagation(); openEvents(view, { ruleIds: ruleRows.filter(x => x.cat === r.key).map(x => x.id), deviceIds: [...view.ids] }); }}>${n0(r.n)}</button>` },
+          { key: "per100", label: "Cada 100 km", align: "num", fmt: r => n2(r.per100) },
+          { key: "share", label: "% del riesgo", align: "num", fmt: r => n0(r.share) + "%" },
+          { key: "trend", label: "Tendencia", align: "num", fmt: r => html`<${Delta} value=${r.trend} goodWhenDown />` },
+        ]} />
+      <//>
       ${catDetail ? html`<${CategoryDetail} view=${view} cat=${catDetail} onClose=${() => setCatDetail(null)} onDriver=${id => { setCatDetail(null); onDriver(id); }} />` : null}
     </div>`;
   }
@@ -634,6 +680,7 @@
         <${Kpi} label="Conductores en el ranking" value=${n0(rows.length)} sub=${"de " + known.length + " con actividad (mín. " + minKm + " km)"} />
         <${Kpi} label="Sin identificar" value=${n0(unknown ? unknown.km : 0)} unit="km" sub=${(unknown ? n0(unknown.events) : 0) + " infracciones sin conductor"} />
       </div>
+      ${GI.MatrixPanel ? html`<${GI.MatrixPanel} view=${view} onDriver=${onDriver} />` : null}
       <${Panel} title=${mode === "risk" ? "Conductores con más infracciones por km" : "Conductores con más ralentí"}
         hint=${"Solo conductores con al menos " + minKm + " km, para que pocos km no distorsionen el índice. Filtrá por servicio para comparar corta con corta y larga con larga."}
         actions=${html`
@@ -654,6 +701,7 @@
           { key: "idleL", label: "Litros ralentí", align: "num", fmt: r => html`${n0(r.idleL)}${price ? html` <span className="muted small">${GI.fmtMoney(r.idleCost)}</span>` : ""}` },
         ]} empty="Ningún conductor identificado llega a esos km mínimos. Bajá el mínimo o ampliá el período." />
       <//>
+      ${GI.CoachingPanel ? html`<${GI.CoachingPanel} view=${view} onDriver=${onDriver} />` : null}
     </div>`;
   }
 
@@ -669,7 +717,7 @@
       ${rest > 0 ? html`<span className="muted small">+${rest} más</span>` : null}</span>`;
   }
 
-  function RoutesTab({ view, api }) {
+  function RoutesTab({ view, api, onMap }) {
     const s = view.settings.journeys;
     const [showNoZone, setShowNoZone] = useState(false);
     const [route, setRoute] = useState(null);
@@ -700,7 +748,8 @@
       <//>
       ${route ? html`<${RouteDrivers} view=${view} route=${rows.find(r => r.key === route.key) || route} onClose=${() => setRoute(null)} />`
         : rows.length ? html`<p className="muted small" style=${{ margin: "-6px 0 14px" }}>Click en un recorrido para ver quiénes lo manejaron y sus infracciones.</p>` : null}
-      <${HeatmapPanel} view=${view} api=${api} route=${route} onClearRoute=${() => setRoute(null)} />
+      ${onMap ? html`<div className="hm-routecta"><button className="btn" onClick=${() => onMap(route ? { route, cat: "" } : { cat: "" })}>${route ? "Ver las infracciones de este recorrido en el Mapa de calor →" : "Ver dónde ocurren las infracciones en el Mapa de calor →"}</button></div>`
+        : html`<${HeatmapPanel} view=${view} api=${api} route=${route} onClearRoute=${() => setRoute(null)} />`}
     </div>`;
   }
 
@@ -779,7 +828,7 @@
       if (!m) return;
       if (m._spots) { m.removeLayer(m._spots); m._spots = null; }
       if (!spots || !spots.length) return;
-      m._spots = L.layerGroup(spots.slice(0, 15).map((h, i) => L.rectangle(h.bounds, { color: "#b02f2e", weight: 2, fill: false })
+      m._spots = L.layerGroup(spots.slice(0, 15).map((h, i) => L.rectangle(h.bounds, { color: "#fe5a3f", weight: 2, fill: false })
         .bindTooltip(String(i + 1), { permanent: true, direction: "center", className: "spot-label" }))).addTo(m);
     }, [spots]);
     useEffect(() => {
@@ -812,10 +861,10 @@
       if (!trace || !trace.pts || !trace.pts.length) return;
       const zones = view.model.cat.zones || [];
       const zo = zones.find(z => z.id === trace.j.o), zd = zones.find(z => z.id === trace.j.dest);
-      const layers = [L.polyline(trace.pts, { color: "#1c5cab", weight: 4, opacity: 0.85 })];
-      for (const [z, color] of [[zo, "#0b7a3e"], [zd, "#b93a0f"]]) if (z) layers.push(L.polygon(z.pts.map(([x, y]) => [y, x]), { color, weight: 2, fillOpacity: 0.12 }).bindTooltip(z.name));
-      layers.push(L.circleMarker(trace.pts[0], { radius: 7, color: "#fff", weight: 2, fillColor: "#0b7a3e", fillOpacity: 1 }).bindTooltip("Salida: " + route.from));
-      layers.push(L.circleMarker(trace.pts[trace.pts.length - 1], { radius: 7, color: "#fff", weight: 2, fillColor: "#b93a0f", fillOpacity: 1 }).bindTooltip("Llegada: " + route.to));
+      const layers = [L.polyline(trace.pts, { color: "#25477b", weight: 4, opacity: 0.85 })];
+      for (const [z, color] of [[zo, "#00aa00"], [zd, "#fe5a3f"]]) if (z) layers.push(L.polygon(z.pts.map(([x, y]) => [y, x]), { color, weight: 2, fillOpacity: 0.12 }).bindTooltip(z.name));
+      layers.push(L.circleMarker(trace.pts[0], { radius: 7, color: "#fff", weight: 2, fillColor: "#00aa00", fillOpacity: 1 }).bindTooltip("Salida: " + route.from));
+      layers.push(L.circleMarker(trace.pts[trace.pts.length - 1], { radius: 7, color: "#fff", weight: 2, fillColor: "#fe5a3f", fillOpacity: 1 }).bindTooltip("Llegada: " + route.to));
       m._trace = L.layerGroup(layers).addTo(m);
       if (!points || !points.length) m.fitBounds(L.latLngBounds(trace.pts), { padding: [30, 30] });
       setTimeout(() => m.invalidateSize(), 0);
@@ -877,14 +926,217 @@
     </div>`;
   }
 
+
+  // ======================= MAPA DE CALOR =======================
+  // Pestaña propia: filtros (período, chofer, vehículo, categoría, gravedad del exceso, franja
+  // horaria), tres capas (calor, puntos por gravedad, puntos calientes), ranking lateral y detalle
+  // de un evento con la velocidad real a pedido.
+  const SEV = { leve: { label: "Leve", color: "#f9ba00", stroke: "#f9ba00" }, medio: { label: "Medio", color: "#fe5a3f", stroke: "#c2381f" }, grave: { label: "Grave", color: "#c2381f", stroke: "#21325e" } };
+  const SEV_KEYS = ["leve", "medio", "grave"];
+  const BANDS = [["all", "Todo el día", null], ["night", "De noche (22–06 h)", [22, 6]], ["dawn", "Madrugada (02–05 h)", [2, 5]], ["day", "De día (06–22 h)", [6, 22]]];
+  const inBand = (t, b) => { if (!b) return true; const h = new Date(t).getHours(); return b[0] < b[1] ? h >= b[0] && h < b[1] : h >= b[0] || h < b[1]; };
+  const minsTxt = h => { const m = Math.round((h || 0) * 60 * 60); return m >= 60 ? Math.floor(m / 60) + " min " + (m % 60) + " s" : m + " s"; };
+
+  function MapTab({ view, api, preset, onPresetUsed, onDriver, period, presets, onPeriod, isAdmin, onSaveSettings, onCorridors }) {
+    const hasSpeed = view.events.some(e => e.cat === "velocidad");
+    const [cat, setCat] = useState(hasSpeed ? "velocidad" : "");
+    const [sev, setSev] = useState(new Set(SEV_KEYS));
+    const [drv, setDrv] = useState(""), [dev, setDev] = useState(""), [band, setBand] = useState("all");
+    const [route, setRoute] = useState(null);
+    const [layer, setLayer] = useState("points");
+    const [limit, setLimit] = useState(1000);
+    const [locs, setLocs] = useState(null), [progress, setProgress] = useState(null), [err, setErr] = useState(null);
+    const [sel, setSel] = useState(null), [focus, setFocus] = useState(null);
+    const mapRef = React.useRef(null), mapObj = React.useRef(null), runRef = React.useRef(0);
+    // Llega con un filtro puesto (desde un conductor, un vehículo o un recorrido)
+    useEffect(() => {
+      if (!preset) return;
+      if (preset.driverId) setDrv(preset.driverId);
+      if (preset.deviceId) setDev(preset.deviceId);
+      if (preset.route) setRoute(preset.route);
+      if (preset.cat != null) setCat(preset.cat);
+      if (onPresetUsed) onPresetUsed();
+    }, [preset]);
+    const b = (BANDS.find(x => x[0] === band) || [])[2];
+    const sevAll = sev.size === 3;
+    const evs = useMemo(() => view.events.filter(e => e.w > 0 && (!cat || e.cat === cat) && (!drv || e.drv === drv) && (!dev || e.d === dev)
+      && (sevAll || (e.sev && sev.has(e.sev))) && inBand(e.t, b) && (!route || (e.j && !e.j.internal && e.j.o + "→" + e.j.dest === route.key))), [view, cat, drv, dev, sev, band, route]);
+    const sample = useMemo(() => {
+      const r = [...evs].sort((x, y) => (SEV_KEYS.indexOf(y.sev) - SEV_KEYS.indexOf(x.sev)) || y.t - x.t);
+      return r.slice(0, limit);
+    }, [evs, limit]);
+    // Ubicar los eventos (LogRecord más cercano; queda guardado en el navegador)
+    useEffect(() => {
+      const id = ++runRef.current;
+      setErr(null); setSel(null);
+      if (!sample.length) { setLocs(new Map()); setProgress(null); return; }
+      setProgress(0);
+      let last = 0;
+      GI.loadEventLocations(api, sample, (p, partial) => {
+        if (id !== runRef.current) return;
+        setProgress(p);
+        if (p - last >= 0.15 || p === 1) { last = p; setLocs(new Map(partial)); }
+      }).then(l => { if (id === runRef.current) { setLocs(l); setProgress(null); } })
+        .catch(e => { if (id === runRef.current) { setErr(String((e && e.message) || e)); setProgress(null); } });
+    }, [sample]);
+    const placed = useMemo(() => (locs ? sample.filter(e => locs.get(e.i)) : []), [locs, sample]);
+    const spots = useMemo(() => (locs && progress == null ? GI.hotspots(sample, locs) : null), [locs, progress, sample]);
+    const corrIds = useMemo(() => new Set((view.settings.corridors || []).map(c => c.id)), [view.settings]);
+    const tramos = useMemo(() => (layer === "tramos" && locs && progress == null && GI.tramosFromEvents ? GI.tramosFromEvents(sample, locs, view.model.cat.zones, corrIds) : null), [layer, locs, progress, sample, view.model.cat.zones, corrIds]);
+    const [conv, setConv] = useState({});
+    async function toCorridor(t) {
+      setConv(c => ({ ...c, [t.key]: "busy" }));
+      try {
+        const list = [...(view.settings.corridors || []), { id: t.zone.id, name: t.zone.name, limit: GI.limitFromName(t.zone.name), from: 0, to: 24, stops: [], stopMin: 5 }];
+        await onSaveSettings({ ...view.settings, corridors: list });
+        setConv(c => ({ ...c, [t.key]: "ok" }));
+      } catch (e) { setConv(c => ({ ...c, [t.key]: "err" })); }
+    }
+    const ensureMap = () => {
+      if (!mapObj.current && mapRef.current) {
+        mapObj.current = L.map(mapRef.current, { preferCanvas: true });
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 18, attribution: "© OpenStreetMap" }).addTo(mapObj.current);
+        mapObj.current.setView([-38.95, -68.06], 7);
+      }
+      return mapObj.current;
+    };
+    const colorOf = e => (e.sev ? SEV[e.sev].color : GI.catColor(e.cat));
+    useEffect(() => {
+      const m = ensureMap();
+      if (!m) return;
+      for (const k of ["_heat", "_pts", "_spots", "_tramos"]) if (m[k]) { m.removeLayer(m[k]); m[k] = null; }
+      const pts = placed.map(e => [...locs.get(e.i), e.w]);
+      if (layer === "heat") m._heat = L.heatLayer(pts, { radius: 14, blur: 18, maxZoom: 12, max: 2 }).addTo(m);
+      if (layer === "points") {
+        const order = [...placed].sort((x, y) => SEV_KEYS.indexOf(x.sev) - SEV_KEYS.indexOf(y.sev)); // graves arriba
+        m._pts = L.layerGroup(order.map(e => L.circleMarker(locs.get(e.i), { radius: e.sev === "grave" ? 7 : 5.5, color: "#fff", weight: 1.5, fillColor: colorOf(e), fillOpacity: 0.95 })
+          .on("click", () => setSel(e)).bindTooltip(GI.catLabel(e.cat) + (e.sev ? " · " + SEV[e.sev].label : "") + " · " + new Date(e.t).toLocaleString("es-AR", { dateStyle: "short", timeStyle: "short" })))).addTo(m);
+      }
+      if (layer === "spots" && spots) m._spots = L.layerGroup(spots.slice(0, 15).map((h, i) => L.rectangle(h.bounds, { color: "#fe5a3f", weight: 2, fill: false })
+        .bindTooltip(String(i + 1), { permanent: true, direction: "center", className: "spot-label" }))).addTo(m);
+      if (layer === "tramos" && tramos) m._tramos = L.layerGroup(tramos.slice(0, 15).map((t, i) => (t.zone ? L.polygon(t.zone.pts.map(([x, y]) => [y, x]), { color: "#fe5a3f", weight: 2, fillOpacity: 0.08 }) : L.rectangle(t.bounds, { color: "#fe5a3f", weight: 2, dashArray: "4 4", fill: false }))
+        .bindTooltip(String(i + 1), { permanent: true, direction: "center", className: "spot-label" }))).addTo(m);
+      const fitKey = sample.length + "|" + (sample[0] ? sample[0].i : "");
+      if (pts.length && progress == null && m._fitKey !== fitKey) { m._fitKey = fitKey; m.fitBounds(L.latLngBounds(pts.map(p => [p[0], p[1]])), { padding: [24, 24], maxZoom: 13 }); }
+      setTimeout(() => m.invalidateSize(), 0);
+    }, [placed, layer, spots, tramos, progress == null]);
+    useEffect(() => { const m = mapObj.current; if (m && focus) m.fitBounds(focus.bounds, { padding: [60, 60], maxZoom: 15 }); }, [focus]);
+    // Trazado de un evento con su velocidad real
+    const [speed, setSpeed] = useState(null);
+    const [limits, setLimits] = useState(new Map());
+    useEffect(() => {
+      setSpeed(null);
+      const m = mapObj.current;
+      if (m && m._evTrace) { m.removeLayer(m._evTrace); m._evTrace = null; }
+      if (sel && sel.cat === "velocidad" && !limits.has(sel.rule) && GI.loadRuleLimits) GI.loadRuleLimits(api, [sel.rule]).then(l => setLimits(x => new Map([...x, ...l]))).catch(() => {});
+      if (sel && m && locs && locs.get(sel.i)) m.setView(locs.get(sel.i), Math.max(m.getZoom(), 13));
+    }, [sel && sel.i]);
+    async function calcSpeed() {
+      setSpeed({ loading: true });
+      try {
+        const r = await GI.loadEventSpeed(api, sel);
+        setSpeed(r);
+        const m = mapObj.current;
+        if (m && r.pts.length > 1) { if (m._evTrace) m.removeLayer(m._evTrace); m._evTrace = L.polyline(r.pts, { color: "#c2381f", weight: 5, opacity: 0.85 }).addTo(m); m.fitBounds(L.latLngBounds(r.pts), { padding: [60, 60], maxZoom: 16 }); }
+      } catch (e) { setSpeed({ error: String((e && e.message) || e) }); }
+    }
+    // Opciones de los filtros: los conductores y vehículos con eventos en el período
+    const drvOpts = useMemo(() => [...new Set(view.events.filter(e => e.w > 0 && e.drv).map(e => e.drv))].map(id => ({ id, name: view.model.driverName.get(id) || id })).sort((a, b) => a.name.localeCompare(b.name)), [view]);
+    const devOpts = useMemo(() => [...new Set(view.events.filter(e => e.w > 0).map(e => e.d))].map(id => ({ id, name: (view.model.devById.get(id) || {}).name || id })).sort((a, b) => a.name.localeCompare(b.name, "es", { numeric: true })), [view]);
+    const cats = GI.CATEGORIES.filter(c => c.kind === "riesgo" && view.events.some(e => e.cat === c.key));
+    const toggleSev = k => setSev(s0 => { const n = new Set(s0); if (n.has(k) && n.size > 1) n.delete(k); else n.add(k); return n; });
+    const chips = [];
+    if (cat) chips.push({ k: "cat", label: GI.catLabel(cat), clear: () => setCat("") });
+    if (!sevAll) chips.push({ k: "sev", label: "Gravedad: " + SEV_KEYS.filter(k => sev.has(k)).map(k => SEV[k].label).join(" y "), clear: () => setSev(new Set(SEV_KEYS)) });
+    if (drv) chips.push({ k: "drv", label: "Chofer: " + (view.model.driverName.get(drv) || drv), clear: () => setDrv("") });
+    if (dev) chips.push({ k: "dev", label: "Vehículo: " + ((view.model.devById.get(dev) || {}).name || dev), clear: () => setDev("") });
+    if (band !== "all") chips.push({ k: "band", label: (BANDS.find(x => x[0] === band) || [])[1], clear: () => setBand("all") });
+    if (route) chips.push({ k: "route", label: "Recorrido: " + route.from + " → " + route.to, clear: () => setRoute(null) });
+    const nDrv = new Set(evs.map(e => e.drv).filter(Boolean)).size, nDev = new Set(evs.map(e => e.d)).size;
+    const bySev = SEV_KEYS.map(k => ({ k, n: evs.filter(e => e.sev === k).length }));
+    const maxSev = Math.max(1, ...bySev.map(x => x.n));
+    const kml = () => spots && GI.downloadText("puntos-calientes.kml", GI.hotspotsKml(spots.slice(0, 15), "Puntos calientes"));
+    const lim = sel && limits.get(sel.rule);
+    const limVal = lim && lim.length ? (speed && speed.max != null ? (lim.filter(v => v <= speed.max).pop() || lim[0]) : lim[lim.length - 1]) : null;
+    return html`<div className="hm">
+      <div className="hm-filters">
+        <label className="ctl">Período<select value=${period.preset || "range"} onChange=${e => onPeriod(e.target.value)}>
+          ${presets.map(([k, l]) => html`<option key=${k} value=${k}>${l}</option>`)}
+          ${!period.preset ? html`<option value="range">Del ${period.from} al ${period.to}</option>` : null}</select></label>
+        <label className="ctl">Chofer<select value=${drv} onChange=${e => setDrv(e.target.value)}><option value="">Todos</option>${drvOpts.map(o => html`<option key=${o.id} value=${o.id}>${o.name}</option>`)}</select></label>
+        <label className="ctl">Vehículo<select value=${dev} onChange=${e => setDev(e.target.value)}><option value="">Todos</option>${devOpts.map(o => html`<option key=${o.id} value=${o.id}>${o.name}</option>`)}</select></label>
+        <label className="ctl">Categoría<select value=${cat} onChange=${e => setCat(e.target.value)}><option value="">Todas las de riesgo</option>${cats.map(c => html`<option key=${c.key} value=${c.key}>${c.label}</option>`)}</select></label>
+        <div className="ctl" role="group" aria-label="Gravedad del exceso de velocidad">Gravedad
+          <div className="hm-seg">${SEV_KEYS.map(k => html`<button key=${k} type="button" aria-pressed=${sev.has(k)} className=${sev.has(k) ? "on" : ""} onClick=${() => toggleSev(k)}><span className="hm-dot" style=${{ background: SEV[k].color }}></span>${SEV[k].label}</button>`)}</div></div>
+        <label className="ctl">Franja horaria<select value=${band} onChange=${e => setBand(e.target.value)}>${BANDS.map(([k, l]) => html`<option key=${k} value=${k}>${l}</option>`)}</select></label>
+        <label className="ctl">Eventos<select value=${limit} onChange=${e => setLimit(+e.target.value)}>${[500, 1000, 2000, 5000].map(n => html`<option key=${n} value=${n}>Hasta ${n0(n)}</option>`)}</select></label>
+      </div>
+      <div className="filterbar" role="status"><span>Mostrando:</span>
+        ${chips.map(c => html`<span key=${c.k} className="fchip">${c.label}<button aria-label=${"Quitar " + c.label} onClick=${c.clear}>×</button></span>`)}
+        <span className="muted">${n0(evs.length)} infracciones · ${n0(nDrv)} conductores · ${n0(nDev)} vehículos${evs.length > sample.length ? " · en el mapa, las " + n0(sample.length) + " más graves y recientes" : ""}</span>
+        ${!sevAll && cat !== "velocidad" ? html`<span className="muted small">(la gravedad solo aplica a los excesos de velocidad)</span>` : null}
+      </div>
+      ${progress != null ? html`<${GI.Progress} value=${progress} label=${"Ubicando " + n0(sample.length) + " eventos (la segunda vez es instantáneo)"} />` : null}
+      ${err ? html`<${Info} tone="error">No se pudieron ubicar los eventos: ${err}<//>` : null}
+      <div className="hm-main">
+        <div className="hm-mapbox">
+          <div className="hm-maphead">
+            <${Segmented} value=${layer} onChange=${setLayer} options=${[{ value: "heat", label: "Calor" }, { value: "points", label: "Puntos por gravedad" }, { value: "spots", label: "Puntos calientes" }, ...(GI.tramosFromEvents ? [{ value: "tramos", label: "Tramos" }] : [])]} />
+            ${layer === "points" ? html`<span className="hm-legend">${cat === "velocidad" || !cat ? SEV_KEYS.map(k => html`<span key=${k}><span className="hm-dot" style=${{ background: SEV[k].color }}></span>${SEV[k].label}</span>`) : null}${cat !== "velocidad" ? html`<span className="muted small">otras categorías: su color</span>` : null}</span>` : null}
+          </div>
+          <div ref=${mapRef} className="hm-map"></div>
+        </div>
+        <aside className="hm-side">
+          ${sel ? html`<div className="hm-detail">
+            <button className="btn small" onClick=${() => setSel(null)}>← Puntos calientes</button>
+            <h3>${GI.catLabel(sel.cat)} ${sel.sev ? html`<span className=${"hm-sev " + sel.sev}>${SEV[sel.sev].label}</span>` : null}</h3>
+            <p>${sel.drv ? html`<a href="#" onClick=${e => { e.preventDefault(); onDriver(sel.drv); }}>${view.model.driverName.get(sel.drv) || sel.drv}</a>` : "Sin conductor identificado"} · ${(view.model.devById.get(sel.d) || {}).name || sel.d}<br/>
+              <span className="muted">${new Date(sel.t).toLocaleString("es-AR", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}${sel.h ? " · duró " + minsTxt(sel.h) : ""}</span></p>
+            ${sel.sev ? html`<div className="hm-why"><b>Por qué es ${SEV[sel.sev].label}</b><br/>La regla <b>${(view.model.cat.rules.find(r => r.id === sel.rule) || { name: sel.rule }).name}</b> es ${SEV[sel.sevBase].label}${sel.sevUp ? html`; duró más de ${sel.sevBase === "leve" ? (view.settings.speed_sev || {}).up_leve_min : (view.settings.speed_sev || {}).up_medio_min} min, así que sube un nivel` : ""}.</div>` : null}
+            ${sel.cat === "velocidad" ? html`<div className="hm-kv">
+              <div><span>Límite de la regla</span><b>${lim ? (lim.length ? lim.join(" / ") + " km/h" : "–") : "…"}</b></div>
+              <div><span>Duración</span><b>${sel.h ? minsTxt(sel.h) : "–"}</b></div>
+              <div><span>Velocidad máxima</span><b className="bad">${speed && speed.max != null ? n0(speed.max) + " km/h" : "–"}</b></div>
+              <div><span>Sobre el límite</span><b className="bad">${speed && speed.max != null && limVal ? "+" + n0(speed.max - limVal) + " km/h" : "–"}</b></div>
+            </div>
+            <div className="hm-calc"><button className="btn" disabled=${speed && speed.loading} onClick=${calcSpeed}>${speed && speed.loading ? "Calculando…" : "Calcular velocidad real"}</button>
+              <span className="small muted">${speed && speed.error ? "No se pudo: " + speed.error : speed && !speed.loading && speed.max == null ? "El GPS no informó velocidad en ese tramo." : "Se pide el GPS solo de este evento y se dibuja su recorrido."}</span></div>` : null}
+            <div className="hm-links">
+              ${sel.drv ? html`<button className="btn small" onClick=${() => onDriver(sel.drv)}>Ficha del conductor</button>` : null}
+              <button className="btn small" onClick=${() => GI.openEventsPage({ ruleIds: [sel.rule], deviceIds: [sel.d], driverIds: sel.drv ? [sel.drv] : null, from: sel.dk, to: sel.dk })}>Evento en MyGeotab ↗</button>
+            </div>
+          </div>` : layer === "tramos" ? html`<div className="hm-spots">
+            <div className="hm-side-head"><h3>Tramos con más infracciones</h3></div>
+            <p className="small muted">Infracciones agrupadas por geocerca (o por zona de ~2 km si no caen en ninguna), ordenadas por excesos graves.${onSaveSettings ? " Una geocerca con muchas infracciones puede pasar a ser un corredor con límite, horario y paradas." : ""}</p>
+            ${!tramos ? html`<p className="small muted">${progress != null ? "Calculando…" : "Sin datos."}</p>` : !tramos.length ? html`<p className="small muted">Ningún tramo junta 3 o más infracciones con estos filtros.</p>`
+              : html`<ol className="hm-spotlist">${tramos.slice(0, 15).map((t, i) => html`<li key=${t.key}><button type="button" onClick=${() => setFocus(t)}>
+                  <b>${i + 1}</b><span><span className="hm-spot-n">${t.name || "Sin geocerca"}</span><br/>${n0(t.n)} infracciones${t.grave ? html` · <span className="bad-text">${n0(t.grave)} graves</span>` : ""} · ${n0(t.drivers)} conductores<br/><span className="small muted">${t.cats.slice(0, 2).map(c => GI.catLabel(c.cat) + " " + n0(c.n)).join(" · ")}</span></span></button>
+                  <div className="hm-tramo-act">${t.isCorridor || conv[t.key] === "ok" ? html`<span className="small">Es corredor${onCorridors ? html` · <a href="#" onClick=${e => { e.preventDefault(); onCorridors(); }}>ver cumplimiento</a>` : ""}</span>`
+                    : t.zone ? (isAdmin && onSaveSettings ? html`<button className="btn small" disabled=${conv[t.key] === "busy"} onClick=${() => toCorridor(t)}>${conv[t.key] === "busy" ? "Guardando…" : conv[t.key] === "err" ? "No se pudo, reintentar" : "Convertir en corredor"}</button>` : onSaveSettings ? html`<span className="small muted">Un administrador puede convertirlo en corredor.</span>` : null)
+                    : html`<button className="btn small ghost" onClick=${() => GI.downloadText("tramo-" + (i + 1) + ".kml", GI.hotspotsKml([{ ...t, cats: t.cats }], "Tramo " + (i + 1)))} title="Importalo en MyGeotab con Import KML Zones para crear la geocerca">KML para crear la geocerca</button>`}</div></li>`)}</ol>`}
+          </div>` : html`<div className="hm-spots">
+            <div className="hm-side-head"><h3>Puntos calientes</h3><button className="btn small" disabled=${!spots || !spots.length} onClick=${kml} title="KML con un polígono por punto caliente, para crear zonas con Import KML Zones">Descargar KML</button></div>
+            <p className="small muted">Lugares de ~500 m con 5 o más infracciones de 2 o más conductores. Click para centrar el mapa; click en un punto del mapa para ver el evento.</p>
+            ${!spots ? html`<p className="small muted">${progress != null ? "Calculando…" : "Sin datos."}</p>` : !spots.length ? html`<p className="small muted">Ningún lugar junta 5 o más infracciones de varios conductores con estos filtros.</p>`
+              : html`<ol className="hm-spotlist">${spots.slice(0, 15).map((h, i) => { return html`<li key=${h.key}><button type="button" onClick=${() => { setLayer(l => (l === "heat" ? "spots" : l)); setFocus(h); }}>
+                  <b>${i + 1}</b><span><span className="hm-spot-n">${n0(h.n)} infracciones</span> · ${n0(Math.max(h.drivers, h.devices))} conductores<br/><span className="small muted">${h.cats.slice(0, 2).map(c => GI.catLabel(c.cat) + " " + n0(c.n)).join(" · ")}</span></span></button></li>`; })}</ol>`}
+            ${cat === "velocidad" || !cat ? html`<div className="hm-sevbars"><b>Excesos de velocidad por gravedad</b>
+              ${bySev.map(x => html`<div key=${x.k} className=${sev.has(x.k) ? "" : "off"}><span>${SEV[x.k].label}</span><span className="hm-bar" style=${{ width: (x.n / maxSev) * 150 + "px", background: SEV[x.k].color }}></span><span>${n0(x.n)}</span></div>`)}
+              <span className="small muted">El nivel sale de la regla y la duración (Configuración → Fatiga y gravedad).</span></div>` : null}
+          </div>`}
+        </aside>
+      </div>
+    </div>`;
+  }
+
   // ======================= DETALLES =======================
   function smallBars(s, key, label, unit) {
-    return { type: "bar", data: { labels: s.map(x => x.label), datasets: [{ label, data: s.map(x => GI.round(x[key] || 0, 0)), backgroundColor: s.map(x => (x.partial ? "#9ec5f4" : "#2a78d6")), borderRadius: 3 }] },
+    return { type: "bar", data: { labels: s.map(x => x.label), datasets: [{ label, data: s.map(x => GI.round(x[key] || 0, 0)), backgroundColor: s.map(x => (x.partial ? "#99c9ed" : "#0078d3")), borderRadius: 3 }] },
       options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, title: { display: true, text: unit } } } } };
   }
   function smallLine(s, key, label, unit, dec) {
     return { type: "line", data: { labels: s.map(x => x.label), datasets: [{ label, data: s.map(x => (x[key] == null ? null : GI.round(x[key], dec))),
-      borderColor: "#2a78d6", backgroundColor: "#2a78d61f", fill: true, tension: 0.3, spanGaps: true }] },
+      borderColor: "#0078d3", backgroundColor: "#0078d31f", fill: true, tension: 0.3, spanGaps: true }] },
       options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, title: { display: true, text: unit } } } } };
   }
 
@@ -901,7 +1153,7 @@
       <p className="muted small" style=${{ marginTop: "6px" }}>Click en una categoría para ver sus eventos en MyGeotab.</p>`;
   }
 
-  function VehicleDetail({ view, id, onClose }) {
+  function VehicleDetail({ view, id, onClose, onMap }) {
     const r = view.vRows.find(x => x.id === id);
     const s = useMemo(() => GI.series(view.model, new Set([id]), view.gran), [id, view.gran]);
     const drivers = useMemo(() => {
@@ -918,6 +1170,7 @@
     const lastFull = [...s].reverse().find(b => !b.partial && b.km >= 50);
     const evRows = Object.entries(r.evByCat).filter(([k]) => (GI.CATEGORY_BY_KEY[k] || {}).kind === "riesgo").map(([k, n]) => ({ k, n }));
     return html`<${Modal} title=${r.name} onClose=${onClose} wide>
+      ${onMap ? html`<div className="hm-detail-cta"><button className="btn small" onClick=${() => onMap({ deviceId: id })}>Ver sus infracciones en el Mapa de calor →</button></div>` : null}
       <p className="muted" style=${{ marginBottom: "12px" }}>${GI.profileLabel(view.settings, r.profile)}. Servicio ${r.serviceSource === "grupo" ? "asignado por grupo" : r.serviceSource}. Referencia de consumo: ${r.refSource}.</p>
       <div className="readouts compact">
         <${Kpi} label="Km" value=${n0(r.km)} />
@@ -938,7 +1191,40 @@
     <//>`;
   }
 
-  function DriverDetail({ view, id, onClose, mode }) {
+  // Resumen de fatiga del conductor para su ficha (con acceso a la pestaña Fatiga).
+  function DriverFatigue({ view, id, onFatigue }) {
+    const d = useMemo(() => {
+      if (!GI.buildShifts || id === "_unknown") return null;
+      try {
+        const now = Date.now();
+        const res = GI.buildShifts(view.model, view.ids, x => x === id, { now });
+        const e = res.sims.get(id);
+        if (!e || !e.list.length) return null;
+        return { e, fz: res.limits, now, proj: GI.projectIndex ? GI.projectIndex(e, res.limits, now, 16) : null };
+      } catch (err) { console.warn("[Geotab Insights] fatiga en ficha", err); return null; }
+    }, [id, view]);
+    if (!d) return null;
+    const { e, fz, proj, now } = d, L = e.list;
+    const rests = L.map(j => j.restBefore).filter(v => v != null && v < 48);
+    const hi = L.filter(j => j.level === "alto").length, low = GI.sum(L, j => j.low);
+    const peak = Math.max(...L.map(j => j.fiPeak || 0));
+    const fiTxt = v => (v == null ? "–" : String(Math.round(v)));
+    const lvl = v => (v == null ? "" : v >= fz.fi_high ? "bad" : v >= fz.fi_mod ? "warn" : "");
+    return html`<div className="drv-fat">
+      <div className="drv-fat-head"><h3>Fatiga</h3>${onFatigue ? html`<button className="btn small" onClick=${() => onFatigue(id)}>Ver en la pestaña Fatiga →</button>` : null}</div>
+      ${proj ? html`<div className=${"verdict-line " + (proj.level === "rojo" ? "bad" : "")}><span className="vtag">${proj.open ? "En jornada" : "Próximo turno"}</span><span><b>${proj.action}.</b> Índice de fatiga ahora: <b className=${"delta " + lvl(proj.Fnow)}>${fiTxt(proj.Fnow)}</b>.</span></div>` : null}
+      <div className="readouts compact inset">
+        <${Kpi} label="Jornadas" value=${n0(L.length)} sub=${html`<span>${n0(L.filter(j => j.type === "noche").length)} de noche</span>`} />
+        <${Kpi} label="Jornadas de nivel alto" value=${n0(hi)} tone=${hi ? "bad" : null} />
+        <${Kpi} label="Índice máximo" value=${fiTxt(peak)} tone=${peak >= fz.fi_high ? "bad" : null} sub=${html`<span>alto desde ${fz.fi_high}</span>`} />
+        <${Kpi} label="Descanso más corto" value=${rests.length ? GI.fmtNum(Math.min(...rests), 1) : "–"} unit="h" sub=${html`<span>${rests.filter(r => r < fz.min_rest).length} de menos de ${fz.min_rest} h</span>`} />
+        <${Kpi} label="Manejo entre 02 y 05 h" value=${GI.fmtNum(low, 1)} unit="h" />
+      </div>
+      ${GI.FatigueSpark && e.sim ? html`<div className="drv-fat-spark"><span className="muted small">Índice de fatiga: últimas 72 h y próximas 16 h</span><${GI.FatigueSpark} entry=${e} proj=${proj} fz=${fz} now=${now} /></div>` : null}
+    </div>`;
+  }
+
+  function DriverDetail({ view, id, onClose, mode, onFatigue, onMap }) {
     const safety = mode === "safety";
     const r = view.dRows.find(x => x.id === id);
     const s = useMemo(() => {
@@ -971,6 +1257,8 @@
     const withMarks = cfg => (safety ? { ...cfg, options: { ...cfg.options, plugins: { ...cfg.options.plugins, milestones: { items: GI.milestoneMarks(view.milestones, view.series, view.gran) } } } } : cfg);
     const evRows = Object.entries(r.evByCat).filter(([k]) => (GI.CATEGORY_BY_KEY[k] || {}).kind === "riesgo").map(([k, n]) => ({ k, n }));
     return html`<${Modal} title=${r.name} onClose=${onClose} wide>
+      ${onMap ? html`<div className="hm-detail-cta"><button className="btn small" onClick=${() => onMap({ driverId: id })}>Ver sus infracciones en el Mapa de calor →</button></div>` : null}
+      ${GI.DriverCoaching && !view.driverMode ? html`<${GI.DriverCoaching} view=${view} drv=${id} />` : null}
       <div className="readouts compact">
         <${Kpi} label="Km" value=${n0(r.km)} />
         <${Kpi} label="Riesgo del período" value=${n2(r.risk)} unit="pts/100 km"
@@ -992,8 +1280,9 @@
         <div><h3>Vehículos que manejó</h3><${DataTable} rows=${vehicles} rowKey=${x => x.name} defaultSort=${{ key: "km", dir: "desc" }} columns=${[
           { key: "name", label: "Vehículo" }, { key: "km", label: "Km", align: "num", fmt: x => n0(x.km) }, { key: "n", label: "Infracciones", align: "num" }]} /></div>
       </div>
+      ${safety ? html`<${DriverFatigue} view=${view} id=${id} onFatigue=${onFatigue} />` : null}
     <//>`;
   }
 
-  Object.assign(GI, { SummaryTab, FuelTab, SafetyTab, DriversTab, RoutesTab, VehicleDetail, DriverDetail, TrendChart, METRICS, TargetCell });
+  Object.assign(GI, { MapTab, SummaryTab, FuelTab, SafetyTab, DriversTab, RoutesTab, VehicleDetail, DriverDetail, TrendChart, METRICS, TargetCell });
 })(window.GI);
