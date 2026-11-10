@@ -20,7 +20,7 @@
   ];
 
   // Pestañas que por ahora solo se publican en la BETA (en la versión normal no aparecen).
-  const BETA_ONLY = new Set(["corredores", "mapa"]);
+  const BETA_ONLY = new Set(["corredores"]);
   const showBetaTabs = () => GI.BUILD === "beta" || /\/dev\//.test(window.location.pathname);
 
   // Config guardada + campos nuevos que pudieran faltar (versiones futuras).
@@ -270,7 +270,7 @@
       load(settings, p, catalogs);
     }
 
-    const mapOn = !!GI.MapTab && !driverMode && showBetaTabs();
+    const mapOn = !!GI.MapTab && !driverMode;
     const openMap = p => { setDetail(null); setMapPreset(p); setTab("mapa"); };
     if (phase === "init") return html`<div className="splash"><div className="spinner"></div>Cargando configuración de ${database}…</div>`;
     if (phase === "error") return html`<div className="splash"><${Info} tone="error">${error}<//></div>`;
@@ -352,7 +352,7 @@
           : tab === "conductores" ? html`<${GI.DriversTab} view=${view} onDriver=${id => setDetail({ type: "d", id })} />`
           : tab === "recorridos" ? html`<${GI.RoutesTab} view=${view} api=${api} onMap=${mapOn ? openMap : null} />`
           : tab === "mapa" ? html`<${GI.MapTab} view=${view} api=${api} preset=${mapPreset} onPresetUsed=${() => setMapPreset(null)} onDriver=${id => setDetail({ type: "d", id, mode: "safety" })}
-              isAdmin=${isAdmin} onSaveSettings=${saveSettings} onCorridors=${() => setTab("corredores")}
+              isAdmin=${isAdmin} onSaveSettings=${showBetaTabs() ? saveSettings : null} onCorridors=${showBetaTabs() ? () => setTab("corredores") : null}
               period=${period} presets=${PRESETS} onPeriod=${applyPreset} />`
           : tab === "fatiga" ? (GI.FatigueTab ? html`<${GI.FatigueTab} view=${view} api=${api} userName=${userName} isAdmin=${isAdmin} onSaveSettings=${saveSettings} openDriverId=${fatigueDrv} onOpened=${() => setFatigueDrv(null)} onDriver=${id => setDetail({ type: "d", id, mode: "safety" })} />` : html`<${Info} tone="warn">Se está terminando de cargar la nueva versión. Recargá la página (Ctrl + F5).<//>`)
           : tab === "exposicion" ? html`<${GI.ExposureTab} view=${view} onDriver=${id => setDetail({ type: "d", id })} />`
