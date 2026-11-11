@@ -242,7 +242,8 @@
         const from = S.toMs(m.from);
         const to = Math.min(m.to ? S.toMs(m.to) : S.dayEnd(c.date), now);
         if (!(to > from)) continue;
-        out.push({ from, to, devices: (c.deviceIds && c.deviceIds.length ? c.deviceIds : [c.deviceId]).filter(Boolean),
+        // desde Horas de trabajo 1.5 cada acompañante va en un vehículo (m.deviceId)
+        out.push({ from, to, driverId: c.driverId, devices: (m.deviceId ? [m.deviceId] : c.deviceIds && c.deviceIds.length ? c.deviceIds : [c.deviceId]).filter(Boolean),
           crewKey: c.key, driverName: c.driverName || "", deviceName: c.deviceName || "", status: S.memberStatus(c, m, idx) });
       }
     }
@@ -257,6 +258,7 @@
     for (const iv of intervals) {
       for (const t of vehTrips || []) {
         if (!iv.devices.includes(t.d) || t.e <= iv.from || t.s >= iv.to) continue;
+        if (iv.driverId && t.r && t.r !== iv.driverId) continue;   // ese vehículo ya lo manejaba otro
         const s = Math.max(t.s, iv.from), e = Math.min(t.e, iv.to);
         if (!(e > s) || overlapsOwn(s, e)) continue;
         const f = t.e > t.s ? (e - s) / (t.e - t.s) : 1;
