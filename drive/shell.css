@@ -13,3 +13,16 @@
 .cz .mj { min-height: 0; }
 .cz .whd { padding-top: 12px; }
 .cz-badge[hidden], .cz-panel[hidden] { display: none; }
+
+/* Tema oscuro de Drive: contenedor y "Mi jornada" en oscuro, como la pestaña Tripulación (1.2.6) */
+@media (prefers-color-scheme: dark) {
+  .cz, .cz-tabs { background: #15191e; color: #e8ecf0; }
+  .cz-head h1, .cz-tab.is-on { color: #e8ecf0; }
+  .cz-sub, .cz-tab { color: #9aa6b2; }
+  .cz-icon { background: #1f252c; border-color: #333c46; color: #e8ecf0; }
+  .cz-tabs { border-bottom-color: #333c46; }
+  .cz .mj { --canvas: #15191e; --surface: #1f252c; --rule: #333c46; --ink: #e8ecf0; --text: #e8ecf0; --text-2: #b4bec8; --muted: #9aa6b2;
+            --marking-soft: #3d2f12; --marking-ink: #f3c56b; --good-soft: #173323; --good: #8fd6a8; --bad-soft: #3e1a17; --bad: #f2a59c; }
+  .cz .mj-btn:not(.mj-btn-2) { background: #7aa7e6; border-color: #7aa7e6; color: #10161d; }
+  .cz .mj-sb > div { background: #9aa6b2; }
+}
