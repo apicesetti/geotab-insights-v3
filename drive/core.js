@@ -153,6 +153,17 @@
       const last = mine.filter(t => t.d === live.d).pop();
       if (!(last && last.e > live.since)) mine.push({ i: "_live", d: live.d, r: me, s: live.since, e: now, dh: (now - live.since) / H, km: 0, live: true });
     }
+    // La jornada empieza al identificarse en el vehículo, aunque todavía no haya viajes: se agrega
+    // el tiempo desde la identificación hasta el primer viaje como trabajo sin manejo.
+    let identPiece = null;
+    if (live && live.identFrom && live.identFrom < now && now - live.identFrom < cfg.drive.fatigue_days * DAY) {
+      const after = mine.filter(t => t.e > live.identFrom).sort((a, b) => a.s - b.s);
+      const end = after.length ? Math.max(live.identFrom, after[0].s) : now;
+      if (end - live.identFrom >= MIN) {
+        identPiece = { i: "_ident", d: live.d, r: me, s: live.identFrom, e: end, dh: 0, km: 0.5, ident: true };
+        mine.push(identPiece);
+      }
+    }
     const tripsByDevice = GI.groupBy(mine.sort((a, b) => a.s - b.s), t => t.d);
     const model = { settings: { fatigue: fz }, tripsByDevice, events: evs.filter(e => e.t >= from) };
     const res = GI.buildShifts(model, new Set(tripsByDevice.keys()), id => id === me, { now, tripsByDevice });
@@ -165,6 +176,7 @@
       const fi = GI.openShiftIndex(last, list, last.sim, fz, now);
       for (const x of p.items) { x.left = Math.max(0, x.max - x.v); }
       out.open = { shift: last, progress: p, index: fi, daysRow: last.daysRow };
+      if (identPiece && identPiece.s >= last.s - MIN) out.open.ident = { from: identPiece.s, noTrips: !mine.some(t => !t.ident && !t.ride && t.e >= last.s) };
       const rides = mine.filter(t => t.ride && t.e >= last.s);
       out.open.ride = rides.length ? { only: !mine.some(t => !t.ride && t.e >= last.s), crewKey: rides[rides.length - 1].crewKey } : null;
     } else if (last) {

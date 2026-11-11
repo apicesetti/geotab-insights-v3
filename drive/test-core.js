@@ -130,4 +130,16 @@ if (fs.existsSync(whPath)) {
   ok(D.rideIntervals([crew, ack], "me", now, S).length === 0, "rechazado: no cuenta");
 } else console.log("(sin ../workinghours: se saltean las pruebas de acompañante)");
 
+// identificado en el vehículo sin viajes todavía: la jornada empieza al identificarse
+{
+  const n2 = at(15, 40);
+  const fsI = D.fatigueState([], [], cfg, "me", n2, { d: "b42", driving: false, since: at(12, 0), identFrom: at(15, 36) });
+  ok(fsI.open && fsI.open.ident && fsI.open.ident.noTrips && Math.abs(fsI.open.progress.items[0].v - 4 / 60) < 1e-6, "identificado sin viajes: jornada abierta desde la identificación");
+  const it3 = Object.fromEntries(fsI.open.progress.items.map(x => [x.key, x]));
+  ok(it3.drive.v === 0 && it3.stint.v === 0 && !fsI.open.progress.driving, "sin manejo ni manejo continuo");
+  // con viajes: cuenta desde la identificación (05:55), no desde el primer viaje (06:00)
+  const fsJ = D.fatigueState(trips, evs, cfg, "me", now, { d: "b1", driving: false, since: at(13, 0), identFrom: at(5, 55) });
+  ok(Math.abs(fsJ.open.progress.items[0].v - (8 + 5 / 60)) < 1e-6 && !fsJ.open.ident.noTrips, "con viajes: la jornada arranca en la identificación");
+}
+
 console.log("OK " + pass + " pruebas");
