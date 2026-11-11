@@ -75,6 +75,7 @@
       geolocation: { getCurrentPosition: (ok) => setTimeout(() => { const p = window.__phone; ok({ coords: { latitude: p.lat, longitude: p.lon, accuracy: p.acc }, timestamp: Date.now() }); }, 5) },
       notification: { notify: (msg, title) => { window.__notifications.push({ title, msg }); return Promise.resolve(); } },
       speak: t => window.__spoken.push(t),
+      navigate: page => { window.__navigated = page; },
       listenTo: () => {},
     },
   };
