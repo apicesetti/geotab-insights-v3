@@ -67,3 +67,4 @@
 .mj-user { display: block; width: 100%; text-align: left; min-height: 48px; padding: 0 14px; border: 0; border-bottom: 1px solid var(--rule); background: var(--surface); font-size: 16px; font-family: inherit; color: var(--text); }
 .mj-user:last-child { border-bottom: 0; }
 .mj-okm { background: var(--good-soft); color: var(--good); border-radius: 8px; padding: 10px 12px; font-size: 14px; margin: 10px 0 0; }
+.mj-ride { background: #e8eef7; color: #25477b; border-radius: 8px; padding: 8px 10px; font-size: 14px; margin: 8px 0 0; }

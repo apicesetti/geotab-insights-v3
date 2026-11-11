@@ -103,4 +103,31 @@ ok(D.filterUsers(cands, "alvarez").length === 1 && D.filterUsers(cands, "").leng
 const msg = D.reliefMessage("Juan Pérez", { name: "Camión 12", lat: -38.95, lon: -68.06 }, now);
 ok(/Juan Pérez te entregó Camión 12 a las 14:00/.test(msg) && /maps\.google\.com\/\?q=-38\.95,-68\.06/.test(msg), "mensaje de relevo");
 
+// acompañante: tramos de tripulación de Horas de trabajo (repo hermano ../workinghours)
+const whPath = path.join(__dirname, "..", "..", "workinghours", "scripts", "shared.js");
+if (fs.existsSync(whPath)) {
+  vm.runInContext(fs.readFileSync(whPath, "utf8"), ctx);
+  const S = ctx.WorkingHoursShared;
+  const jw = { key: "k1", date: GI.dayKey(now), driverId: "chofer", deviceId: "b2", firstAt: at(6, 0), segments: [] };
+  const crew = S.newCrewRecord(jw, { driverName: "Mauricio Falcon", deviceName: "OE" });
+  crew.members = [{ userId: "me", name: "Yo", from: new Date(at(6, 0)).toISOString(), to: new Date(at(12, 0)).toISOString() }];
+  const vtrips = [
+    { i: "v1", d: "b2", r: "chofer", s: at(6, 10), e: at(9, 0), km: 200, dh: 2.8 },
+    { i: "v2", d: "b2", r: "chofer", s: at(10, 0), e: at(13, 0), km: 210, dh: 3 },   // se corta a las 12:00
+    { i: "v3", d: "b9", r: "otro", s: at(7, 0), e: at(8, 0), km: 50, dh: 1 },        // otro vehículo
+  ];
+  let ivs = D.rideIntervals([crew], "me", now, S);
+  ok(ivs.length === 1 && ivs[0].status === "pending" && ivs[0].deviceName === "OE", "tramo como acompañante (sin confirmar)");
+  let rt = D.rideTrips(ivs, vtrips, "me", []);
+  ok(rt.length === 2 && rt.every(t => t.dh === 0 && t.r === "me") && rt[1].e === at(12, 0) && Math.abs(rt[1].km - 140) < 1e-6, "viajes del vehículo recortados al tramo, sin manejo");
+  const fsR = D.fatigueState(rt, [], cfg, "me", at(12, 30), null);
+  const itR = Object.fromEntries(fsR.open.progress.items.map(x => [x.key, x]));
+  ok(fsR.open && fsR.open.ride && fsR.open.ride.only && Math.abs(itR.span.v - 6.5 + 0.1667) < 0.01 && itR.drive.v === 0, "jornada del acompañante: cuenta jornada, no manejo (" + itR.span.v + ")");
+  // lo que manejé yo gana sobre lo que viajé de acompañante
+  ok(D.rideTrips(ivs, vtrips, "me", [{ s: at(10, 30), e: at(11, 0) }]).length === 1, "superposición con manejo propio: gana el manejo");
+  // dijo "No viajo": no cuenta
+  const ack = S.newAck(crew, { id: "me", name: "Yo" }, "no", "yo");
+  ok(D.rideIntervals([crew, ack], "me", now, S).length === 0, "rechazado: no cuenta");
+} else console.log("(sin ../workinghours: se saltean las pruebas de acompañante)");
+
 console.log("OK " + pass + " pruebas");

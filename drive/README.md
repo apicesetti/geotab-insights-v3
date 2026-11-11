@@ -1,5 +1,14 @@
 # Mi jornada — add-in de Geotab Drive
 
+**Desde la v1.1 es un add-in unificado** con dos pestañas:
+
+- **Mi jornada** (este repo: `core.js`, `app.js`): tiempo restante, fatiga, índice de riesgo y vehículo.
+- **Tripulación** ([apicesetti/workinghours](https://github.com/apicesetti/workinghours), `scripts/drive.js`): carga de acompañantes, confirmación "¿Viajás con…?", "Viajo con…", paradas y planilla.
+
+`shell.js` registra los dos como un solo add-in (un ícono, un `onStartup`) y abre directamente en *Tripulación* cuando hay algo para responder (la pestaña muestra cuántas cosas faltan). La página carga los scripts de workinghours desde `../../workinghours/` — los dos repos se publican en `apicesetti.github.io`.
+
+**Acompañantes**: la jornada y la fatiga de quien viaja de acompañante salen de las tripulaciones de Horas de trabajo. Se toman los viajes del vehículo mientras estuvo a bordo; cuentan como jornada, no como manejo. Si dijo "No viajo" no cuentan; si todavía no confirmó, cuentan y se muestra "sin confirmar". Si en el mismo momento manejó él, gana el manejo.
+
 El conductor ve en el teléfono, con los **mismos límites y cálculos que Insights by Cesetti**:
 
 - **Te queda**: horas de jornada, de manejo y de manejo continuo que le quedan, y a qué hora llega a cada límite. Fuera de jornada muestra el descanso que lleva y cuánto le falta para el mínimo.
@@ -37,7 +46,7 @@ Opcional: en la configuración de Insights se puede agregar una clave `drive` pa
 ## Instalación
 
 1. GitHub Pages ya publica el repo: la página queda en `https://apicesetti.github.io/geotab-insights-v3/drive/index.html`.
-2. En cada base: *Administración → Sistema → Configuración del sistema → Add-Ins → Nuevo* y pegar `drive/addin-config.json`. Es un add-in **aparte** de Insights (no lleva el `id` de Insights).
+2. En cada base: *Administración → Sistema → Configuración del sistema → Add-Ins → Nuevo* y pegar `drive/addin-config.json`. Es un add-in **aparte** de Insights (no lleva el `id` de Insights). **Quitar "Horas de trabajo (Drive)"** si estaba instalado: ya viene incluido acá. La página "Horas de trabajo" de MyGeotab se deja como está.
 3. **Permisos del perfil con el que entran los conductores a Drive** — tiene que poder ver: *Viajes*, *Excepciones*, *Cambios de conductor*, *Estado de los vehículos* (DeviceStatusInfo), *Vehículos*, *Usuarios* (para la lista de relevo) y *Datos de add-ins* (lectura). Para los botones: **agregar cambios de conductor** y **enviar mensajes**. Si falta un permiso, el add-in lo dice en pantalla.
 4. **Configuración de Insights visible para los conductores**: Insights guarda la configuración en el grupo de la empresa y en los grupos de acceso de los usuarios **al momento de guardar**. Si un conductor tiene un grupo de acceso nuevo, volver a guardar la configuración desde Insights.
 5. En cada teléfono: entrar a Drive una vez y aceptar los permisos de **ubicación** y **notificaciones**.
@@ -51,6 +60,7 @@ Opcional: en la configuración de Insights se puede agregar una clave `drive` pa
 ## Probar sin Geotab
 
 ```
-node drive/test-core.js          # lógica (límites, riesgo, alejamiento)
+node drive/test-core.js          # lógica (límites, riesgo, alejamiento, acompañante)
 python3 drive/dev/run_e2e.py     # navegador con API simulado (Playwright), capturas en drive/dev/shots
+python3 drive/dev/run_shell.py   # add-in unificado con dos teléfonos (requiere ../workinghours clonado al lado)
 ```

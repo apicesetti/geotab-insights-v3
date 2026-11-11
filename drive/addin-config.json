@@ -1,7 +1,7 @@
 {
-  "name": "Mi jornada - Cesetti",
+  "name": "Mi jornada - Cesetti (incluye Horas de trabajo)",
   "supportEmail": "mt@cesetti.com.ar",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "items": [
     {
       "url": "https://apicesetti.github.io/geotab-insights-v3/drive/index.html",
