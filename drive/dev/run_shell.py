@@ -52,7 +52,7 @@ with sync_playwright() as p:
     page.check("[data-pick=u2]")
     page.click("[data-act=saveCrew]")
     page.wait_for_timeout(500)
-    check("María Álvarez no confirmó" in page.inner_text("#whDrive"), "Juan ve que María no confirmó")
+    check("María Álvarez · sin confirmar" in page.inner_text("#whDrive"), "Juan ve que María no confirmó")
     # Clientes: llegada con la posición del teléfono
     page.click(".cz-tab[data-tab=clientes]")
     page.wait_for_selector("[data-act=checkin]")
