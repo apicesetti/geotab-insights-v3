@@ -82,6 +82,9 @@ with sync_playwright() as p:
     check(len(dc) == 1 and dc[0]["entity"]["driver"]["id"] == "UnknownDriverId" and dc[0]["entity"]["device"]["id"] == "b1", "desvinculación por DriverChange")
     check("Le avisamos a María Álvarez" in page.inner_text(".mj-okm"), "confirmación en pantalla")
     page.screenshot(path=str(OUT / "04-relevo-ok.png"), full_page=True)
+    check(page.is_visible("text=Quitar el vehículo en Drive"), "ofrece quitar el vehículo elegido en Drive")
+    page.click("text=Quitar el vehículo en Drive")
+    check(page.evaluate("window.__navigated") == "assets", "abre la pantalla de vehículos de Drive")
 
     # se desvincula → ya no avisa
     page.evaluate("() => { window.__notifications.length = 0; }")

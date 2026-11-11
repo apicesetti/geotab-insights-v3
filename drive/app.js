@@ -277,12 +277,14 @@
     if (ui.busy) return;
     const vn = (vehicle && vehicle.name) || "el vehículo";
     if (name === "cancel") { ui = { mode: null, q: "", busy: false, msg: null }; return render(); }
+    if (name === "drive-assets") { try { api.mobile.navigate("assets"); } catch (e) { /* versión de Drive sin navigate */ } return; }
     if (name === "ask-unassign") { ui.mode = "unassign"; ui.msg = null; return render(); }
     if (name === "ask-relief") { ui.mode = "relief"; ui.q = ""; ui.msg = null; render(); return loadDrivers().then(render); }
     ui.busy = true; render();
     let p;
     if (name === "unassign") {
-      p = unassign().then(() => ({ ok: "Te desvinculaste de " + vn + "." }), e => ({ err: errMsg(e, "No se pudo desvincular") }));
+      const dev = vehicle && vehicle.d;
+      p = unassign().then(() => ({ ok: "Te desvinculaste de " + vn + ".", dev }), e => ({ err: errMsg(e, "No se pudo desvincular") }));
     } else if (name === "relief") {
       const u = (drivers || []).find(x => x.id === arg);
       if (!u) { ui.busy = false; return render(); }
@@ -290,7 +292,7 @@
       p = sendRelief(u).then(() => null, e => errMsg(e, "No se pudo avisar a " + u.name))
         .then(e1 => unassign().then(() => null, e => errMsg(e, "No se pudo desvincular"))
           .then(e2 => (e1 || e2 ? { err: [e1, e2].filter(Boolean).join(" ") + (e1 ? "" : " A " + u.name + " le llegó el aviso.") }
-            : { ok: "Le avisamos a " + u.name + " y te desvinculaste de " + vn + "." })));
+            : { ok: "Le avisamos a " + u.name + " y te desvinculaste de " + vn + ".", dev: vehicle && vehicle.d })));
     }
     return p.then(r => { ui = { mode: null, q: "", busy: false, msg: r }; render(); });
   }
@@ -436,7 +438,11 @@
     else if (mine) {
       actions = `<div class="mj-btns"><button class="mj-btn ${far ? "" : "mj-btn-2"}" data-act="ask-unassign">Me desvinculo</button><button class="mj-btn mj-btn-2" data-act="ask-relief">Me relevaron</button></div>`;
     }
-    const msg = ui.msg ? `<p class="${ui.msg.ok ? "mj-okm" : "mj-msg"}">${esc(ui.msg.ok || ui.msg.err)}</p>` : "";
+    // Drive tiene su propia selección de vehículo: si sigue elegido el que se dejó, se ofrece quitarlo
+    const driveSel = state && GI.idOf(state.device);
+    const offerAssets = ui.msg && ui.msg.ok && ui.msg.dev && driveSel === ui.msg.dev && hasMobile();
+    const msg = ui.msg ? `<p class="${ui.msg.ok ? "mj-okm" : "mj-msg"}">${esc(ui.msg.ok || ui.msg.err)}</p>`
+      + (offerAssets ? `<p class="mj-hint">En Drive todavía figura ese vehículo como elegido.</p><div class="mj-btns"><button class="mj-btn mj-btn-2" data-act="drive-assets">Quitar el vehículo en Drive</button></div>` : "") : "";
     return `<section class="mj-card ${far && mine ? "mj-card-alert" : ""}" id="mj-vehicle"><h2>Vehículo</h2>
       <p class="mj-big-s">${vn ? esc(vn) : "Sin identificación"}</p>
       <p class="mj-sub ${far ? "mj-badc" : ""}">${f ? f(away.dist) : "Revisando…"}</p>
