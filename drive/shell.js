@@ -6,6 +6,8 @@
 // onStartup y un solo lugar donde el técnico responde lo que le preguntan.
 //
 // Ingeniero Jorge Cesetti SRL
+// Versión que se ve en Drive (pie de cada pestaña). Subirla junto con addin-config.json.
+window.CESETTI_VERSION = "1.2.9";
 (function () {
   "use strict";
   const M = window.CesettiModules || {};
@@ -38,6 +40,12 @@
     if (name !== "jornada" && mods && mods.wh && mods.wh.section) { try { mods.wh.section(name === "clientes" ? "clients" : "crew"); } catch (e) { /* módulo sin secciones */ } }
     window.scrollTo && window.scrollTo(0, 0);
     updateBadge();
+  }
+  function version() {
+    const el = document.getElementById("cz-ver");
+    if (!el) return;
+    const wh = window.WorkingHoursShared && window.WorkingHoursShared.VERSION;
+    el.textContent = "Mi jornada v" + window.CESETTI_VERSION + (wh ? " · Horas de trabajo v" + wh : "");
   }
   function who() {
     const el = document.getElementById("cz-who"), src = document.getElementById("mj-who") || document.getElementById("whd-who");
@@ -73,7 +81,7 @@
         setTimeout(once, 9000); // nunca bloquear el inicio de Drive
       },
       initialize(api, state, cb) {
-        create(); bind();
+        create(); bind(); version();
         const fin = done(Object.keys(mods).length || 1, cb);
         if (!Object.keys(mods).length) return fin();
         each(m => m.initialize(api, state, fin));

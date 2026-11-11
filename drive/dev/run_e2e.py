@@ -27,7 +27,7 @@ with sync_playwright() as p:
     v = page.evaluate("() => { const v = window.GI._mj.view; return { open: !!v.fat.open, items: v.fat.open.progress.items.map(x => [x.key, x.v, x.left]), risk: v.risk.cur.risk, n: v.risk.cur.n } }")
     items = {k: (val, left) for k, val, left in v["items"]}
     check(v["open"], "jornada en curso")
-    check(abs(items["span"][0] - 8) < 0.01 and abs(items["span"][1] - 4) < 0.01, "jornada 8 h, quedan 4 h (%s)" % (items["span"],))
+    check(abs(items["span"][0] - 8.0833) < 0.01 and abs(items["span"][1] - 3.9167) < 0.01, "jornada desde la identificación 05:55: 8 h 05, quedan 3 h 55 (%s)" % (items["span"],))
     check(abs(items["drive"][0] - 7.3333) < 0.01 and abs(items["drive"][1] - 1.6667) < 0.01, "manejo 7 h 20, quedan 1 h 40 (%s)" % (items["drive"],))
     check(abs(items["stint"][0] - 3.8333) < 0.01, "manejo continuo 3 h 50 (%s)" % (items["stint"],))
     check(v["risk"] is not None and v["n"] > 0, "índice de riesgo calculado (%s, %d eventos)" % (v["risk"], v["n"]))
@@ -40,7 +40,7 @@ with sync_playwright() as p:
     page.evaluate("() => window.__a.focus(window.__api, window.__state)")
     page.wait_for_timeout(300)
     txt = page.inner_text("#mjDrive").replace("\u00a0", " ")
-    check("TE QUEDA" in txt.upper() and "Quedan 4 h" in txt and "Quedan 1 h 40 min" in txt and "Quedan 10 min" in txt, "tarjeta de tiempo restante")
+    check("TE QUEDA" in txt.upper() and "Quedan 3 h 55 min" in txt and "Identificado en Camión 12 desde las 05:55" in txt and "v1.2.9" in txt and "Quedan 1 h 40 min" in txt and "Quedan 10 min" in txt, "tarjeta de tiempo restante")
     check("Límites de Insights" in txt, "usa la configuración de Insights")
     check(page.evaluate("document.getElementById('mj-who').textContent") == "Juan Pérez", "nombre del conductor")
     page.screenshot(path=str(OUT / "01-jornada.png"), full_page=True)

@@ -168,6 +168,8 @@
             }));
             vehicle = st.find(v => v.driver === me.id) || st[0] || null;
             if (!vehicle) return;
+            // desde cuándo estoy identificado en este vehículo (último cambio de conductor a mi nombre)
+            if (vehicle.driver === me.id && lastCh && GI.idOf(lastCh.device) === vehicle.d) vehicle.identFrom = new Date(lastCh.dateTime).getTime();
             const names = lsGet("devNames", {});
             if (names[vehicle.d]) { vehicle.name = names[vehicle.d]; return; }
             return wapi.call("Get", { typeName: "Device", search: { id: vehicle.d }, propertySelector: { fields: ["id", "name", "licensePlate"], isIncluded: true } })
@@ -196,7 +198,7 @@
     if (!me) return;
     const now = Date.now();
     const evs = D.myEvents(rawEvents, trips, me.id, cfg);
-    const live = vehicle && vehicle.driver === me.id ? { d: vehicle.d, driving: vehicle.driving || !!(state && state.driving), since: vehicle.since } : null;
+    const live = vehicle && vehicle.driver === me.id ? { d: vehicle.d, driving: vehicle.driving || !!(state && state.driving), since: vehicle.since, identFrom: vehicle.identFrom || null } : null;
     // jornada y fatiga: lo que manejé + lo que viajé de acompañante (sin manejo)
     const ivs = D.rideIntervals(rides.records, me.id, now, WH());
     const rideT = D.rideTrips(ivs, rides.vtrips, me.id, trips);
@@ -356,6 +358,7 @@
       return `<section class="mj-card"><h2>Te queda</h2>
         <p class="mj-sub">Jornada desde las ${D.hm(f.open.shift.s)}${p.driving ? " · manejando" : p.sinceLast > 1 ? " · detenido hace " + D.dur(p.sinceLast / 60) : ""}</p>
         ${f.open.ride ? rideNote(f.open) : ""}
+        ${f.open.ident ? `<p class="mj-ride">Identificado en ${esc((vehicle && vehicle.name) || "el vehículo")} desde las ${D.hm(f.open.ident.from)}${f.open.ident.noTrips ? " · todavía sin viajes" : ""}. La jornada cuenta desde la identificación.</p>` : ""}
         ${p.items.map(bar).join("")}
         ${f.open.daysRow > f.limits.max_days_row ? `<p class="mj-warn">Llevás ${f.open.daysRow} días seguidos de trabajo (máximo ${f.limits.max_days_row}).</p>` : ""}
         ${p.nightAhead ? `<p class="mj-warn">Tu jornada sigue de madrugada (02–05 h): es el horario de más riesgo de sueño.</p>` : ""}
@@ -458,7 +461,7 @@
     if (who) who.textContent = me ? me.name : "";
     const body = $("#mj-view");
     if (!body) return;
-    const foot = `<p class="mj-foot">${cfg.fromInsights ? "Límites de Insights by Cesetti" : "Límites por defecto (no se pudo leer la configuración de Insights)"} · actualizado ${view ? D.hm(view.at) : "–"}${isOnline() ? "" : " · sin conexión"}</p>`;
+    const foot = `<p class="mj-foot">${window.CESETTI_VERSION ? "v" + window.CESETTI_VERSION + " · " : ""}${cfg.fromInsights ? "Límites de Insights by Cesetti" : "Límites por defecto (no se pudo leer la configuración de Insights)"} · actualizado ${view ? D.hm(view.at) : "–"}${isOnline() ? "" : " · sin conexión"}</p>`;
     const err = error ? `<div class="mj-msg">${esc(error)}</div>` : "";
     if (!me || !view) { body.innerHTML = err + `<p class="mj-sub mj-loading">Cargando tus datos…</p>`; return; }
     // con el conductor lejos del vehículo (o eligiendo relevo) la tarjeta del vehículo va primero
