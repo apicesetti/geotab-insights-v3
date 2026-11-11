@@ -40,7 +40,7 @@ with sync_playwright() as p:
 
     # 1) Juan: un solo add-in, dos pestañas; falta cargar tripulación → abre en Tripulación
     phone(page, "jp@cesetti.com.ar")
-    check(page.locator(".cz-tab").count() == 2, "dos pestañas")
+    check(page.locator(".cz-tab").count() == 3, "tres pestañas: Mi jornada, Tripulación y Clientes")
     titles = [n["title"] for n in page.evaluate("window.__notifications")]
     check("¿Quién viaja con vos?" in titles, "aviso de Horas de trabajo desde el mismo add-in (%s)" % titles)
     check(any("manejo" in t.lower() for t in titles), "avisos de límites de Mi jornada")
@@ -53,6 +53,23 @@ with sync_playwright() as p:
     page.click("[data-act=saveCrew]")
     page.wait_for_timeout(500)
     check("María Álvarez no confirmó" in page.inner_text("#whDrive"), "Juan ve que María no confirmó")
+    # Clientes: llegada con la posición del teléfono
+    page.click(".cz-tab[data-tab=clientes]")
+    page.wait_for_selector("[data-act=checkin]")
+    page.click("[data-act=checkin]")
+    page.wait_for_selector("#whd-search")
+    page.wait_for_timeout(200)
+    page.fill("#whd-search", "Pampa Energía")
+    page.click("[data-act=checkinSave][data-new='1']")
+    page.wait_for_timeout(800)
+    recs = [e["details"]["rec"] for e in page.evaluate("window.__db.AddInData") if e["details"].get("type")]
+    check(any(r["type"] == "visit" and r["client"] == "Pampa Energía" and r["posSource"] == "phone" for r in recs), "llegada guardada desde la pestaña Clientes")
+    check(any(r["type"] == "zonereq" for r in recs), "geocerca pedida para el supervisor")
+    page.wait_for_selector(".whd-visit")
+    check("Pampa Energía" in page.inner_text(".whd-visit >> nth=-1"), "la visita aparece en curso")
+    page.screenshot(path=str(OUT / "s1b-juan-clientes.png"), full_page=True)
+    page.click(".cz-tab[data-tab=tripulacion]")
+    check(page.is_visible("[data-act=crew]"), "volver a Tripulación muestra la tripulación")
     page.click(".cz-tab[data-tab=jornada]")
     check(page.is_visible("#mjDrive .mj-card"), "pestaña Mi jornada")
     saved = page.evaluate("JSON.stringify(window.__db.AddInData)")
