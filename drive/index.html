@@ -4,25 +4,56 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
 <title>Mi jornada</title>
-<link rel="stylesheet" href="style.css?v=1.0.1">
+<!-- Add-in unificado de Geotab Drive: "Mi jornada" (este repo) + "Horas de trabajo" (apicesetti/workinghours).
+     Los dos se publican en apicesetti.github.io, por eso las rutas relativas ../../workinghours/. -->
+<script>window.CESETTI_SHELL = true;</script>
+<link rel="stylesheet" href="style.css?v=1.1.0">
+<link rel="stylesheet" href="../../workinghours/styles/drive.css?v=1.2.0">
+<link rel="stylesheet" href="shell.css?v=1.1.0">
 <!-- núcleo compartido con Insights by Cesetti: mismos límites y mismos cálculos -->
-<script src="../static/js/core/util.js?v=3.20.1"></script>
-<script src="../static/js/core/catalog.js?v=3.20.1"></script>
-<script src="../static/js/core/storage.js?v=3.20.1"></script>
-<script src="../static/js/core/fatigue.js?v=3.20.1"></script>
-<script src="core.js?v=1.0.1"></script>
-<script src="app.js?v=1.0.1"></script>
+<script src="../static/js/core/util.js?v=3.35.0"></script>
+<script src="../static/js/core/catalog.js?v=3.35.0"></script>
+<script src="../static/js/core/storage.js?v=3.35.0"></script>
+<script src="../static/js/core/fatigue.js?v=3.35.0"></script>
+<script src="../../workinghours/scripts/shared.js?v=1.2.0"></script>
+<script src="../../workinghours/scripts/drive.js?v=1.2.0"></script>
+<script src="core.js?v=1.1.0"></script>
+<script src="app.js?v=1.1.0"></script>
+<script src="shell.js?v=1.1.0"></script>
 </head>
 <body>
-<div id="mjDrive" class="mj">
-  <header class="mj-head">
+<div id="czShell" class="cz">
+  <header class="cz-head">
     <div>
       <h1>Mi jornada</h1>
-      <p id="mj-who" class="mj-sub"></p>
+      <p id="cz-who" class="cz-sub"></p>
     </div>
-    <button id="mj-refresh" class="mj-icon" title="Actualizar" aria-label="Actualizar">↻</button>
+    <button id="cz-refresh" class="cz-icon" title="Actualizar" aria-label="Actualizar">↻</button>
   </header>
-  <main id="mj-view"><p class="mj-sub mj-loading">Cargando tus datos…</p></main>
+  <nav class="cz-tabs" role="tablist">
+    <button class="cz-tab is-on" data-tab="jornada" role="tab">Mi jornada</button>
+    <button class="cz-tab" data-tab="tripulacion" role="tab">Tripulación <span id="cz-badge" class="cz-badge" hidden></span></button>
+  </nav>
+  <section id="cz-p-jornada" class="cz-panel">
+    <div id="mjDrive" class="mj">
+      <header class="mj-head">
+        <div><h1>Mi jornada</h1><p id="mj-who" class="mj-sub"></p></div>
+        <button id="mj-refresh" class="mj-icon" title="Actualizar" aria-label="Actualizar">↻</button>
+      </header>
+      <main id="mj-view"><p class="mj-sub mj-loading">Cargando tus datos…</p></main>
+    </div>
+  </section>
+  <section id="cz-p-tripulacion" class="cz-panel" hidden>
+    <div id="whDrive" class="whd">
+      <header class="whd-head">
+        <div><h1>Horas de trabajo</h1><p id="whd-who" class="whd-sub"></p></div>
+        <button id="whd-refresh" class="whd-icon" title="Actualizar" aria-label="Actualizar">↻</button>
+      </header>
+      <div id="whd-sync" class="whd-sync" hidden></div>
+      <div id="whd-msg" class="whd-msg" hidden></div>
+      <main id="whd-view"></main>
+    </div>
+  </section>
 </div>
 </body>
 </html>

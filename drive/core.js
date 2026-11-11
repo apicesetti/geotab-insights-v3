@@ -165,6 +165,8 @@
       const fi = GI.openShiftIndex(last, list, last.sim, fz, now);
       for (const x of p.items) { x.left = Math.max(0, x.max - x.v); }
       out.open = { shift: last, progress: p, index: fi, daysRow: last.daysRow };
+      const rides = mine.filter(t => t.ride && t.e >= last.s);
+      out.open.ride = rides.length ? { only: !mine.some(t => !t.ride && t.e >= last.s), crewKey: rides[rides.length - 1].crewKey } : null;
     } else if (last) {
       const restH = (now - last.e) / H;
       out.rest = { since: last.e, hours: restH, min: fz.min_rest, left: Math.max(0, fz.min_rest - restH), fiNow: last.sim ? last.sim.at(now - 1) : null };
@@ -225,6 +227,45 @@
     return { state, status: "lejos", dist, acc, alert };
   }
 
+  // ---------- Acompañante (tripulación de Horas de trabajo) ----------
+  // Tramos en los que viajé de acompañante en el vehículo de otro chofer, según las
+  // tripulaciones cargadas en Horas de trabajo. No cuentan los que rechacé ("No viajo").
+  // S = WorkingHoursShared (scripts/shared.js de apicesetti/workinghours).
+  function rideIntervals(records, me, now, S) {
+    if (!S) return [];
+    const idx = S.ackIndex(records);
+    const out = [];
+    for (const c of records || []) {
+      if (!c || c.type !== S.CREW || c.driverId === me) continue;
+      for (const m of c.members || []) {
+        if (m.userId !== me || S.memberStatus(c, m, idx) === "no") continue;
+        const from = S.toMs(m.from);
+        const to = Math.min(m.to ? S.toMs(m.to) : S.dayEnd(c.date), now);
+        if (!(to > from)) continue;
+        out.push({ from, to, devices: (c.deviceIds && c.deviceIds.length ? c.deviceIds : [c.deviceId]).filter(Boolean),
+          crewKey: c.key, driverName: c.driverName || "", deviceName: c.deviceName || "", status: S.memberStatus(c, m, idx) });
+      }
+    }
+    return out.sort((a, b) => a.from - b.from);
+  }
+  // Viajes del vehículo dentro de esos tramos, como trabajo sin manejo (dh = 0). Se descartan
+  // los pedazos que se superponen con viajes que manejé yo (manejar gana).
+  function rideTrips(intervals, vehTrips, me, ownTrips) {
+    const out = [];
+    const own = (ownTrips || []).slice().sort((a, b) => a.s - b.s);
+    const overlapsOwn = (s, e) => own.some(t => t.s < e && t.e > s);
+    for (const iv of intervals) {
+      for (const t of vehTrips || []) {
+        if (!iv.devices.includes(t.d) || t.e <= iv.from || t.s >= iv.to) continue;
+        const s = Math.max(t.s, iv.from), e = Math.min(t.e, iv.to);
+        if (!(e > s) || overlapsOwn(s, e)) continue;
+        const f = t.e > t.s ? (e - s) / (t.e - t.s) : 1;
+        out.push({ i: "ride|" + t.i, d: t.d, r: me, s, e, km: GI.round((t.km || 0) * f, 3), dh: 0, ride: true, crewKey: iv.crewKey });
+      }
+    }
+    return out.sort((a, b) => a.s - b.s);
+  }
+
   // ---------- Relevo ----------
   const userName = u => [u.firstName, u.lastName].filter(Boolean).join(" ").trim() || u.name || u.id;
   // Conductores activos que comparten algún grupo de conductor conmigo (si no
@@ -258,6 +299,6 @@
   GI.Drive = {
     DRIVE_DEFAULTS, settingsFrom, compactTrip, compactException, mergeById, myEvents,
     riskSummary, fatigueState, limitAlerts, haversine, awayCheck, dur, hm, meters, realDriver,
-    reliefCandidates, filterUsers, reliefMessage, userName,
+    reliefCandidates, filterUsers, reliefMessage, userName, rideIntervals, rideTrips,
   };
 })(window.GI);

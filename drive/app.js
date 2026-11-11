@@ -25,7 +25,7 @@
 
   let api = null, wapi = null, state = null, root = null;
   let me = null, cfg = D.settingsFrom(null);
-  let trips = [], rawEvents = [], vehicle = null, phone = null, away = { status: "—" }, awayState = null;
+  let trips = [], rawEvents = [], rides = { records: [], vtrips: [] }, vehicle = null, phone = null, away = { status: "—" }, awayState = null;
   let last = { config: 0, trips: 0, events: 0, away: 0, fullTrips: 0 };
   let timer = null, busy = false, listening = false, error = null;
   let view = null; // resultados calculados
@@ -49,6 +49,7 @@
     rawEvents = lsGet("events", []);
     last = Object.assign(last, lsGet("last", {}));
     awayState = lsGet("away", null);
+    rides = lsGet("rides", rides);
   }
   function saveCache() {
     lsSet("trips", trips); lsSet("events", rawEvents); lsSet("last", last); lsSet("away", awayState);
@@ -118,6 +119,33 @@
     });
   }
 
+  // Tramos como acompañante: tripulaciones de Horas de trabajo (AddInData) de los últimos
+  // fatigue_days días y los viajes de esos vehículos en esos tramos.
+  const WH = () => window.WorkingHoursShared || null;
+  function loadRides(force) {
+    const S = WH();
+    const now = Date.now();
+    if (!S || (!force && now - (last.rides || 0) < cfg.drive.trips_refresh_min * MIN)) return Promise.resolve();
+    const dates = [];
+    for (let i = cfg.drive.fatigue_days; i >= 0; i--) dates.push(S.addDays(S.dayKey(now), -i));
+    const store = new S.Store((m, p) => wapi.call(m, p), calls => wapi.multiCall(calls));
+    return store.recordsByDates(dates).then(recs => {
+      const records = (recs || []).filter(r => r.type === S.ACK || (r.type === S.CREW && (r.members || []).some(m => m.userId === me.id)));
+      const ivs = D.rideIntervals(records, me.id, now, S);
+      const byDev = new Map();
+      for (const iv of ivs) for (const d of iv.devices) {
+        const cur = byDev.get(d) || { from: iv.from, to: iv.to };
+        cur.from = Math.min(cur.from, iv.from); cur.to = Math.max(cur.to, iv.to); byDev.set(d, cur);
+      }
+      if (!byDev.size) { rides = { records, vtrips: [] }; return; }
+      const devs = [...byDev.keys()];
+      return wapi.multiCall(devs.map(d => ["Get", { typeName: "Trip",
+        search: { deviceSearch: { id: d }, fromDate: iso(byDev.get(d).from - 6 * H), toDate: iso(byDev.get(d).to) },
+        propertySelector: { fields: ["id", "device", "driver", "start", "stop", "distance", "drivingDuration"], isIncluded: true } }]))
+        .then(res => { rides = { records, vtrips: [].concat(...(res || []).map(x => (x || []).map(D.compactTrip))) }; });
+    }).then(() => { last.rides = now; lsSet("rides", rides); }).catch(() => { /* sin permiso o sin red: se mantiene la caché */ });
+  }
+
   // Vehículo en el que estoy identificado: el de Drive y el del último cambio de conductor.
   function loadVehicle() {
     const now = Date.now();
@@ -169,7 +197,10 @@
     const now = Date.now();
     const evs = D.myEvents(rawEvents, trips, me.id, cfg);
     const live = vehicle && vehicle.driver === me.id ? { d: vehicle.d, driving: vehicle.driving || !!(state && state.driving), since: vehicle.since } : null;
-    view = { at: now, risk: D.riskSummary(trips, evs, cfg, now), fat: D.fatigueState(trips, evs, cfg, me.id, now, live) };
+    // jornada y fatiga: lo que manejé + lo que viajé de acompañante (sin manejo)
+    const ivs = D.rideIntervals(rides.records, me.id, now, WH());
+    const rideT = D.rideTrips(ivs, rides.vtrips, me.id, trips);
+    view = { at: now, rides: ivs, risk: D.riskSummary(trips, evs, cfg, now), fat: D.fatigueState(trips.concat(rideT), evs, cfg, me.id, now, live) };
   }
 
   // ---------- avisos ----------
@@ -274,6 +305,7 @@
       if (!me) throw new Error("No se pudo identificar al usuario de Drive.");
       return loadConfig(o.full);
     }).then(() => loadTrips(o.full ? "full" : o.force))
+      .then(() => loadRides(o.full || o.force))
       .then(() => loadEvents(o.full || o.force))
       .then(() => (o.full || o.force || Date.now() - last.away >= cfg.drive.away.poll_min * MIN - 5000 ? checkAway().catch(() => {}) : null))
       .then(() => { error = null; compute(); sendLimitAlerts(); saveCache(); })
@@ -310,11 +342,18 @@
     </div>`;
   }
 
+  function rideNote(o) {
+    const iv = (view.rides || []).filter(r => r.crewKey === o.ride.crewKey).pop();
+    if (!iv) return "";
+    const st = iv.status === "pending" ? " (sin confirmar)" : "";
+    return `<p class="mj-ride">${o.ride.only ? "Como acompañante" : "Parte como acompañante"} de ${esc(iv.driverName || "otro chofer")}${iv.deviceName ? " en " + esc(iv.deviceName) : ""}${st}. Cuenta como jornada, no como manejo.</p>`;
+  }
   function cardTime(f) {
     if (f.open) {
       const p = f.open.progress;
       return `<section class="mj-card"><h2>Te queda</h2>
         <p class="mj-sub">Jornada desde las ${D.hm(f.open.shift.s)}${p.driving ? " · manejando" : p.sinceLast > 1 ? " · detenido hace " + D.dur(p.sinceLast / 60) : ""}</p>
+        ${f.open.ride ? rideNote(f.open) : ""}
         ${p.items.map(bar).join("")}
         ${f.open.daysRow > f.limits.max_days_row ? `<p class="mj-warn">Llevás ${f.open.daysRow} días seguidos de trabajo (máximo ${f.limits.max_days_row}).</p>` : ""}
         ${p.nightAhead ? `<p class="mj-warn">Tu jornada sigue de madrugada (02–05 h): es el horario de más riesgo de sueño.</p>` : ""}
@@ -459,9 +498,7 @@
     document.addEventListener("input", onInput, true);
   }
 
-  window.geotab = window.geotab || {};
-  window.geotab.addin = window.geotab.addin || {};
-  window.geotab.addin.cesettiMiJornada = function () {
+  const factory = function () {
     return {
       // onStartup: al iniciar sesión en Drive, sin interfaz.
       startup(freshApi, freshState, callback) {
@@ -495,5 +532,13 @@
       },
     };
   };
+  // Dentro del add-in unificado (shell.js) lo registra el contenedor; suelto, se registra solo.
+  window.CesettiModules = window.CesettiModules || {};
+  window.CesettiModules.miJornada = factory;
+  if (!window.CESETTI_SHELL) {
+    window.geotab = window.geotab || {};
+    window.geotab.addin = window.geotab.addin || {};
+    window.geotab.addin.cesettiMiJornada = factory;
+  }
   GI._mj = { get view() { return view; }, get away() { return away; }, get ui() { return ui; }, check, render, act };
 })(window.GI);

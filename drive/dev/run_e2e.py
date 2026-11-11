@@ -22,7 +22,7 @@ with sync_playwright() as p:
     page.goto((HERE.parent / "index.html").as_uri())
 
     # startup (sin interfaz) → carga datos, sin avisos todavía (cerca del vehículo)
-    page.evaluate("""() => new Promise(res => { window.__a = geotab.addin.cesettiMiJornada(); window.__a.startup(window.__api, window.__state, res); })""")
+    page.evaluate("""() => new Promise(res => { window.__a = window.CesettiModules.miJornada(); window.__a.startup(window.__api, window.__state, res); })""")
     page.wait_for_function("() => window.GI._mj.view")
     v = page.evaluate("() => { const v = window.GI._mj.view; return { open: !!v.fat.open, items: v.fat.open.progress.items.map(x => [x.key, x.v, x.left]), risk: v.risk.cur.risk, n: v.risk.cur.n } }")
     items = {k: (val, left) for k, val, left in v["items"]}
@@ -42,7 +42,7 @@ with sync_playwright() as p:
     txt = page.inner_text("#mjDrive").replace("\u00a0", " ")
     check("TE QUEDA" in txt.upper() and "Quedan 4 h" in txt and "Quedan 1 h 40 min" in txt and "Quedan 10 min" in txt, "tarjeta de tiempo restante")
     check("Límites de Insights" in txt, "usa la configuración de Insights")
-    check("Juan Pérez" in txt, "nombre del conductor")
+    check(page.evaluate("document.getElementById('mj-who').textContent") == "Juan Pérez", "nombre del conductor")
     page.screenshot(path=str(OUT / "01-jornada.png"), full_page=True)
 
     # se aleja 900 m sin desvincularse → avisa a la 2.ª lectura

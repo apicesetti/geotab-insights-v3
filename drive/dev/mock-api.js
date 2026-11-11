@@ -35,6 +35,7 @@
     AddInData: [{ id: "aid1", addInId: "a2jBAg7PpaFdQpimkOJ7Ajg", details: { kind: "settings", rev: 3, part: 0, parts: 1, chunk } }],
   };
   window.__calls = [];
+  window.__db = db;
   function get(p) {
     const s = p.search || {};
     const tn = p.typeName;
@@ -53,16 +54,22 @@
     return JSON.parse(JSON.stringify(l));
   }
   window.__added = [];
+  function set(p) {
+    const cur = db.AddInData.find(x => x.id === p.entity.id);
+    if (!cur) throw { name: "InvalidEntity", message: "no existe " + p.entity.id };
+    cur.details = JSON.parse(JSON.stringify(p.entity.details)); return null;
+  }
   function add(p) {
     window.__added.push(p);
     if (window.__denyAdd) throw new Error("Unauthorized: missing permission");
     if (p.typeName === "DriverChange" && p.entity.driver.id === "UnknownDriverId") window.__vehicle.driver = "UnknownDriverId";
+    if (p.typeName === "AddInData") { const e = JSON.parse(JSON.stringify(p.entity)); e.id = "aD" + window.__added.length; db.AddInData.push(e); return e.id; }
     return "new" + window.__added.length;
   }
   window.__api = {
-    call: (m, p, ok, err) => setTimeout(() => { try { ok(m === "Add" ? add(p) : get(p)); } catch (e) { err(e); } }, 5),
-    multiCall: (calls, ok, err) => setTimeout(() => { try { ok(calls.map(c => get(c[1]))); } catch (e) { err(e); } }, 5),
-    getSession: cb => setTimeout(() => cb({ userName: "jp@cesetti.com.ar", database: "intcesetti" }), 1),
+    call: (m, p, ok, err) => setTimeout(() => { try { ok(m === "Add" ? add(p) : m === "Set" ? set(p) : get(p)); } catch (e) { err(e); } }, 5),
+    multiCall: (calls, ok, err) => setTimeout(() => { try { ok(calls.map(c => c[0] === "Add" ? add(c[1]) : get(c[1]))); } catch (e) { err(e); } }, 5),
+    getSession: cb => setTimeout(() => cb({ userName: window.__userName || "jp@cesetti.com.ar", database: "intcesetti" }), 1),
     mobile: {
       exists: () => true,
       geolocation: { getCurrentPosition: (ok) => setTimeout(() => { const p = window.__phone; ok({ coords: { latitude: p.lat, longitude: p.lon, accuracy: p.acc }, timestamp: Date.now() }); }, 5) },
