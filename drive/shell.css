@@ -5,7 +5,7 @@
 .cz-sub { color: #4f5866; font-size: 14px; margin: 2px 0 0; }
 .cz-icon { width: 44px; height: 44px; border-radius: 22px; border: 1px solid #e3e7ec; background: #fff; font-size: 22px; color: #1f2a37; }
 .cz-tabs { display: flex; gap: 6px; padding: 6px 12px 0; position: sticky; top: 0; background: #f2f4f6; z-index: 5; border-bottom: 1px solid #e3e7ec; }
-.cz-tab { flex: 1; min-height: 44px; border: 0; background: none; font: inherit; font-size: 16px; font-weight: 600; color: #7b8492; border-bottom: 3px solid transparent; }
+.cz-tab { flex: 1; min-height: 44px; border: 0; background: none; font: inherit; font-size: 15px; padding: 0 2px; white-space: nowrap; font-weight: 600; color: #7b8492; border-bottom: 3px solid transparent; }
 .cz-tab.is-on { color: #1f2a37; border-bottom-color: #f2b705; }
 .cz-badge { display: inline-block; min-width: 20px; padding: 1px 6px; border-radius: 10px; background: #b93a0f; color: #fff; font-size: 12px; margin-left: 4px; }
 /* los encabezados propios de cada módulo no se muestran: el del contenedor los reemplaza */

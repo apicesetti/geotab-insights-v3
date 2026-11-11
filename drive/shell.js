@@ -1,4 +1,4 @@
-// Add-in unificado de Geotab Drive: "Mi jornada" + "Horas de trabajo" (tripulación y planilla).
+// Add-in unificado de Geotab Drive: "Mi jornada" + "Horas de trabajo" (tripulación, clientes y planilla).
 //
 // Cada módulo sigue siendo el mismo código (drive/app.js de este repo y scripts/drive.js de
 // apicesetti/workinghours); este contenedor los registra como UN solo add-in, reparte el ciclo
@@ -33,8 +33,11 @@
     document.querySelectorAll("#czShell .cz-tab").forEach(t => t.classList.toggle("is-on", t.getAttribute("data-tab") === name));
     const pj = document.getElementById("cz-p-jornada"), pt = document.getElementById("cz-p-tripulacion");
     if (pj) pj.hidden = name !== "jornada";
-    if (pt) pt.hidden = name !== "tripulacion";
+    // Tripulación y Clientes son dos secciones del mismo módulo (Horas de trabajo)
+    if (pt) pt.hidden = name === "jornada";
+    if (name !== "jornada" && mods && mods.wh && mods.wh.section) { try { mods.wh.section(name === "clientes" ? "clients" : "crew"); } catch (e) { /* módulo sin secciones */ } }
     window.scrollTo && window.scrollTo(0, 0);
+    updateBadge();
   }
   function who() {
     const el = document.getElementById("cz-who"), src = document.getElementById("mj-who") || document.getElementById("whd-who");

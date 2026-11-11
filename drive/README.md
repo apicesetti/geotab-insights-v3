@@ -1,9 +1,10 @@
 # Mi jornada — add-in de Geotab Drive
 
-**Desde la v1.1 es un add-in unificado** con dos pestañas:
+**Desde la v1.1 es un add-in unificado** con tres pestañas:
 
 - **Mi jornada** (este repo: `core.js`, `app.js`): tiempo restante, fatiga, índice de riesgo y vehículo.
-- **Tripulación** ([apicesetti/workinghours](https://github.com/apicesetti/workinghours), `scripts/drive.js`): carga de acompañantes, confirmación "¿Viajás con…?", "Viajo con…", paradas y planilla.
+- **Tripulación** ([apicesetti/workinghours](https://github.com/apicesetti/workinghours), `scripts/drive.js`): carga de acompañantes, confirmación "¿Viajás con…?", "Viajo con…" y planilla.
+- **Clientes** (v1.2, misma base de Horas de trabajo 1.3): "Llegué a un cliente" con la posición del teléfono, geocerca de 100 × 100 m pedida al supervisor si el cliente no tiene, visitas del día con el tiempo en cada cliente y el tiempo y los km entre clientes, y la carga de clientes en las paradas.
 
 `shell.js` registra los dos como un solo add-in (un ícono, un `onStartup`) y abre directamente en *Tripulación* cuando hay algo para responder (la pestaña muestra cuántas cosas faltan). La página carga los scripts de workinghours desde `../../workinghours/` — los dos repos se publican en `apicesetti.github.io`.
 
