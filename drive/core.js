@@ -245,6 +245,8 @@
   // S = WorkingHoursShared (scripts/shared.js de apicesetti/workinghours).
   function rideIntervals(records, me, now, S) {
     if (!S) return [];
+    // con lo automático (detectado por posición, bajadas) si Horas de trabajo lo soporta
+    if (S.withEffectiveCrews) records = S.withEffectiveCrews(records);
     const idx = S.ackIndex(records);
     const out = [];
     for (const c of records || []) {
@@ -261,21 +263,29 @@
     }
     return out.sort((a, b) => a.from - b.from);
   }
-  // Viajes del vehículo dentro de esos tramos, como trabajo sin manejo (dh = 0). Se descartan
-  // los pedazos que se superponen con viajes que manejé yo (manejar gana).
-  function rideTrips(intervals, vehTrips, me, ownTrips) {
+  // Todo el tiempo a bordo cuenta como trabajo sin manejo (dh = 0), desde que subió hasta que se
+  // bajó, aunque el vehículo esté detenido (en un cliente, esperando). Si el tramo sigue abierto y
+  // el chofer no maneja hace más de rest_split horas, se corta en su último viaje. Lo que manejé
+  // yo gana (se descuenta).
+  function rideTrips(intervals, vehTrips, me, ownTrips, now, restSplitH) {
     const out = [];
     const own = (ownTrips || []).slice().sort((a, b) => a.s - b.s);
-    const overlapsOwn = (s, e) => own.some(t => t.s < e && t.e > s);
+    const split = (restSplitH || 4) * H;
     for (const iv of intervals) {
-      for (const t of vehTrips || []) {
-        if (!iv.devices.includes(t.d) || t.e <= iv.from || t.s >= iv.to) continue;
-        if (iv.driverId && t.r && t.r !== iv.driverId) continue;   // ese vehículo ya lo manejaba otro
-        const s = Math.max(t.s, iv.from), e = Math.min(t.e, iv.to);
-        if (!(e > s) || overlapsOwn(s, e)) continue;
-        const f = t.e > t.s ? (e - s) / (t.e - t.s) : 1;
-        out.push({ i: "ride|" + t.i, d: t.d, r: me, s, e, km: GI.round((t.km || 0) * f, 3), dh: 0, ride: true, crewKey: iv.crewKey });
+      let to = iv.to;
+      const drv = (vehTrips || []).filter(t => iv.devices.includes(t.d) && (!iv.driverId || !t.r || t.r === iv.driverId) && t.e > iv.from && t.s < iv.to);
+      const lastE = drv.length ? Math.max(...drv.map(t => t.e)) : null;
+      if (lastE != null && (now || Date.now()) - lastE > split && to > lastE) to = lastE;
+      // pedazos sin lo que manejé yo
+      let pieces = [[iv.from, to]];
+      for (const t of own) {
+        pieces = pieces.flatMap(([a, b]) => (t.e <= a || t.s >= b ? [[a, b]] : [[a, t.s], [t.e, b]].filter(([x, y]) => y - x >= MIN)));
       }
+      pieces.forEach(([a, b], k) => {
+        if (b - a < MIN) return;
+        const km = GI.sum(drv.filter(t => t.s < b && t.e > a), t => (t.km || 0) * Math.max(0, Math.min(t.e, b) - Math.max(t.s, a)) / Math.max(1, t.e - t.s));
+        out.push({ i: "ride|" + iv.crewKey + "|" + a + "|" + k, d: iv.devices[0], r: me, s: a, e: b, km: Math.max(0.5, GI.round(km, 3)), dh: 0, ride: true, crewKey: iv.crewKey });
+      });
     }
     return out.sort((a, b) => a.s - b.s);
   }

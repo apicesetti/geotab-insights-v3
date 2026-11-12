@@ -40,7 +40,7 @@ with sync_playwright() as p:
     page.evaluate("() => window.__a.focus(window.__api, window.__state)")
     page.wait_for_timeout(300)
     txt = page.inner_text("#mjDrive").replace("\u00a0", " ")
-    check("TE QUEDA" in txt.upper() and "Quedan 3 h 55 min" in txt and "Identificado en Camión 12 desde las 05:55" in txt and "v1.2.9" in txt and "Quedan 1 h 40 min" in txt and "Quedan 10 min" in txt, "tarjeta de tiempo restante")
+    check("TE QUEDA" in txt.upper() and "Quedan 3 h 55 min" in txt and "Identificado en Camión 12 desde las 05:55" in txt and "v1.3.0" in txt and "Quedan 1 h 40 min" in txt and "Quedan 10 min" in txt, "tarjeta de tiempo restante")
     check("Límites de Insights" in txt, "usa la configuración de Insights")
     check(page.evaluate("document.getElementById('mj-who').textContent") == "Juan Pérez", "nombre del conductor")
     page.screenshot(path=str(OUT / "01-jornada.png"), full_page=True)

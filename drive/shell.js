@@ -7,7 +7,7 @@
 //
 // Ingeniero Jorge Cesetti SRL
 // Versión que se ve en Drive (pie de cada pestaña). Subirla junto con addin-config.json.
-window.CESETTI_VERSION = "1.2.9";
+window.CESETTI_VERSION = "1.3.0";
 (function () {
   "use strict";
   const M = window.CesettiModules || {};

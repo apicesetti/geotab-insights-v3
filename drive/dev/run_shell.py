@@ -85,7 +85,7 @@ with sync_playwright() as p:
     ride = page.inner_text(".mj-ride")
     check(ride.startswith("Como acompañante de Juan Pérez en Camión 12") and "(sin confirmar)" in ride, "Mi jornada: jornada como acompañante (%s)" % ride)
     items = page.evaluate("Object.fromEntries(window.GI._mj.view.fat.open.progress.items.map(x => [x.key, x.v]))")
-    check(abs(items["span"] - 8) < 0.01 and items["drive"] == 0, "cuenta 8 h de jornada y 0 de manejo (%s)" % items)
+    check(abs(items["span"] - 8.0833) < 0.01 and items["drive"] == 0, "cuenta desde que subió (05:55): 8 h 05 de jornada y 0 de manejo (%s)" % items)
     page.screenshot(path=str(OUT / "s3-maria-jornada.png"), full_page=True)
     page.click(".cz-tab[data-tab=tripulacion]")
     page.click("[data-act=ack][data-status=ok]")
