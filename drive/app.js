@@ -130,7 +130,8 @@
     for (let i = cfg.drive.fatigue_days; i >= 0; i--) dates.push(S.addDays(S.dayKey(now), -i));
     const store = new S.Store((m, p) => wapi.call(m, p), calls => wapi.multiCall(calls));
     return store.recordsByDates(dates).then(recs => {
-      const records = (recs || []).filter(r => r.type === S.ACK || (r.type === S.CREW && (r.members || []).some(m => m.userId === me.id)));
+      // tripulaciones, confirmaciones, detecciones por posición y bajadas (las tripulaciones efectivas se arman en rideIntervals)
+      const records = (recs || []).filter(r => r.type === S.ACK || r.type === S.CLAIM || r.type === S.LEAVE || r.type === S.CREW);
       const ivs = D.rideIntervals(records, me.id, now, S);
       const byDev = new Map();
       for (const iv of ivs) for (const d of iv.devices) {
@@ -201,7 +202,7 @@
     const live = vehicle && vehicle.driver === me.id ? { d: vehicle.d, driving: vehicle.driving || !!(state && state.driving), since: vehicle.since, identFrom: vehicle.identFrom || null } : null;
     // jornada y fatiga: lo que manejé + lo que viajé de acompañante (sin manejo)
     const ivs = D.rideIntervals(rides.records, me.id, now, WH());
-    const rideT = D.rideTrips(ivs, rides.vtrips, me.id, trips);
+    const rideT = D.rideTrips(ivs, rides.vtrips, me.id, trips, now, cfg.fatigue.rest_split);
     view = { at: now, rides: ivs, risk: D.riskSummary(trips, evs, cfg, now), fat: D.fatigueState(trips.concat(rideT), evs, cfg, me.id, now, live) };
   }
 
@@ -359,7 +360,7 @@
         <p class="mj-sub">Jornada desde las ${D.hm(f.open.shift.s)}${p.driving ? " · manejando" : p.sinceLast > 1 ? " · detenido hace " + D.dur(p.sinceLast / 60) : ""}</p>
         ${f.open.ride ? rideNote(f.open) : ""}
         ${f.open.ident ? `<p class="mj-ride">Identificado en ${esc((vehicle && vehicle.name) || "el vehículo")} desde las ${D.hm(f.open.ident.from)}${f.open.ident.noTrips ? " · todavía sin viajes" : ""}. La jornada cuenta desde la identificación.</p>` : ""}
-        ${p.items.map(bar).join("")}
+        ${p.items.filter(x => !(f.open.ride && f.open.ride.only) || x.key === "span").map(bar).join("")}
         ${f.open.daysRow > f.limits.max_days_row ? `<p class="mj-warn">Llevás ${f.open.daysRow} días seguidos de trabajo (máximo ${f.limits.max_days_row}).</p>` : ""}
         ${p.nightAhead ? `<p class="mj-warn">Tu jornada sigue de madrugada (02–05 h): es el horario de más riesgo de sueño.</p>` : ""}
       </section>`;
@@ -395,6 +396,8 @@
   }
 
   function cardRisk(r) {
+    // sin kilómetros manejados (por ejemplo, solo acompañante): no hay índice que mostrar
+    if (!r.cur.km && !r.prev.km) return "";
     const vals = r.series.map(b => b.risk || 0), mx = Math.max(0.001, ...vals);
     const ch = r.change;
     const chTxt = ch == null ? "" : `<span class="mj-tag ${ch <= 0 ? "mj-okt" : "mj-badt"}">${ch <= 0 ? "▼" : "▲"} ${Math.abs(Math.round(ch * 100))} % vs ${r.days} días anteriores</span>`;
@@ -431,6 +434,14 @@
   function cardVehicle() {
     const mine = vehicle && vehicle.driver === me.id;
     const vn = mine ? vehicle.name || vehicle.d : null;
+    // acompañante: en lugar de "Sin identificación", con quién va
+    const ride = !mine && view && (view.rides || []).filter(r => r.to >= Date.now() - 2 * MIN).pop();
+    if (ride) {
+      return `<section class="mj-card" id="mj-vehicle"><h2>Vehículo</h2>
+        <p class="mj-big-s">${esc(ride.deviceName || "Vehículo")}</p>
+        <p class="mj-sub">Vas de acompañante con ${esc(ride.driverName || "otro chofer")} desde las ${D.hm(ride.from)}.</p>
+        <p class="mj-hint">Si te bajás, tu teléfono lo detecta solo (o tocá "Me bajé" en Tripulación).</p></section>`;
+    }
     const f = AWAY_TXT[away.status];
     const far = away.status === "lejos";
     let actions = "";
