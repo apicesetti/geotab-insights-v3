@@ -11,6 +11,11 @@
 //   cambio      cambia de turno día ↔ noche con un solo descanso entremedio
 //   descanso    descanso previo < min_rest, o mayormente de día antes de un turno noche
 //   seguidos    más de max_days_row días seguidos de trabajo
+//   Controles IOGP 365 (se activan en Configuración → "Parametrizar a IOGP 365"; con 0 están apagados):
+//   manejo24    manejo en cualquier ventana de 24 h > max_drive_24h (suma jornadas separadas por pausas)
+//   semana      horas de jornada en 7 días > max_work_7d, o en 14 días > max_work_14d
+//   corte       más de max_days_row días sin un descanso continuo de break_after_row h
+//   tarde       ≥ 30 min de manejo entre las 15 y las 17 h (bajo circadiano de la tarde; señal leve, vale ½)
 //   (los eventos de cámara —bostezo, distracción, salida de carril— NO son
 //   señales: bostezar no prueba cansancio. Se muestran como contexto y se usan
 //   para validar si el índice anticipa esos eventos.)
@@ -27,6 +32,10 @@
     { key: "cambio", label: "Cambio de turno" },
     { key: "descanso", label: "Descanso corto o de día" },
     { key: "seguidos", label: "Días seguidos" },
+    { key: "manejo24", label: "Manejo en 24 h" },
+    { key: "semana", label: "Horas en la semana" },
+    { key: "corte", label: "Sin corte de 24 h" },
+    { key: "tarde", label: "Manejo 15–17 h" },
     { key: "franco", label: "Franco corto" },
     { key: "francos", label: "Noche después de francos" },
     { key: "motor", label: "Descanso con motor en marcha" },
@@ -194,8 +203,51 @@
     return (overlapHours(a, b, 20, 24) + overlapHours(a, b, 0, 6)) / ((b - a) / H);
   }
 
+  // Valores de fábrica (comportamiento histórico) y piso IOGP 365 (Land transportation safety practice,
+  // marzo 2025, tabla 15; IOGP 626 para el bajo circadiano). 0 = control apagado.
+  const FATIGUE_DEFAULT = { max_drive_day: 9, max_span: 12, min_rest: 8, max_continuous: 4, pause_min: 15, max_days_row: 6, rest_split: 4, fi_mod: 80, fi_high: 100, micro_km: 0.5, micro_min: 10,
+    max_drive_24h: 0, max_work_7d: 0, max_work_14d: 0, break_after_row: 0, low_from: 2, low_to: 5, pm_low: false };
+  // dir: "max" = el valor IOGP es un máximo (menor es más exigente); "min" = es un mínimo (mayor es más exigente)
+  const IOGP365 = [
+    { key: "min_rest", label: "Descanso mínimo entre jornadas", unit: "h", iogp: 10, dir: "min", why: "Tabla 15: no más de 14 h de trabajo en 24 h móviles (deja al menos 10 h de descanso). El IOGP 626 recomienda 11 h." },
+    { key: "pause_min", label: "Pausa que reinicia el manejo continuo", unit: "min", iogp: 30, dir: "min", why: "Tabla 15: 4,5 h de manejo y después al menos 30 min de pausa." },
+    { key: "max_continuous", label: "Manejo continuo máximo", unit: "h", iogp: 4.5, dir: "max", why: "Tabla 15: máximo 4,5 h de manejo seguido." },
+    { key: "max_drive_day", label: "Manejo máximo en una jornada", unit: "h", iogp: 10, dir: "max", why: "Tabla 15: máximo 10 h de manejo en 24 h." },
+    { key: "max_drive_24h", label: "Manejo máximo en 24 h móviles", unit: "h", iogp: 10, dir: "max", isNew: true, why: "Tabla 15: máximo 10 h de manejo en cualquier ventana de 24 h. Hoy dos jornadas separadas por una pausa no se suman." },
+    { key: "max_span", label: "Jornada máxima", unit: "h", iogp: 14, dir: "max", why: "Tabla 15: máximo 14 h de trabajo en 24 h (12 h + 2 por imprevistos)." },
+    { key: "max_work_7d", label: "Horas de trabajo en 7 días", unit: "h", iogp: 72, dir: "max", isNew: true, why: "Tabla 15: máximo 72 h en 7 días móviles. Se suman las jornadas (lo que ve el GPS: es un mínimo)." },
+    { key: "max_work_14d", label: "Horas de trabajo en 14 días", unit: "h", iogp: 120, dir: "max", isNew: true, why: "Tabla 15: máximo 120 h en 14 días (promedio de 60 h por semana)." },
+    { key: "max_days_row", label: "Días seguidos de trabajo", unit: "días", iogp: 6, dir: "max", why: "Tabla 15: la semana de trabajo no puede pasar de 6 días seguidos." },
+    { key: "break_after_row", label: "Corte después de los días seguidos", unit: "h", iogp: 24, dir: "min", isNew: true, why: "Tabla 15: después de 6 días, al menos 24 h continuas de descanso (se aconsejan 36 h). Un día del calendario sin viajes ya no alcanza si el corte fue más corto." },
+    { key: "low_to", label: "Franja de madrugada: hasta las", unit: "h", iogp: 6, dir: "min", why: "Bajo circadiano: 02 a 06 h (IOGP 626; el 365 marca 03 a 05 h)." },
+    { key: "pm_low", label: "Franja de la tarde 15–17 h (señal leve)", unit: "", iogp: true, dir: "bool", isNew: true, why: "Tabla 15: bajo circadiano de la tarde, de 15 a 17 h." },
+  ];
+  // Estado de un parámetro contra el IOGP: "laxo" | "exigente" | "cumple" | "off" (control apagado).
+  function iogpStatus(row, v) {
+    if (row.dir === "bool") return v ? "cumple" : "off";
+    if (v == null || v === "" || (row.isNew && !(+v > 0))) return "off";
+    v = +v;
+    if (v === row.iogp) return "cumple";
+    if (row.dir === "max") return v < row.iogp ? "exigente" : "laxo";
+    return v > row.iogp ? "exigente" : "laxo";
+  }
+  // Cambios que hace "Parametrizar a IOGP 365": solo lo que está apagado o es más laxo.
+  function iogpChanges(fatigue) {
+    const f = Object.assign({}, FATIGUE_DEFAULT, fatigue || {});
+    return IOGP365.map(r => ({ ...r, now: f[r.key], status: iogpStatus(r, f[r.key]) })).filter(r => r.status === "laxo" || r.status === "off");
+  }
+  function applyIogp(fatigue, by) {
+    const f = Object.assign({}, FATIGUE_DEFAULT, fatigue || {});
+    const prev = {}; for (const k of Object.keys(FATIGUE_DEFAULT)) prev[k] = f[k];
+    const ch = iogpChanges(f);
+    for (const r of ch) f[r.key] = r.iogp;
+    if (f.low_from == null || f.low_from > 2) f.low_from = 2;
+    f.iogp_applied = { at: new Date().toISOString(), by: by || null, changes: ch.map(r => ({ key: r.key, from: r.now, to: r.iogp })), prev };
+    return f;
+  }
+
   function fatigueLimits(settings) {
-    const fz = Object.assign({ max_drive_day: 9, max_span: 12, min_rest: 8, max_continuous: 4, max_days_row: 6, rest_split: 4, fi_mod: 80, fi_high: 100, micro_km: 0.5, micro_min: 10 }, (settings && settings.fatigue) || {});
+    const fz = Object.assign({}, FATIGUE_DEFAULT, (settings && settings.fatigue) || {});
     fz.SPLIT = Math.max(1, Math.min(fz.rest_split || 4, fz.min_rest || 8)) * H;
     fz.P = Object.assign({}, FI_DEFAULT, fz.fi_params || {}, { start: FI_DEFAULT.start, step: FI_DEFAULT.step });
     return fz;
@@ -308,7 +360,7 @@
         cur.trips.push(t); cur.e = Math.max(cur.e, t.e);
       }
       const rs = rosterOf(list, o.now, o.rosters && o.rosters.get(drv));
-      let prev = null, row = 0, away = 0;
+      let prev = null, row = 0, away = 0, sinceBreak = null;
       for (const j of list) {
         j.dk = GI.dayKey(new Date(j.s));
         j.key = drv + "|" + j.s;
@@ -319,7 +371,7 @@
         let st = 0, stS = null, lastE = null, maxStint = 0, maxStintS = null, maxStintE = null;
         const pauses = [];
         for (const t of j.trips) {
-          if (lastE != null && t.s - lastE >= 15 * MIN) { pauses.push([lastE, t.s]); st = 0; stS = null; }
+          if (lastE != null && t.s - lastE >= (fz.pause_min || 15) * MIN) { pauses.push([lastE, t.s]); st = 0; stS = null; }
           if (stS == null) stS = t.s;
           st += t.dh;
           if (st > maxStint) { maxStint = st; maxStintS = stS; maxStintE = t.e; }
@@ -327,11 +379,38 @@
         }
         j.maxStint = maxStint; j.maxStintRange = [maxStintS, maxStintE]; j.pauses = pauses;
         // manejo de madrugada: horas de los viajes (proporcional al manejo) en 00–06 y 02–05
-        j.night = 0; j.low = 0;
+        j.night = 0; j.low = 0; j.pm = 0;
         for (const t of j.trips) {
           const len = (t.e - t.s) / H || 1, f = t.dh / len;
           j.night += overlapHours(t.s, t.e, 0, 6) * f;
-          j.low += overlapHours(t.s, t.e, 2, 5) * f;
+          j.low += overlapHours(t.s, t.e, fz.low_from, fz.low_to) * f;
+          if (fz.pm_low) j.pm += overlapHours(t.s, t.e, 15, 17) * f;
+        }
+        // manejo en 24 h móviles: la ventana de 24 h que termina en cada viaje de la jornada (incluye jornadas anteriores)
+        if (fz.max_drive_24h > 0) {
+          j.win24 = 0; j.win24At = null;
+          const base = trips.indexOf(j.trips[0]);
+          for (let m = 0; m < j.trips.length; m++) {
+            const t = j.trips[m], w0 = t.e - 24 * H;
+            let sum = 0;
+            for (let k = base + m; k >= 0; k--) {
+              const u = trips[k];
+              if (u.e <= w0) break;
+              const len = u.e - u.s;
+              sum += len > 0 ? u.dh * (Math.min(u.e, t.e) - Math.max(u.s, w0)) / len : u.dh;
+            }
+            if (sum > j.win24) { j.win24 = sum; j.win24At = t.e; }
+          }
+        }
+        // horas de jornada en 7 y 14 días (jornadas que empiezan en la ventana que termina con esta)
+        if (fz.max_work_7d > 0 || fz.max_work_14d > 0) {
+          j.work7 = 0; j.work14 = 0;
+          for (const k of list) {
+            if (k.s > j.s) break;
+            const sp = (k.e - k.s) / H;
+            if (k.s > j.s - 14 * 24 * H) j.work14 += sp;
+            if (k.s > j.s - 7 * 24 * H) j.work7 += sp;
+          }
         }
         j.type = nightFrac(j.s, j.e) >= 0.5 ? "noche" : "día";
         if (prev) {
@@ -360,6 +439,11 @@
           j.afterOff = j.restBefore >= 36;
         } else row = 1;
         j.daysRow = row;
+        // días desde el último descanso continuo de break_after_row h (sin conocer el anterior, desde el primero)
+        if (fz.break_after_row > 0) {
+          if (!prev || j.restBefore >= fz.break_after_row) sinceBreak = j.dk;
+          j.daysSinceBreak = Math.round((GI.parseDayKey(j.dk) - GI.parseDayKey(sinceBreak)) / 86400000) + 1;
+        }
         if (rs) { const di = dayIdx(GI.dayKey(j.s)), b = rs.blockOf(di); if (b) { j.cycleDay = di - b.start + 1; j.offBefore = di === b.start ? b.offBefore : null; } }
         // esperas: cortes de 1 h o más dentro de la jornada, con el lugar
         j.waits = [];
@@ -382,8 +466,12 @@
         if (j.span > (fz.ident_span || 20)) add("ident", 0, "jornada de " + GI.fmtNum(j.span, 1) + " h sin un corte de " + (fz.SPLIT / H) + " h: puede ser un relevo sin identificar (el turno del otro chofer quedó a su nombre) o un doble turno real");
         if (j.span > fz.max_span) add("larga", 1, GI.fmtNum(j.span, 1) + " h de jornada (límite " + fz.max_span + " h)");
         if (j.dh > fz.max_drive_day) add("manejo", 1, GI.fmtNum(j.dh, 1) + " h de manejo (límite " + fz.max_drive_day + " h)");
-        if (j.maxStint > fz.max_continuous) add("continuo", 1, GI.fmtNum(j.maxStint, 1) + " h de manejo sin una pausa de 15 min (límite " + fz.max_continuous + " h)");
-        if (j.low >= 0.5) add("madrugada", 1, GI.fmtNum(j.low, 1) + " h de manejo entre las 02 y las 05 h");
+        if (fz.max_drive_24h > 0 && j.win24 > fz.max_drive_24h && !(j.dh > fz.max_drive_day)) add("manejo24", 1, GI.fmtNum(j.win24, 1) + " h de manejo en 24 h sumando la jornada anterior (límite " + fz.max_drive_24h + " h en cualquier ventana de 24 h)");
+        if (j.maxStint > fz.max_continuous) add("continuo", 1, GI.fmtNum(j.maxStint, 1) + " h de manejo sin una pausa de " + (fz.pause_min || 15) + " min (límite " + fz.max_continuous + " h)");
+        if (j.low >= 0.5) add("madrugada", 1, GI.fmtNum(j.low, 1) + " h de manejo entre las " + String(fz.low_from).padStart(2, "0") + " y las " + String(fz.low_to).padStart(2, "0") + " h");
+        if (fz.pm_low && j.pm >= 0.5) add("tarde", 0.5, GI.fmtNum(j.pm, 1) + " h de manejo entre las 15 y las 17 h (bajo circadiano de la tarde; señal leve)");
+        { const w7 = fz.max_work_7d > 0 && j.work7 > fz.max_work_7d, w14 = fz.max_work_14d > 0 && j.work14 > fz.max_work_14d;
+          if (w7 || w14) add("semana", 1, [w7 ? GI.fmtNum(j.work7, 0) + " h de jornada en 7 días (máximo " + fz.max_work_7d + " h)" : null, w14 ? GI.fmtNum(j.work14, 0) + " h en 14 días (máximo " + fz.max_work_14d + " h)" : null].filter(Boolean).join(" y ")); }
         if (prev && j.prevType !== j.type && j.restBefore < 24) add("cambio", 1, "pasó de turno " + j.prevType + " a turno " + j.type + " con un solo descanso de " + GI.fmtNum(j.restBefore, 1) + " h" + (j.rotation === "atras" ? " (rotación hacia atrás, de noche a día: la que más cuesta)" : ""));
         if (prev && j.type === "noche" && j.afterOff) add("francos", 1, "primer turno noche después de " + GI.fmtNum(j.restBefore / 24, 1) + " días de franco (el cuerpo viene acostumbrado a dormir de noche)");
         if (prev && j.restBefore < 48 && (j.restBefore < fz.min_rest || (j.type === "noche" && j.restDayFrac >= 0.7)))
@@ -394,6 +482,7 @@
           if (j.cycleDay > rs.work + 1) add("seguidos", 1, "día " + j.cycleDay + " de la vuelta: su diagrama es " + rs.label + (rs.source === "auto" ? " (detectado)" : ""));
           if (j.offBefore != null && rs.off && j.offBefore < rs.off - 1) add("franco", 1, "volvió después de " + j.offBefore + " días de franco; su diagrama es " + rs.label);
         } else if (j.daysRow > fz.max_days_row) add("seguidos", 1, j.daysRow + " días seguidos de trabajo (máximo " + fz.max_days_row + ")");
+        else if (fz.break_after_row > 0 && j.daysSinceBreak > fz.max_days_row) add("corte", 1, "día " + j.daysSinceBreak + " sin un descanso continuo de " + fz.break_after_row + " h (después de " + fz.max_days_row + " días hace falta ese corte)");
         j.signals = sg;
         // jornada en curso: el último viaje terminó hace menos de la pausa que cierra la jornada
         j.open = o.now - j.e < fz.SPLIT && o.now >= j.e - 60000;
@@ -412,7 +501,7 @@
         j.fiLevel = fiLevel(j.fiPeak, fz);
         if (j.fiPeak >= fz.fi_high) j.signals.push({ key: "indice", w: 1, label: "Índice de fatiga alto", text: "el índice de fatiga estimado llegó a " + Math.round(j.fiPeak) + " a las " + new Date(j.fiPeakAt).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit", hour12: false }) + " (alto desde " + fz.fi_high + ")" });
         j.score = GI.sum(j.signals, x => x.w);
-        j.level = j.score >= 3 ? "alto" : j.score === 2 ? "medio" : "bajo";
+        j.level = j.score >= 3 ? "alto" : j.score >= 2 ? "medio" : "bajo";
       }
       sims.set(drv, { sim, list, rs, next: nextShiftRisk(list, sim, fz, o.now, rs), rot: rotationSummary(list) });
     }
@@ -549,10 +638,11 @@
     const sinceLast = driving ? 0 : (now - lastE) / MIN;
     // tirada continua actual (si el último viaje terminó hace menos de 15 min)
     let stint = 0;
-    if (driving || sinceLast < 15) {
+    const pm = fz.pause_min || 15;
+    if (driving || sinceLast < pm) {
       for (let i = j.trips.length - 1; i >= 0; i--) {
         stint += j.trips[i].dh;
-        if (i > 0 && j.trips[i].s - j.trips[i - 1].e >= 15 * MIN) break;
+        if (i > 0 && j.trips[i].s - j.trips[i - 1].e >= pm * MIN) break;
       }
     }
     const eta = (remaining, rate) => (remaining <= 0 ? now : rate > 0 ? now + (remaining / rate) * H : null);
@@ -854,5 +944,5 @@
     for (const h of (o && o.others) || []) if (h.drv && !out.has(h.drv)) out.set(h.drv, { drv: h.drv, why: "habito", h });
     return [...out.values()];
   }
-  Object.assign(GI, { identInfer, distKm, commGap, alertsDue, alertConfig, ALERT_DEFAULT, rosterOf, projectIndex, FI_DEFAULT, FI_BANDS, fiExposure, poissonFit, calibrateIndex, FATIGUE_SIGNALS: SIGNALS, FATIGUE_CAM_CATS: CAM_CATS, buildShifts, isMicro, shiftProgress, liveTrips, fatigueLimits, fiLevel, openShiftIndex, nextShiftRisk, _fat: { overlapHours, nightFrac, circ, fiWork, fiRest, simulateDriver, habitual } });
+  Object.assign(GI, { identInfer, distKm, commGap, alertsDue, alertConfig, ALERT_DEFAULT, rosterOf, projectIndex, FI_DEFAULT, FI_BANDS, fiExposure, poissonFit, calibrateIndex, FATIGUE_SIGNALS: SIGNALS, FATIGUE_DEFAULT, IOGP365, iogpStatus, iogpChanges, applyIogp, FATIGUE_CAM_CATS: CAM_CATS, buildShifts, isMicro, shiftProgress, liveTrips, fatigueLimits, fiLevel, openShiftIndex, nextShiftRisk, _fat: { overlapHours, nightFrac, circ, fiWork, fiRest, simulateDriver, habitual } });
 })(window.GI);

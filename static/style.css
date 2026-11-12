@@ -1424,3 +1424,30 @@
 #gi3-root .bad-text { color: #c2381f; font-weight: 500; }
 #gi3-root .hm-spotlist .hm-tramo-act .btn { display: inline-block; width: auto; border: 1px solid var(--rule-strong); background: var(--surface); padding: 3px 10px; min-height: 28px; font-weight: 500; }
 #gi3-root .hm-spotlist .hm-tramo-act .btn:hover { background: var(--sunken); }
+
+/* ---------- Configuración: referencia IOGP 365 ---------- */
+#gi3-root .cfg-iogp-banner { display: flex; align-items: center; gap: 16px; background: var(--surface); border: 1px solid var(--rule); border-left: 4px solid var(--warn); border-radius: 8px; padding: 14px 18px; margin-bottom: 16px; font-size: 14px; }
+#gi3-root .cfg-iogp-banner > div { flex: 1; }
+#gi3-root .cfg-iogp-banner.ok { border-left-color: var(--good); }
+#gi3-root .cfg-iogp-banner ul { margin: 6px 0 0; padding-left: 18px; }
+#gi3-root .cfg-iogp-acts { display: flex; gap: 8px; flex-wrap: wrap; }
+#gi3-root .cfg-iogp-list { display: flex; flex-direction: column; }
+#gi3-root .cfg-iogp-row { display: grid; grid-template-columns: minmax(0, 1fr) 110px minmax(260px, auto); gap: 14px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--rule); font-size: 14px; }
+#gi3-root .cfg-iogp-row:last-child { border-bottom: 0; }
+#gi3-root .cfg-iogp-row input[type=number], #gi3-root .cfg-iogp-row select { width: 100%; }
+#gi3-root .cfg-iogp-row input[type=checkbox] { justify-self: start; }
+#gi3-root .cfg-iogp-in-laxo input[type=number], #gi3-root .cfg-iogp-in-laxo select { background: #fffbea; border-color: var(--warn); }
+#gi3-root .cfg-iogp-ref { display: flex; align-items: center; gap: 10px; justify-content: space-between; }
+#gi3-root .cfg-iogp-chip { display: inline-block; padding: 2px 9px; border-radius: 12px; font-size: 12px; font-weight: 500; white-space: nowrap; }
+#gi3-root .cfg-iogp-laxo { background: #fff5d6; color: #7a5600; }
+#gi3-root .cfg-iogp-exig { background: #e6f1fb; color: #0062ad; }
+#gi3-root .cfg-iogp-ok { background: #e3f4e3; color: #1d6b1d; }
+#gi3-root .cfg-iogp-off { background: #ffe8e3; color: #a3301b; }
+#gi3-root .cfg-iogp-h { font-size: 15px; font-weight: 500; color: var(--accent); margin: 16px 0 6px; }
+#gi3-root .cfg-iogp-t { width: 100%; border-collapse: collapse; font-size: 14px; }
+#gi3-root .cfg-iogp-t th { text-align: left; font-weight: 500; font-size: 12px; color: var(--muted); padding: 6px 8px 6px 0; border-bottom: 1px solid var(--rule); }
+#gi3-root .cfg-iogp-t td:nth-child(2), #gi3-root .cfg-iogp-t td:nth-child(3) { white-space: nowrap; }
+#gi3-root .cfg-iogp-t td { padding: 8px 8px 8px 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+#gi3-root .cfg-iogp-keep { background: var(--canvas); border-radius: 8px; padding: 10px 14px; font-size: 13px; margin-top: 12px; }
+#gi3-root .good-text { color: #1d6b1d; font-weight: 500; }
+@media (max-width: 900px) { #gi3-root .cfg-iogp-row { grid-template-columns: minmax(0, 1fr) 100px; } #gi3-root .cfg-iogp-ref { grid-column: 1 / -1; } }

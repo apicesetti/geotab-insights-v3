@@ -653,10 +653,14 @@ ${restFrom != null && restFrom < j.s ? (() => { const g = GAP[restKind(j, fz)]; 
       ["Jornada", dur(j.span), has("larga")],
       ["Manejo", dur(j.dh), has("manejo")],
       ["Manejo continuo máx.", dur(j.maxStint), has("continuo")],
-      ["Entre 02 y 05 h", dur(j.low), has("madrugada")],
+      ["Entre " + String(fz.low_from).padStart(2, "0") + " y " + String(fz.low_to).padStart(2, "0") + " h", dur(j.low), has("madrugada")],
       ["Descanso previo", j.restBefore != null ? dur(j.restBefore) : "–", has("descanso")],
       ["Días seguidos", n0(j.daysRow), has("seguidos")],
       ["Índice de fatiga máx.", j.fiPeak != null ? String(Math.round(j.fiPeak)) : "–", has("indice")],
+      ...(fz.max_drive_24h > 0 ? [["Manejo en 24 h (máx.)", dur(j.win24 || 0), has("manejo24")]] : []),
+      ...(fz.max_work_7d > 0 || fz.max_work_14d > 0 ? [["Jornadas en 7 / 14 días", n0(j.work7 || 0) + " / " + n0(j.work14 || 0) + " h", has("semana")]] : []),
+      ...(fz.break_after_row > 0 ? [["Días sin corte de " + fz.break_after_row + " h", n0(j.daysSinceBreak || 0), has("corte")]] : []),
+      ...(fz.pm_low ? [["Entre 15 y 17 h", dur(j.pm || 0), has("tarde")]] : []),
     ];
     return html`<${Modal} wide title=${drvName(view, j.drv) + " · jornada del " + dshort(j.s)} onClose=${onClose}>
       <div className="ft-case-head">
@@ -889,7 +893,7 @@ ${restFrom != null && restFrom < j.s ? (() => { const g = GAP[restKind(j, fz)]; 
     const byDrv = GI.groupBy(rows, j => j.drv);
     const repeat = [...byDrv.values()].filter(l => l.length >= 2).length;
     return html`<${Panel} title="Jornadas con señales de fatiga"
-      hint=${"Cada fila es una jornada (viajes sin una pausa de " + limits.SPLIT / H + " h o más). Señales: jornada de más de " + limits.max_span + " h, más de " + limits.max_drive_day + " h de manejo, más de " + limits.max_continuous + " h sin una pausa de 15 min, manejo entre las 02 y las 05 h, cambio de turno día ↔ noche con un solo descanso, descanso de menos de " + limits.min_rest + " h o casi todo de día antes de un turno noche, más de " + limits.max_days_row + " días seguidos e índice de fatiga estimado de " + limits.fi_high + " o más. Nivel alto: 3 señales o más; medio: 2. Los eventos de cámara (bostezo, distracción, salida de carril) no son señales: se ven en la jornada como contexto y se analizan en Análisis → Validación del índice."}>
+      hint=${"Cada fila es una jornada (viajes sin una pausa de " + limits.SPLIT / H + " h o más). Señales: jornada de más de " + limits.max_span + " h, más de " + limits.max_drive_day + " h de manejo, más de " + limits.max_continuous + " h sin una pausa de " + (limits.pause_min || 15) + " min, manejo entre las " + String(limits.low_from).padStart(2, "0") + " y las " + String(limits.low_to).padStart(2, "0") + " h, cambio de turno día ↔ noche con un solo descanso, descanso de menos de " + limits.min_rest + " h o casi todo de día antes de un turno noche, más de " + limits.max_days_row + " días seguidos" + (limits.max_drive_24h > 0 ? ", más de " + limits.max_drive_24h + " h de manejo en 24 h" : "") + (limits.max_work_7d > 0 ? ", más de " + limits.max_work_7d + " h de jornada en 7 días o " + limits.max_work_14d + " h en 14" : "") + (limits.break_after_row > 0 ? ", sin un corte de " + limits.break_after_row + " h después de " + limits.max_days_row + " días" : "") + (limits.pm_low ? ", manejo de 15 a 17 h (vale ½)" : "") + " e índice de fatiga estimado de " + limits.fi_high + " o más. Nivel alto: 3 señales o más; medio: 2. Los eventos de cámara (bostezo, distracción, salida de carril) no son señales: se ven en la jornada como contexto y se analizan en Análisis → Validación del índice."}>
       ${(() => { const pend = shifts.filter(j => j.signals.some(x => x.key === "ident") && !(idents && idents.has(j.key))); return pend.length ? html`<div className="ft-identbar">
         <span><b>${pend.length === 1 ? "1 jornada" : pend.length + " jornadas"} de más de 20 h para revisar.</b> Con camiones en relevo, si un chofer no pasa su llave el turno se le carga al anterior: puede ser un doble turno real (grave) o un relevo sin identificar.</span>
         <button className="btn primary small" onClick=${() => { setLvl("todas"); setSig(["ident"]); }}>Ver ${pend.length === 1 ? "la jornada" : "las " + pend.length}</button></div>` : null; })()}

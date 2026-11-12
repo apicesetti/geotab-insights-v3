@@ -348,7 +348,7 @@
         }} />
       <//>
       <${Panel} title="Jornada y descanso por conductor"
-        hint=${"Límites de referencia (se cambian en Configuración → Fatiga y gravedad): manejo máximo " + L.max_drive_day + " h por día, jornada máxima " + L.max_span + " h (del primer arranque al último corte), descanso mínimo " + L.min_rest + " h entre jornadas, hasta " + L.max_days_row + " días seguidos y manejo continuo de hasta " + L.max_continuous + " h (pausas de menos de 15 min no cortan). Nivel: Alta si incumple 3 o más, Media si incumple alguno."}>
+        hint=${"Límites de referencia (se cambian en Configuración → Fatiga y gravedad): manejo máximo " + L.max_drive_day + " h por día, jornada máxima " + L.max_span + " h (del primer arranque al último corte), descanso mínimo " + L.min_rest + " h entre jornadas, hasta " + L.max_days_row + " días seguidos y manejo continuo de hasta " + L.max_continuous + " h (pausas de menos de " + (L.pause_min || 15) + " min no cortan). Nivel: Alta si incumple 3 o más, Media si incumple alguno."}>
         <div className="readouts compact inset">
           <${Kpi} label="Fatiga alta" value=${n0(rows.filter(d => d.level === "alta").length)} sub=${html`<span>3 o más límites superados</span>`} />
           <${Kpi} label=${"Días con más de " + L.max_drive_day + " h de manejo"} value=${n0(GI.sum(rows, d => d.longDays))} sub=${html`<span>en ${n0(rows.filter(d => d.longDays).length)} conductores</span>`} />
