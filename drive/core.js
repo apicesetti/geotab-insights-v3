@@ -153,6 +153,17 @@
       const last = mine.filter(t => t.d === live.d).pop();
       if (!(last && last.e > live.since)) mine.push({ i: "_live", d: live.d, r: me, s: live.since, e: now, dh: (now - live.since) / H, km: 0, live: true });
     }
+    // La jornada empieza al identificarse en el vehículo, aunque todavía no haya viajes: se agrega
+    // el tiempo desde la identificación hasta el primer viaje como trabajo sin manejo.
+    let identPiece = null;
+    if (live && live.identFrom && live.identFrom < now && now - live.identFrom < cfg.drive.fatigue_days * DAY) {
+      const after = mine.filter(t => t.e > live.identFrom).sort((a, b) => a.s - b.s);
+      const end = after.length ? Math.max(live.identFrom, after[0].s) : now;
+      if (end - live.identFrom >= MIN) {
+        identPiece = { i: "_ident", d: live.d, r: me, s: live.identFrom, e: end, dh: 0, km: 0.5, ident: true };
+        mine.push(identPiece);
+      }
+    }
     const tripsByDevice = GI.groupBy(mine.sort((a, b) => a.s - b.s), t => t.d);
     const model = { settings: { fatigue: fz }, tripsByDevice, events: evs.filter(e => e.t >= from) };
     const res = GI.buildShifts(model, new Set(tripsByDevice.keys()), id => id === me, { now, tripsByDevice });
@@ -165,6 +176,9 @@
       const fi = GI.openShiftIndex(last, list, last.sim, fz, now);
       for (const x of p.items) { x.left = Math.max(0, x.max - x.v); }
       out.open = { shift: last, progress: p, index: fi, daysRow: last.daysRow };
+      if (identPiece && identPiece.s >= last.s - MIN) out.open.ident = { from: identPiece.s, noTrips: !mine.some(t => !t.ident && !t.ride && t.e >= last.s) };
+      const rides = mine.filter(t => t.ride && t.e >= last.s);
+      out.open.ride = rides.length ? { only: !mine.some(t => !t.ride && t.e >= last.s), crewKey: rides[rides.length - 1].crewKey } : null;
     } else if (last) {
       const restH = (now - last.e) / H;
       out.rest = { since: last.e, hours: restH, min: fz.min_rest, left: Math.max(0, fz.min_rest - restH), fiNow: last.sim ? last.sim.at(now - 1) : null };
@@ -225,6 +239,57 @@
     return { state, status: "lejos", dist, acc, alert };
   }
 
+  // ---------- Acompañante (tripulación de Horas de trabajo) ----------
+  // Tramos en los que viajé de acompañante en el vehículo de otro chofer, según las
+  // tripulaciones cargadas en Horas de trabajo. No cuentan los que rechacé ("No viajo").
+  // S = WorkingHoursShared (scripts/shared.js de apicesetti/workinghours).
+  function rideIntervals(records, me, now, S) {
+    if (!S) return [];
+    // con lo automático (detectado por posición, bajadas) si Horas de trabajo lo soporta
+    if (S.withEffectiveCrews) records = S.withEffectiveCrews(records);
+    const idx = S.ackIndex(records);
+    const out = [];
+    for (const c of records || []) {
+      if (!c || c.type !== S.CREW || c.driverId === me) continue;
+      for (const m of c.members || []) {
+        if (m.userId !== me || S.memberStatus(c, m, idx) === "no") continue;
+        const from = S.toMs(m.from);
+        const to = Math.min(m.to ? S.toMs(m.to) : S.dayEnd(c.date), now);
+        if (!(to > from)) continue;
+        // desde Horas de trabajo 1.5 cada acompañante va en un vehículo (m.deviceId)
+        out.push({ from, to, driverId: c.driverId, devices: (m.deviceId ? [m.deviceId] : c.deviceIds && c.deviceIds.length ? c.deviceIds : [c.deviceId]).filter(Boolean),
+          crewKey: c.key, driverName: c.driverName || "", deviceName: c.deviceName || "", status: S.memberStatus(c, m, idx) });
+      }
+    }
+    return out.sort((a, b) => a.from - b.from);
+  }
+  // Todo el tiempo a bordo cuenta como trabajo sin manejo (dh = 0), desde que subió hasta que se
+  // bajó, aunque el vehículo esté detenido (en un cliente, esperando). Si el tramo sigue abierto y
+  // el chofer no maneja hace más de rest_split horas, se corta en su último viaje. Lo que manejé
+  // yo gana (se descuenta).
+  function rideTrips(intervals, vehTrips, me, ownTrips, now, restSplitH) {
+    const out = [];
+    const own = (ownTrips || []).slice().sort((a, b) => a.s - b.s);
+    const split = (restSplitH || 4) * H;
+    for (const iv of intervals) {
+      let to = iv.to;
+      const drv = (vehTrips || []).filter(t => iv.devices.includes(t.d) && (!iv.driverId || !t.r || t.r === iv.driverId) && t.e > iv.from && t.s < iv.to);
+      const lastE = drv.length ? Math.max(...drv.map(t => t.e)) : null;
+      if (lastE != null && (now || Date.now()) - lastE > split && to > lastE) to = lastE;
+      // pedazos sin lo que manejé yo
+      let pieces = [[iv.from, to]];
+      for (const t of own) {
+        pieces = pieces.flatMap(([a, b]) => (t.e <= a || t.s >= b ? [[a, b]] : [[a, t.s], [t.e, b]].filter(([x, y]) => y - x >= MIN)));
+      }
+      pieces.forEach(([a, b], k) => {
+        if (b - a < MIN) return;
+        const km = GI.sum(drv.filter(t => t.s < b && t.e > a), t => (t.km || 0) * Math.max(0, Math.min(t.e, b) - Math.max(t.s, a)) / Math.max(1, t.e - t.s));
+        out.push({ i: "ride|" + iv.crewKey + "|" + a + "|" + k, d: iv.devices[0], r: me, s: a, e: b, km: Math.max(0.5, GI.round(km, 3)), dh: 0, ride: true, crewKey: iv.crewKey });
+      });
+    }
+    return out.sort((a, b) => a.s - b.s);
+  }
+
   // ---------- Relevo ----------
   const userName = u => [u.firstName, u.lastName].filter(Boolean).join(" ").trim() || u.name || u.id;
   // Conductores activos que comparten algún grupo de conductor conmigo (si no
@@ -258,6 +323,6 @@
   GI.Drive = {
     DRIVE_DEFAULTS, settingsFrom, compactTrip, compactException, mergeById, myEvents,
     riskSummary, fatigueState, limitAlerts, haversine, awayCheck, dur, hm, meters, realDriver,
-    reliefCandidates, filterUsers, reliefMessage, userName,
+    reliefCandidates, filterUsers, reliefMessage, userName, rideIntervals, rideTrips,
   };
 })(window.GI);

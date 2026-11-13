@@ -1,0 +1,29 @@
+/* Contenedor del add-in unificado: encabezado y pestañas; cada módulo conserva sus estilos. */
+.cz { font-family: "Barlow", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: #f2f4f6; min-height: 100vh; color: #1c2430; }
+.cz-head { display: flex; justify-content: space-between; align-items: center; padding: 12px 14px 6px; }
+.cz-head h1 { font-size: 22px; margin: 0; color: #1f2a37; font-weight: 700; }
+.cz-sub { color: #4f5866; font-size: 14px; margin: 2px 0 0; }
+.cz-icon { width: 44px; height: 44px; border-radius: 22px; border: 1px solid #e3e7ec; background: #fff; font-size: 22px; color: #1f2a37; }
+.cz-tabs { display: flex; gap: 6px; padding: 6px 12px 0; position: sticky; top: 0; background: #f2f4f6; z-index: 5; border-bottom: 1px solid #e3e7ec; }
+.cz-tab { flex: 1; min-height: 44px; border: 0; background: none; font: inherit; font-size: 15px; padding: 0 2px; white-space: nowrap; font-weight: 600; color: #7b8492; border-bottom: 3px solid transparent; }
+.cz-tab.is-on { color: #1f2a37; border-bottom-color: #f2b705; }
+.cz-badge { display: inline-block; min-width: 20px; padding: 1px 6px; border-radius: 10px; background: #b93a0f; color: #fff; font-size: 12px; margin-left: 4px; }
+/* los encabezados propios de cada módulo no se muestran: el del contenedor los reemplaza */
+.cz .mj-head, .cz .whd-head { display: none; }
+.cz .mj { min-height: 0; }
+.cz .whd { padding-top: 12px; }
+.cz-badge[hidden], .cz-panel[hidden] { display: none; }
+
+/* Tema oscuro de Drive: contenedor y "Mi jornada" en oscuro, como la pestaña Tripulación (1.2.6) */
+@media (prefers-color-scheme: dark) {
+  .cz, .cz-tabs { background: #15191e; color: #e8ecf0; }
+  .cz-head h1, .cz-tab.is-on { color: #e8ecf0; }
+  .cz-sub, .cz-tab { color: #9aa6b2; }
+  .cz-icon { background: #1f252c; border-color: #333c46; color: #e8ecf0; }
+  .cz-tabs { border-bottom-color: #333c46; }
+  .cz .mj { --canvas: #15191e; --surface: #1f252c; --rule: #333c46; --ink: #e8ecf0; --text: #e8ecf0; --text-2: #b4bec8; --muted: #9aa6b2;
+            --marking-soft: #3d2f12; --marking-ink: #f3c56b; --good-soft: #173323; --good: #8fd6a8; --bad-soft: #3e1a17; --bad: #f2a59c; }
+  .cz .mj-btn:not(.mj-btn-2) { background: #7aa7e6; border-color: #7aa7e6; color: #10161d; }
+  .cz .mj-sb > div { background: #9aa6b2; }
+}
+.cz-ver { text-align: center; font-size: 12px; color: #7b8492; margin: 4px 0 16px; padding: 0 12px; }

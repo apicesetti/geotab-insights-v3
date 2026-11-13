@@ -32,7 +32,7 @@
     const set = (path, value) => setDraft(d => {
       const n = clone(d);
       let o = n;
-      for (let i = 0; i < path.length - 1; i++) o = o[path[i]];
+      for (let i = 0; i < path.length - 1; i++) o = o[path[i]] || (o[path[i]] = {});
       o[path[path.length - 1]] = value;
       return n;
     });
@@ -49,6 +49,19 @@
       setSaving(false);
     }
 
+    // Guardado directo de la sección de fatiga (Parametrizar a IOGP 365 / volver atrás)
+    async function saveFatigue(fatigue, okText) {
+      setSaving(true); setMsg(null);
+      try {
+        const saved = await onSave({ ...draft, fatigue, configured: true });
+        setDraft(clone(saved));
+        setMsg({ tone: "ok", text: okText });
+      } catch (e) {
+        setMsg({ tone: "error", text: "No se pudo guardar: " + (e.message || e) });
+        throw e;
+      } finally { setSaving(false); }
+    }
+
     const body = {
       reglas: html`<${RulesSection} api=${api} draft=${draft} set=${set} rules=${catalogs.rules} ro=${ro} />`,
       tipos: html`<${TypesSection} draft=${draft} set=${set} groups=${groups} ro=${ro} model=${model} />`,
@@ -56,7 +69,7 @@
       objetivos: html`<${TargetsSection} draft=${draft} set=${set} ro=${ro} model=${model} />`,
       categorias: html`<${CategoriesSection} draft=${draft} set=${set} ro=${ro} />`,
       recorridos: html`<${RoutesSection} api=${api} draft=${draft} set=${set} ro=${ro} />`,
-      fatiga: html`<${FatigueSection} draft=${draft} set=${set} ro=${ro} />`,
+      fatiga: html`<${FatigueSection} draft=${draft} set=${set} ro=${ro} dirty=${dirty} userName=${userName} onSaveFatigue=${saveFatigue} />${GI.BUILD === "beta" || /\/dev\//.test(location.pathname) ? html`<${SpeedSevSection} draft=${draft} set=${set} ro=${ro} catalogs=${catalogs} api=${api} model=${model} />` : null}`,
       referencias: html`<${ReferenceSection} draft=${draft} set=${set} ro=${ro} model=${model} benchmark=${benchmark} onPublish=${onPublishBenchmark} mgGroups=${mgGroups} groups=${groups} />`,
       alcance: html`<${ScopeSection} draft=${draft} set=${set} groups=${groups} ro=${ro} model=${model} />`,
       general: html`<${GeneralSection} draft=${draft} set=${set} ro=${ro} />`,
@@ -127,7 +140,7 @@
     }
 
     return html`<${Panel} title="Reglas de MyGeotab → categoría"
-      sub="Asigná a una categoría de riesgo las reglas que miden infracciones. Solo esas se descargan: el ralentí se calcula con los viajes, así que no hace falta mapear reglas de ralentí ni operativas (y en flotas grandes son la mayor parte del volumen). Las de prueba (Dummy, [TEST], .test) quedan ocultas.">
+      sub="Asigná a una categoría de riesgo las reglas que miden infracciones. Solo esas se descargan: el ralentí se calcula con los viajes, así que no hace falta mapear reglas operativas (y en flotas grandes son la mayor parte del volumen). Excepción: si asignás Ralentí a la regla de ralentí, Fatiga puede detectar los descansos con el motor en marcha. Las de prueba (Dummy, [TEST], .test) quedan ocultas.">
       <div className="toolbar">
         <input placeholder="Buscar regla…" value=${q} onInput=${e => setQ(e.target.value)} />
         <label className="inline"><input type="checkbox" checked=${onlyUnmapped} onChange=${e => setOnlyUnmapped(e.target.checked)} /> Solo sin categoría</label>
@@ -271,7 +284,7 @@
     const mapping = draft.rule_mapping || {};
     const usage = k => Object.values(mapping).filter(v => v === k).length;
     let slot = 0;
-    const colorOf = c => (c.kind === "riesgo" && slot < 8 ? ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"][slot++] : GI.OTHER_COLOR);
+    const colorOf = c => (c.kind === "riesgo" && slot < 8 ? ["#0078d3", "#fe5a3f", "#00aa00", "#f9ba00", "#edbbb2", "#00aa00", "#00aeff", "#fe5a3f"][slot++] : GI.OTHER_COLOR);
     const colors = cats.map(colorOf);
     const upd = (i, patch) => set(["categories"], cats.map((c, j) => (j === i ? { ...c, ...patch } : c)));
     const move = (i, d) => { const a = [...cats]; const [x] = a.splice(i, 1); a.splice(i + d, 0, x); set(["categories"], a); };
@@ -364,26 +377,149 @@
     </div>`;
   }
 
+
+  // ---------- Gravedad de los excesos de velocidad (Mapa de calor) ----------
+  const SEV_LABEL = { leve: "Leve", medio: "Medio", grave: "Grave" };
+  function suggestSev(name) {
+    const n = String(name || "").toLowerCase();
+    if (/grave|extrem|cr[ií]tic|excesiva/.test(n)) return "grave";
+    if (/medio|moderad/.test(n)) return "medio";
+    if (/leve/.test(n)) return "leve";
+    return null;
+  }
+  function SpeedSevSection({ draft, set, ro, catalogs, api, model }) {
+    const ss = Object.assign({ levels: {}, up_leve_min: 5, up_medio_min: 5, weigh: false, mult: { leve: 1, medio: 1.5, grave: 2.5 } }, draft.speed_sev || {});
+    const map = draft.rule_mapping || {};
+    const rules = (catalogs.rules || []).filter(r => map[r.id] === "velocidad").sort((a, b) => a.name.localeCompare(b.name));
+    const [limits, setLimits] = useState(null);
+    useEffect(() => {
+      let off = false;
+      if (!rules.length || !GI.loadRuleLimits) return;
+      GI.loadRuleLimits(api, rules.map(r => r.id)).then(l => { if (!off) setLimits(l); }).catch(() => { if (!off) setLimits(new Map()); });
+      return () => { off = true; };
+    }, [rules.map(r => r.id).join(",")]);
+    const count = useMemo(() => { const c = new Map(); for (const e of (model && model.events) || []) if (e.cat === "velocidad") c.set(e.rule, (c.get(e.rule) || 0) + 1); return c; }, [model]);
+    const setLevel = (id, v) => set(["speed_sev", "levels"], { ...(ss.levels || {}), [id]: v || undefined });
+    const sugg = rules.filter(r => !ss.levels[r.id] && suggestSev(r.name));
+    const num = (path, v, props) => html`<input type="number" disabled=${ro} value=${v} onChange=${e => set(path, +e.target.value)} ...${props || {}} />`;
+    return html`<${Panel} title="Gravedad de los excesos de velocidad"
+      hint="Cada regla de la categoría Exceso de velocidad tiene un nivel según cuánto se pasa del límite. Si el exceso dura mucho, sube un nivel. Se usa en el Mapa de calor y, si lo activás, en el índice de riesgo. Las reglas escalonadas (por ejemplo +10, +20 y +30 sobre el límite) las crea un administrador en MyGeotab.">
+      <div className="form two-col">
+        <label>Un exceso Leve pasa a Medio si dura más de (min)${num(["speed_sev", "up_leve_min"], ss.up_leve_min, { min: 0, step: 1 })}</label>
+        <label>Un exceso Medio pasa a Grave si dura más de (min)${num(["speed_sev", "up_medio_min"], ss.up_medio_min, { min: 0, step: 1 })}</label>
+        <label className="inline"><input type="checkbox" disabled=${ro} checked=${!!ss.weigh} onChange=${e => set(["speed_sev", "weigh"], e.target.checked)} /> Pesar más en el índice de riesgo (Leve ×${GI.fmtNum(ss.mult.leve, 1)} · Medio ×${GI.fmtNum(ss.mult.medio, 1)} · Grave ×${GI.fmtNum(ss.mult.grave, 1)})</label>
+      </div>
+      ${!rules.length ? html`<p className="muted small">No hay reglas asignadas a la categoría Exceso de velocidad (Configuración → Reglas y objetivos).</p>` : html`
+        ${sugg.length && !ro ? html`<p className="small"><button className="btn small" onClick=${() => { const lv = { ...(ss.levels || {}) }; for (const r of sugg) lv[r.id] = suggestSev(r.name); set(["speed_sev", "levels"], lv); }}>Aplicar el nivel sugerido a ${sugg.length} regla(s) sin asignar</button></p>` : null}
+        <div className="table-wrap"><table className="tbl">
+          <thead><tr><th>Regla de velocidad (MyGeotab)</th><th>Límite</th><th>Nivel</th><th className="num">Excesos en el período</th></tr></thead>
+          <tbody>${rules.map(r => { const lv = ss.levels[r.id] || "", sg = suggestSev(r.name), lim = limits && limits.get(r.id);
+            return html`<tr key=${r.id} className=${lv ? "" : "row-warn"}>
+              <td>${r.name}</td><td>${limits == null ? "…" : lim && lim.length ? lim.join(" / ") + " km/h" : "–"}</td>
+              <td><select disabled=${ro} value=${lv} onChange=${e => setLevel(r.id, e.target.value)} aria-label=${"Nivel de " + r.name}>
+                <option value="">Sin asignar (cuenta como Leve)${sg ? " · sugerido " + SEV_LABEL[sg] : ""}</option>
+                <option value="leve">Leve</option><option value="medio">Medio</option><option value="grave">Grave</option></select></td>
+              <td className="num">${GI.fmtNum(count.get(r.id) || 0, 0)}</td></tr>`; })}</tbody></table></div>
+        <p className="muted small">Una sola regla para todos los excesos no permite separar 111 de 140 km/h: solo la duración la sube de nivel. El límite se lee de la condición de cada regla ("más de X km/h"); si una regla tiene varios, se muestran todos.</p>`}
+    <//>`;
+  }
+
   // ---------- Fatiga y gravedad ----------
-  function FatigueSection({ draft, set, ro }) {
-    const f = Object.assign({ max_drive_day: 9, max_span: 12, min_rest: 8, max_continuous: 4, max_days_row: 6, rest_split: 4, fi_mod: 80, fi_high: 100 }, draft.fatigue || {});
+  const IOGP_CHIP = { laxo: ["cfg-iogp-laxo", "▲ Más laxo que IOGP"], exigente: ["cfg-iogp-exig", "★ Más exigente"], cumple: ["cfg-iogp-ok", "✓ Cumple"], off: ["cfg-iogp-off", "● No se mide"] };
+  const iogpFmt = (r, v) => (r.dir === "bool" ? (v ? "sí" : "no") : v == null || v === "" || (r.isNew && !(+v > 0)) ? "no se mide" : r.key === "low_to" ? "02–" + String(v).padStart(2, "0") + " h" : GI.fmtNum(+v, v % 1 ? 1 : 0) + (r.unit ? " " + r.unit : ""));
+  function IogpModal({ f, onClose, onApply, busy }) {
+    const ch = GI.iogpChanges(f);
+    const keep = GI.IOGP365.filter(r => GI.iogpStatus(r, f[r.key]) === "exigente" || GI.iogpStatus(r, f[r.key]) === "cumple");
+    const adj = ch.filter(r => !r.isNew || r.dir === "bool"), act = ch.filter(r => r.isNew && r.dir !== "bool");
+    return html`<${GI.Modal} title="Parametrizar a IOGP 365" wide=${true} onClose=${onClose}>
+      ${!ch.length ? html`<p>La configuración ya cumple o es más exigente que el IOGP 365 en todos los parámetros. No hay nada para cambiar.</p>` : html`
+      <p>Se van a hacer <b>${ch.length} ${ch.length === 1 ? "cambio" : "cambios"}</b>. Los parámetros que ya son más exigentes que la guía no se tocan. Nada cambia en MyGeotab: solo la configuración del add-in. Se guarda una copia de la configuración actual para poder volver atrás.</p>
+      ${adj.length ? html`<h3 className="cfg-iogp-h">Valores que se ajustan (${adj.length})</h3>
+      <table className="cfg-iogp-t"><thead><tr><th>Parámetro</th><th>Hoy</th><th>Queda</th><th>Por qué</th></tr></thead><tbody>
+        ${adj.map(r => html`<tr key=${r.key}><td>${r.label}</td><td><s className="bad-text">${iogpFmt(r, r.now)}</s></td><td><b className="good-text">${iogpFmt(r, r.iogp)}</b></td><td className="small muted">${r.why}</td></tr>`)}</tbody></table>` : null}
+      ${act.length ? html`<h3 className="cfg-iogp-h">Controles que se activan (${act.length})</h3>
+      <table className="cfg-iogp-t"><thead><tr><th>Control</th><th>Límite</th><th>Qué cambia</th></tr></thead><tbody>
+        ${act.map(r => html`<tr key=${r.key}><td>${r.label}</td><td><b>${iogpFmt(r, r.iogp)}</b></td><td className="small muted">${r.why}</td></tr>`)}</tbody></table>` : null}
+      ${keep.length ? html`<div className="cfg-iogp-keep"><b>Quedan como están</b> (ya cumplen o son más exigentes): ${keep.map(r => r.label.toLowerCase() + " " + iogpFmt(r, f[r.key])).join(" · ")}.</div>` : null}
+      <p className="small muted">Las señales nuevas cuentan para el nivel de cada jornada en la pestaña Fatiga igual que las actuales (la franja de 15 a 17 h vale ½): es esperable que suban los casos.</p>`}
+      <div className="modal-actions"><button className="btn" onClick=${onClose}>${ch.length ? "Cancelar" : "Cerrar"}</button>${ch.length ? html`<button className="btn primary" disabled=${busy} onClick=${onApply}>${busy ? "Aplicando…" : "Aplicar " + (ch.length === 1 ? "el cambio" : "los " + ch.length + " cambios")}</button>` : null}</div>
+    <//>`;
+  }
+
+  function FatigueSection({ draft, set, ro, dirty, userName, onSaveFatigue }) {
+    const f = Object.assign({}, GI.FATIGUE_DEFAULT, draft.fatigue || {});
     const sv = Object.assign({ by_duration: false, per_minute: 0.5, max: 3, long_minutes: 1 }, draft.severity || {});
     const num = (path, v, props) => html`<input type="number" disabled=${ro} value=${v} onChange=${e => set(path, +e.target.value)} ...${props || {}} />`;
+    const [modal, setModal] = useState(false), [busy, setBusy] = useState(false), [showCh, setShowCh] = useState(false);
+    const st = Object.fromEntries(GI.IOGP365.map(r => [r.key, GI.iogpStatus(r, f[r.key])]));
+    const nLax = Object.values(st).filter(x => x === "laxo").length, nOff = Object.values(st).filter(x => x === "off").length;
+    const ap = f.iogp_applied;
+    async function apply() {
+      setBusy(true);
+      try { await onSaveFatigue(GI.applyIogp(f, userName), "Configuración de fatiga parametrizada a IOGP 365 y guardada para todos."); setModal(false); } catch (e) {}
+      setBusy(false);
+    }
+    async function revert() {
+      if (!ap || !ap.prev) return;
+      setBusy(true);
+      try { const n = { ...f, ...ap.prev }; delete n.iogp_applied; await onSaveFatigue(n, "Se volvió a la configuración de fatiga anterior a la parametrización IOGP 365."); } catch (e) {}
+      setBusy(false);
+    }
+    const ref = key => { const r = GI.IOGP365.find(x => x.key === key); const c = IOGP_CHIP[st[key]]; return html`<span className="cfg-iogp-ref"><span className="small muted">IOGP 365: <b>${iogpFmt(r, r.iogp)}</b></span><span className=${"cfg-iogp-chip " + c[0]}>${c[1]}</span></span>`; };
+    const lax = key => (st[key] === "laxo" ? " cfg-iogp-in-laxo" : "");
+    const field = (key, label, props) => html`<label className=${"cfg-iogp-row" + lax(key)}><span>${label}</span>${num(["fatigue", key], f[key], props)}${ref(key)}</label>`;
     return html`<div>
+      ${ap && !nLax && !nOff ? html`<div className="cfg-iogp-banner ok">
+        <div><b>Parametrizado a IOGP 365</b><div className="small">Aplicado el ${new Date(ap.at).toLocaleString("es-AR", { dateStyle: "short", timeStyle: "short" })}${ap.by ? " por " + ap.by : ""}. Todos los parámetros cumplen o son más exigentes que la guía.</div>
+          ${showCh ? html`<ul className="small">${(ap.changes || []).map(c => { const r = GI.IOGP365.find(x => x.key === c.key) || { label: c.key, unit: "" }; return html`<li key=${c.key}>${r.label}: ${iogpFmt(r, c.from)} → ${iogpFmt(r, c.to)}</li>`; })}</ul>` : null}</div>
+        <span className="cfg-iogp-acts"><button className="btn small" onClick=${() => setShowCh(!showCh)}>${showCh ? "Ocultar los cambios" : "Ver los cambios"}</button>${!ro ? html`<button className="btn small" disabled=${busy || dirty} title=${dirty ? "Guardá o descartá los cambios pendientes primero" : ""} onClick=${revert}>Volver a la configuración anterior</button>` : null}</span>
+      </div>` : html`<div className="cfg-iogp-banner">
+        <div><b>Referencia IOGP 365</b> (Land transportation safety practice, 2025)<div className="small">${nLax || nOff ? html`${nLax ? html`<b>${nLax}</b> ${nLax === 1 ? "parámetro es más laxo" : "parámetros son más laxos"} que la guía` : ""}${nLax && nOff ? " y " : ""}${nOff ? html`<b>${nOff}</b> ${nOff === 1 ? "control de la guía no se mide" : "controles de la guía no se miden"}` : ""}. Por ahora se pueden guardar valores más laxos: quedan marcados en amarillo.` : "Todos los parámetros cumplen o son más exigentes que la guía."}</div></div>
+        ${!ro && (nLax || nOff) ? html`<button className="btn primary" disabled=${dirty} title=${dirty ? "Guardá o descartá los cambios pendientes primero" : ""} onClick=${() => setModal(true)}>Parametrizar a IOGP 365…</button>` : null}
+      </div>`}
+      ${modal ? html`<${IogpModal} f=${f} busy=${busy} onClose=${() => setModal(false)} onApply=${apply} />` : null}
       <${Panel} title="Jornada y fatiga"
-        hint="Límites con los que se marcan las jornadas en la pestaña Fatiga. Son valores de referencia: ajustalos a la política de la empresa y a la normativa que aplique a cada operación.">
+        hint="Límites con los que se marcan las jornadas en la pestaña Fatiga. Al lado de cada uno está el valor del IOGP 365 (tabla 15). Ser más exigente siempre está permitido; ajustalos también a la normativa que aplique a cada operación (si la ley es más exigente, manda la ley).">
+        <div className="cfg-iogp-list">
+          ${field("min_rest", "Descanso mínimo entre jornadas (h)", { min: 1, step: 0.5 })}
+          ${field("pause_min", "Pausa que reinicia el manejo continuo (min)", { min: 5, step: 5 })}
+          ${field("max_continuous", "Manejo continuo máximo (h)", { min: 0.5, step: 0.5 })}
+          ${field("max_drive_day", "Manejo máximo en una jornada (h)", { min: 1, step: 0.5 })}
+          ${field("max_drive_24h", "Manejo máximo en 24 h móviles (h; 0 = no se mide)", { min: 0, step: 0.5 })}
+          ${field("max_span", "Jornada máxima, del primer arranque al último corte (h)", { min: 1, step: 0.5 })}
+          ${field("max_work_7d", "Horas de jornada en 7 días (h; 0 = no se mide)", { min: 0, step: 1 })}
+          ${field("max_work_14d", "Horas de jornada en 14 días (h; 0 = no se mide)", { min: 0, step: 1 })}
+          ${field("max_days_row", "Días seguidos de trabajo como máximo", { min: 1 })}
+          ${field("break_after_row", "Corte continuo después de los días seguidos (h; 0 = no se mide)", { min: 0, step: 1 })}
+          <label className=${"cfg-iogp-row" + lax("low_to")}><span>Franja de madrugada: de las 02 hasta las (h)</span><select disabled=${ro} value=${f.low_to} onChange=${e => set(["fatigue", "low_to"], +e.target.value)}>${[5, 6].map(h => html`<option key=${h} value=${h}>${String(h).padStart(2, "0")}:00</option>`)}</select>${ref("low_to")}</label>
+          <label className=${"cfg-iogp-row" + lax("pm_low")}><span>Señal leve por manejo de 15 a 17 h (bajo circadiano de la tarde)</span><input type="checkbox" disabled=${ro} checked=${!!f.pm_low} onChange=${e => set(["fatigue", "pm_low"], e.target.checked)} />${ref("pm_low")}</label>
+        </div>
+        <h3 className="cfg-iogp-h">Otros parámetros del add-in</h3>
         <div className="form two-col">
-          <label>Manejo máximo por día (h)${num(["fatigue", "max_drive_day"], f.max_drive_day, { min: 1, step: 0.5 })}</label>
-          <label>Jornada máxima, del primer arranque al último corte (h)${num(["fatigue", "max_span"], f.max_span, { min: 1, step: 0.5 })}</label>
-          <label>Descanso mínimo entre jornadas (h)${num(["fatigue", "min_rest"], f.min_rest, { min: 1, step: 0.5 })}</label>
-          <label>Manejo continuo máximo sin pausa de 15 min (h)${num(["fatigue", "max_continuous"], f.max_continuous, { min: 0.5, step: 0.5 })}</label>
-          <label>Días seguidos de trabajo como máximo${num(["fatigue", "max_days_row"], f.max_days_row, { min: 1 })}</label>
           <label>Pausa que cierra una jornada (h)${num(["fatigue", "rest_split"], f.rest_split, { min: 1, step: 0.5 })}</label>
+          <label>Movimiento mínimo que se ignora: menos de (km)${num(["fatigue", "micro_km"], f.micro_km, { min: 0, step: 0.1 })}</label>
+          <label>… y menos de (minutos de manejo)${num(["fatigue", "micro_min"], f.micro_min, { min: 0, step: 1 })}</label>
           <label>Índice de fatiga: moderado desde${num(["fatigue", "fi_mod"], f.fi_mod, { min: 10, step: 5 })}</label>
           <label>Índice de fatiga: alto desde${num(["fatigue", "fi_high"], f.fi_high, { min: 20, step: 5 })}</label>
         </div>
-        <p className="muted small">Las jornadas se arman por pausas, no por día calendario: los viajes separados por menos de ${f.rest_split} h son una sola jornada (un turno noche de 19 a 7 h cuenta como una jornada del día en que empezó). Una pausa más larga cierra la jornada y es el descanso previo de la siguiente; si es menor al descanso mínimo, se marca.</p>
+        <p className="muted small">Las jornadas se arman por pausas, no por día calendario: los viajes separados por menos de ${f.rest_split} h son una sola jornada (un turno noche de 19 a 7 h cuenta como una jornada del día en que empezó). Una pausa más larga cierra la jornada y es el descanso previo de la siguiente; si es menor al descanso mínimo, se marca. Las horas de jornada (del primer arranque al último corte) son un mínimo de las horas de trabajo: el GPS no ve carga, descarga ni esperas fuera del vehículo.</p>
+        <p className="muted small">Los movimientos mínimos (por ejemplo, encender el camión durante el descanso por frío o calor, o la dispersión del GPS con el vehículo parado) no cuentan como trabajo: no cortan el descanso. Si duran 5 minutos o más, ese tiempo cuenta como descanso con el motor en marcha.</p>
         <p className="muted small">El índice de fatiga es una estimación propia del add-in (no es un sistema certificado como FAID): sube mientras el conductor trabaja, más rápido manejando y de madrugada, y baja mientras descansa, más rápido si descansa de noche. Una jornada diurna normal termina cerca de 50–70; turnos noche largos o descansos cortos lo llevan por encima de 100.</p>
+      <//>
+      <${Panel} title="Alertas de fatiga con intervención obligatoria"
+        hint="Mientras el add-in está abierto (en cualquier pestaña), cada 3 minutos se recalcula el índice de los conductores en jornada. Si alguno pasa el umbral aparece una ventana que no se cierra hasta registrar qué se hizo; la intervención queda guardada con el nombre de quien la registró y la ven todos los supervisores. Solo funciona en las pantallas que tengan el add-in abierto.">
+        ${(() => { const al = Object.assign({}, GI.ALERT_DEFAULT || {}, draft.fatigue_alerts || {}); return html`<div className="form two-col">
+          <label className="inline"><input type="checkbox" disabled=${ro} checked=${!!al.on} onChange=${e => set(["fatigue_alerts", "on"], e.target.checked)} /> Activar las alertas en esta base</label>
+          <span></span>
+          <label>Alerta (intervención obligatoria) desde el índice${num(["fatigue_alerts", "warn"], al.warn, { min: 10, step: 5 })}</label>
+          <label>Alerta crítica (intervención + cámara en vivo) desde${num(["fatigue_alerts", "crit"], al.crit, { min: 10, step: 5 })}</label>
+          <label>Volver a avisar si el índice sube (puntos)${num(["fatigue_alerts", "re_rise"], al.re_rise, { min: 1, step: 1 })}</label>
+          <label>… o si pasan (horas) desde la última intervención${num(["fatigue_alerts", "re_hours"], al.re_hours, { min: 0.25, step: 0.25 })}</label>
+          <label>Si no contesta, volver a avisar a los (min)${num(["fatigue_alerts", "noanswer_min"], al.noanswer_min, { min: 1, step: 1 })}</label>
+          <label>Sonido mientras haya una alerta sin atender: cada (segundos, 0 = sin sonido)${num(["fatigue_alerts", "beep_sec"], al.beep_sec, { min: 0, step: 5 })}</label>
+          <label>Usuarios que reciben las alertas (separados por coma; vacío = todos los supervisores)<input type="text" disabled=${ro} value=${al.users || ""} onChange=${e => set(["fatigue_alerts", "users"], e.target.value)} placeholder="operaciones@empresa.com" /></label>
+        </div>`; })()}
+        <p className="muted small">Solo avisa por conductores en jornada. En la alerta crítica la nota es obligatoria. El video en vivo de las cámaras GO Focus se ve dentro de la alerta; el de las Surfsight se abre en el reproductor de MyGeotab (Activos → Cámaras) en otra pestaña, con los permisos de cada usuario.</p>
       <//>
       <${Panel} title="Gravedad de las infracciones"
         hint="Una infracción que dura más (por ejemplo un exceso de velocidad de 3 minutos) es más peligrosa que una de segundos. Si activás la ponderación, cada minuto de duración suma un porcentaje del peso de la categoría, con un tope. Las infracciones instantáneas (frenadas, giros) no cambian.">
@@ -448,8 +584,8 @@
     const [editors, setEditors] = useState(draft.editors.join(", "));
     return html`<${Panel} title="General">
       <div className="form two-col">
-        <label>Período por defecto (días)<select disabled=${ro} value=${draft.ui.default_days} onChange=${e => set(["ui", "default_days"], +e.target.value)}>
-          ${[30, 60, 90, 180, 365].map(d => html`<option key=${d} value=${d}>${d}</option>`)}</select></label>
+        <label>Período por defecto<select disabled=${ro} value=${(() => { const d = draft.ui.default_period; if (d) return d; const n = draft.ui.default_days; return !n ? "3m" : n <= 31 ? "month" : n <= 95 ? "3m" : n <= 185 ? "6m" : "12m"; })()} onChange=${e => { set(["ui", "default_period"], e.target.value); set(["ui", "default_period_set"], true); }}>
+          ${[["month", "Este mes"], ["last_month", "Mes pasado"], ["3m", "Últimos 3 meses"], ["6m", "Últimos 6 meses"], ["12m", "Últimos 12 meses"]].map(([k, l]) => html`<option key=${k} value=${k}>${l}</option>`)}</select></label>
         <label>Agrupación por defecto<select disabled=${ro} value=${draft.ui.default_granularity} onChange=${e => set(["ui", "default_granularity"], e.target.value)}>
           <option value="day">Día</option><option value="week">Semana</option><option value="month">Mes</option></select></label>
         <label>Ventana de impacto de hitos (días)<input type="number" disabled=${ro} value=${draft.ui.milestone_window_days} onChange=${e => set(["ui", "milestone_window_days"], +e.target.value)} /></label>

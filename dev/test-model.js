@@ -296,7 +296,8 @@ assert.strictEqual(GI.durationToHours("00:11:42.0300000").toFixed(4), (11 / 60 +
   const night = shifts.find(j => j.dk === "2026-10-20" && j.type === "noche");
   assert.ok(night, JSON.stringify(shifts.map(j => [j.dk, j.type])));
   const keys = night.signals.map(x => x.key).sort().join(",");
-  for (const k of ["camara", "cambio", "continuo", "descanso", "madrugada", "manejo"]) assert.ok(keys.includes(k), k + " en " + keys);
+  for (const k of ["cambio", "continuo", "descanso", "madrugada", "manejo", "indice"]) assert.ok(keys.includes(k), k + " en " + keys);
+  assert.ok(!keys.includes("camara"), "las cámaras no son señal");
   assert.strictEqual(night.level, "alto");
   assert.strictEqual(night.camCluster, 4);
   assert.ok(Math.abs(night.low - 3) < 0.01, "02–05 " + night.low);
@@ -311,6 +312,9 @@ assert.strictEqual(GI.durationToHours("00:11:42.0300000").toFixed(4), (11 / 60 +
   assert.ok(drive.at > now && drive.at < now + 4 * 3600000);
   // índice de fatiga: el turno noche tras descansar de día termina alto; el diurno, bajo
   assert.ok(night.fiPeak >= 100 && night.signals.some(x => x.key === "indice"), "índice noche " + night.fiPeak);
+  // proyección: la jornada en curso
+  const pj = GI.projectIndex(GI.buildShifts(fm, new Set(["v1"]), null, { now }).sims.get("L"), limits, now, 16);
+  assert.ok(pj.open && pj.pts.length > 10 && pj.peak >= pj.Fnow && typeof pj.action === "string");
   assert.ok(day.fiPeak < 80, "índice día " + day.fiPeak);
   const oi = GI.openShiftIndex(open[0], shifts.filter(j => j.drv === "L").reverse(), open[0].sim, limits, now);
   assert.ok(oi.Fnow > 30 && oi.peak >= oi.Fnow);
@@ -323,6 +327,131 @@ assert.strictEqual(GI.durationToHours("00:11:42.0300000").toFixed(4), (11 / 60 +
   const lt = GI.liveTrips(fm, trips, [{ d: "v1", r: null, driving: true, since: now - 4 * 60000 }], 36, now);
   const live = GI.buildShifts(fm, new Set(["v1"]), null, { now, tripsByDevice: lt }).shifts.find(j => j.open);
   assert.ok(live.live && GI.shiftProgress(live, limits, now).driving);
+}
+// Descanso: lugar, motor en marcha, esperas y rotación.
+{
+  const T = (d, h, m) => new Date(2026, 9, d, h, m || 0).getTime();
+  const base = { id: "zB", name: "Base Neuquén", types: ["ZoneTypeOfficeId"] }, cli = { id: "zC", name: "Planta Añelo", types: ["ZoneTypeCustomerId"] };
+  const zoneAtPlace = (x, y) => (x === 1 ? base : x === 2 ? cli : null);
+  const trips = [];
+  const add = (s, hrs, x) => { trips.push({ d: "v1", r: "L", s, e: s + hrs * 3600000, dh: hrs, km: hrs * 70, x, y: 0 }); return s + hrs * 3600000; };
+  // día 1: sale de base, espera 3 h en la planta, vuelve a base
+  { let t = T(5, 6); t = add(t, 3, 2) + 3 * 3600000; add(t, 3, 1); }
+  // día 2 turno día terminando en ruta; descansa en ruta con motor en marcha 6 h
+  { let t = T(6, 6); add(t, 8, 9); }
+  // día 2 noche (rotación hacia adelante) y día 3 de día (hacia atrás)
+  { let t = T(6, 22); add(t, 8, 1); }
+  { let t = T(7, 13); add(t, 6, 1); }
+  // franco largo y primera noche
+  { let t = T(10, 21); add(t, 8, 1); }
+  const idle = [{ d: "v1", t: T(6, 14, 10), h: 6 }];
+  const fm = { settings: { fatigue: {} }, tripsByDevice: new Map([["v1", trips]]), events: [], idle, zoneAtPlace };
+  const r = GI.buildShifts(fm, new Set(["v1"]), null, { now: T(20, 0) });
+  const L = r.sims.get("L").list;
+  assert.strictEqual(L[0].waits.length, 1); assert.strictEqual(L[0].waits[0].place.name, "Planta Añelo"); assert.ok(Math.abs(L[0].waits[0].h - 3) < 1e-6);
+  assert.strictEqual(L[1].restPlace.kind, "base");
+  const n2 = L[2];
+  assert.strictEqual(n2.restPlace.kind, "ruta"); assert.ok(n2.restEngine && n2.signals.some(x => x.key === "motor"), JSON.stringify(n2.signals));
+  assert.strictEqual(n2.rotation, "adelante"); assert.strictEqual(L[3].rotation, "atras");
+  assert.ok(L[4].signals.some(x => x.key === "francos"));
+  const rot = r.sims.get("L").rot;
+  assert.strictEqual(rot.back, 1); assert.strictEqual(rot.fwd, 1); assert.strictEqual(rot.afterOff, 1); assert.ok(rot.startSd > 3);
+  // con el motor en marcha se recupera menos: arranca la noche más cansado que sin ralentí
+  const r2 = GI.buildShifts({ ...fm, idle: [] }, new Set(["v1"]), null, { now: T(20, 0) });
+  assert.ok(n2.fiStart > r2.sims.get("L").list[2].fiStart + 3, n2.fiStart + " vs " + r2.sims.get("L").list[2].fiStart);
+}
+// Viaje con 7 h de ralentí adentro (durmió con el motor en marcha): se parte y el ralentí es el descanso.
+{
+  const T = (h) => new Date(2026, 9, 12, 0, 0).getTime() + h * 3600000;
+  const trips = [{ d: "v1", r: "L", s: T(8), e: T(24), dh: 9, km: 600, ih: 7.2, x: 5, y: 5 }];
+  const idle = [{ d: "v1", t: T(16), h: 7 }];
+  const r = GI.buildShifts({ settings: { fatigue: {} }, tripsByDevice: new Map([["v1", trips]]), events: [], idle }, new Set(["v1"]), null, { now: T(48) });
+  const L = r.sims.get("L").list;
+  assert.strictEqual(L.length, 2, L.map(j => j.span).join(","));
+  assert.ok(Math.abs(L[1].restBefore - 7) < 0.01 && L[1].restEngine);
+  assert.ok(Math.abs(L[0].dh + L[1].dh - 9) < 1e-6);
+}
+// Diagramas: 14x7 detectado, día 15 de la vuelta, franco corto y franco en curso.
+{
+  const D = (n, h) => new Date(2026, 6, 1 + n, h || 0).getTime();
+  const trips = [];
+  const work = (d0, n) => { for (let d = d0; d < d0 + n; d++) trips.push({ d: "v1", r: "L", s: D(d, 7), e: D(d, 17), dh: 9, km: 600 }); };
+  work(0, 14); work(21, 14); work(42, 16); /* 2 días de más */ work(61, 14); /* volvió con 3 de franco */ work(81, 14);
+  const now = D(97, 12); // terminó el día 94: de franco
+  const r = GI.buildShifts({ settings: { fatigue: {} }, tripsByDevice: new Map([["v1", trips]]), events: [] }, new Set(["v1"]), null, { now });
+  const e = r.sims.get("L");
+  assert.strictEqual(e.rs.label, "14x7"); assert.strictEqual(e.rs.source, "auto");
+  const L = e.list;
+  const d57 = L.find(j => GI.dayKey(j.s) === GI.dayKey(D(57)));
+  assert.ok(d57.cycleDay === 16 && d57.signals.some(x => x.key === "seguidos"), d57.cycleDay);
+  const d10 = L.find(j => GI.dayKey(j.s) === GI.dayKey(D(10)));
+  assert.ok(!d10.signals.some(x => x.key === "seguidos"), "día 11 de 14 no es 'días seguidos'");
+  const d60 = L.find(j => GI.dayKey(j.s) === GI.dayKey(D(61)));
+  assert.ok(d60.signals.some(x => x.key === "franco"), JSON.stringify(d60.signals));
+  assert.ok(e.rs.inFranco && e.rs.backAt >= D(102) && e.rs.backAt <= D(102, 1), new Date(e.rs.backAt).toString());
+  const pj = GI.projectIndex(e, r.limits, now, 16);
+  assert.ok(pj.franco && /De franco/.test(pj.action), pj.action);
+  assert.ok(e.next.start >= D(102), new Date(e.next.start).toString());
+  // manual: 7x7
+  const r2 = GI.buildShifts({ settings: { fatigue: {} }, tripsByDevice: new Map([["v1", trips]]), events: [] }, new Set(["v1"]), null, { now, rosters: new Map([["L", { work: 7, off: 7 }]]) });
+  assert.strictEqual(r2.sims.get("L").rs.label, "7x7");
+}
+// Movimiento mínimo durante el descanso (encendió el camión a la 01:20, 3 min, 0 km): no corta el descanso.
+{
+  const T = (d, h, m) => new Date(2026, 9, d, h, m || 0).getTime();
+  const trips = [
+    { d: "v1", r: "L", s: T(28, 8), e: T(28, 18), dh: 8, km: 500, x: 1, y: 1 },
+    { d: "v1", r: "L", s: T(28, 22, 0), e: T(28, 22, 3), dh: 0.05, km: 0.1, x: 1, y: 1 },
+    { d: "v1", r: "L", s: T(29, 1, 20), e: T(29, 1, 30), dh: 0.05, km: 0, x: 1, y: 1 },
+    { d: "v1", r: "L", s: T(29, 6), e: T(29, 16), dh: 8, km: 500, x: 1, y: 1 },
+  ];
+  const r = GI.buildShifts({ settings: { fatigue: {} }, tripsByDevice: new Map([["v1", trips]]), events: [] }, new Set(["v1"]), null, { now: T(30, 0) });
+  const L = r.sims.get("L").list;
+  assert.strictEqual(L.length, 2, L.map(j => new Date(j.s) + " " + j.span).join(" | "));
+  assert.ok(Math.abs(L[1].restBefore - 12) < 1e-6);
+  assert.strictEqual(L[1].restMicro.length, 2);
+  assert.ok(L[1].restIdle.length === 1, "la de 10 min cuenta como motor en marcha");
+  // con el control desactivado, el movimiento corta el descanso
+  const r2 = GI.buildShifts({ settings: { fatigue: { micro_km: 0, micro_min: 0 } }, tripsByDevice: new Map([["v1", trips]]), events: [] }, new Set(["v1"]), null, { now: T(30, 0) });
+  assert.ok(r2.sims.get("L").list.length === 1 || r2.sims.get("L").list[1].restBefore < 12);
+}
+// Relevo: el camión trabaja 24 h con dos conductores; el ralentí mientras maneja el otro no es "descanso con motor".
+{
+  const T = (d, h, m) => new Date(2026, 9, d, h, m || 0).getTime();
+  const trips = [], idle = [];
+  for (const d of [23, 24, 25]) {
+    trips.push({ d: "v1", r: "A", s: T(d - 1, 17), e: T(d, 5, 50), dh: 9, km: 500 });  // A de noche
+    trips.push({ d: "v1", r: "B", s: T(d, 6), e: T(d, 16, 40), dh: 8, km: 400 });      // B de día
+    idle.push({ d: "v1", t: T(d, 9), h: 1.5, r: "B" }, { d: "v1", t: T(d, 12), h: 1.5, r: null });
+  }
+  const r = GI.buildShifts({ settings: { fatigue: {} }, tripsByDevice: new Map([["v1", trips.sort((a, b) => a.s - b.s)]]), events: [], idle }, new Set(["v1"]), null, { now: T(28, 0) });
+  for (const drv of ["A", "B"]) for (const j of r.sims.get(drv).list.slice(1)) {
+    assert.ok(!j.restEngine, drv + " " + new Date(j.s) + " idle " + j.restIdleH);
+    assert.ok(j.restHandover && j.restHandover.drv === (drv === "A" ? "B" : "A"));
+  }
+}
+// Revisar identificación: jornada de 25 h por un relevo sin llave; confirmado el relevo, se parte.
+{
+  const T = (d, h, m) => new Date(2026, 9, d, h, m || 0).getTime();
+  const trips = [];
+  const block = (r, s, hrs) => { for (let t = s; t < s + hrs * 3600000 - 1800000; t += 3600000) trips.push({ d: "v1", r, s: t, e: t + 3000000, dh: 0.8, km: 50 }); };
+  block("A", T(22, 17), 6.5); block("A", T(23, 4, 16), 13); block("A", T(23, 17, 29), 12.4); block("B", T(24, 6), 10.7); block("A", T(24, 17), 12.8);
+  trips.sort((a, b) => a.s - b.s);
+  const fm = { settings: { fatigue: {} }, tripsByDevice: new Map([["v1", trips]]), events: [] };
+  const r = GI.buildShifts(fm, new Set(["v1"]), null, { now: T(27, 0) });
+  const long = r.sims.get("A").list.find(j => j.span > 20);
+  assert.ok(long && long.signals.some(x => x.key === "ident"), JSON.stringify(r.sims.get("A").list.map(j => j.span)));
+  const r2 = GI.buildShifts(fm, new Set(["v1"]), null, { now: T(27, 0), identFixes: [{ drv: "A", d: "v1", from: long.s, to: T(23, 17, 29), other: "B" }] });
+  assert.ok(r2.sims.get("A").list.every(j => j.span < 20), "partida");
+  assert.ok(r2.sims.get("B").list.some(j => GI.dayKey(j.s) === GI.dayKey(T(23, 4))), "el tramo pasó a B");
+}
+// Validación del índice: el ajuste de Poisson recupera la pendiente.
+{
+  const bins = [];
+  for (let F = 5; F < 160; F += 10) { const h = 100; bins.push({ F, h, n: Math.round(h * 0.05 * Math.exp(1.5 * F / 100)) }); }
+  const f = GI.poissonFit(bins);
+  assert.ok(Math.abs(f.b - 1.5) < 0.1, "b " + f.b);
+  assert.ok(GI.poissonFit([{ F: 5, h: 0, n: 0 }]) === null);
 }
 // Corredores v2: riesgo del camino ajustado por conductor.
 {
@@ -394,5 +523,89 @@ assert.strictEqual(GI.durationToHours("00:11:42.0300000").toFixed(4), (11 / 60 +
   const g17 = y.franjas.find(f => f.key === "17-21"), g10 = y.franjas.find(f => f.key === "10-17");
   assert.ok(g17.envIdx / g10.envIdx > 2, "mismo conductor: 17h " + g17.envIdx + " vs 10h " + g10.envIdx);
   assert.ok(rm.routes.find(r => r.name === "RP7"));
+}
+
+// Contador de combustible con días sin lecturas: el consumo del hueco cae
+// en el día siguiente y los km del hueco tienen que contar también.
+{
+  const cd = GI.counterDeltas;
+  const daily = new Map([
+    ["2026-10-01", { v1: { fv: 100, lv: 110 } }],
+    ["2026-10-04", { v1: { fv: 150, lv: 160 } }],
+  ]);
+  const days = ["2026-10-01", "2026-10-02", "2026-10-03", "2026-10-04"];
+  const out = cd(daily, days, days);
+  assert.strictEqual(out.get("v1").get("2026-10-04"), 50);
+  assert.deepStrictEqual(out.gaps.get("v1").get("2026-10-04"), ["2026-10-02", "2026-10-03"]);
+}
+
+// Vehículo sin comunicación: el descanso desde la última comunicación no se confirma.
+{
+  const now = Date.parse("2026-10-30T12:00:00Z");
+  const lt = { d: "v9", r: "c9", s: now - 14 * 3600000, e: now - 10 * 3600000 };
+  const entry = { list: [{ trips: [lt] }] };
+  assert.strictEqual(GI.commGap(entry, [{ d: "v9", comm: true, at: now - 10 * 3600000 }], now), null);
+  const g = GI.commGap(entry, [{ d: "v9", comm: false, at: now - 10 * 3600000 }], now);
+  assert.ok(g && g.d === "v9" && Math.abs(g.h - 10) < 0.01);
+  assert.strictEqual(GI.commGap(entry, [{ d: "v9", comm: false, r: "otro", at: now - 9 * 3600000 }], now), null);
+  // un estado viejo "manejando" de un equipo sin comunicación no crea un viaje en vivo
+  const fake = { tripsByDevice: new Map() };
+  const tb = GI.liveTrips(fake, [], [{ d: "v9", r: "c9", driving: true, comm: false, since: now - 3600000 }], 24, now);
+  assert.ok(!(tb.get("v9") || []).length);
+}
+
+// Alertas de fatiga: umbrales, intervención y cuándo vuelve a avisar.
+{
+  const cfg = GI.alertConfig({ fatigue_alerts: { on: true } }), now = Date.parse("2026-11-03T12:00:00Z"), M = 60000;
+  const it = [{ drv: "a", key: "k1", F: 95 }, { drv: "b", key: "k2", F: 104 }, { drv: "c", key: "k3", F: 70 }];
+  let due = GI.alertsDue(it, [], cfg, now);
+  assert.strictEqual(due.map(x => x.drv + ":" + x.level).join(), "b:critica,a:alerta");
+  const acks = [{ drv: "a", key: "k1", level: "alerta", F: 95, at: now - 10 * M, action: "bien" }, { drv: "b", key: "k2", level: "critica", F: 104, at: now - 20 * M, action: "nocontesta" }];
+  due = GI.alertsDue(it, acks, cfg, now);
+  assert.strictEqual(due.map(x => x.drv).join(), "b"); // no contestó: vuelve a los 15 min; a ya intervenido
+  assert.strictEqual(GI.alertsDue([{ drv: "a", key: "k1", F: 101 }], acks, cfg, now).map(x => x.level).join(), "critica"); // sube de nivel
+  assert.strictEqual(GI.alertsDue([{ drv: "a", key: "k1", F: 99 }], acks, cfg, now).length, 0);
+  assert.strictEqual(GI.alertsDue([{ drv: "a", key: "k1", F: 96 }], acks, cfg, now + 61 * M).length, 1); // pasó 1 h
+  assert.strictEqual(GI.alertsDue([{ drv: "a", key: "k9", F: 96 }], acks, cfg, now).length, 1); // otra jornada
+}
+// ¿Quién manejó? Caso real tsbsa 3–4/11: Zanon (b238) en el 1751 (b2E7); Madrid (b946) llega en la 8015
+// (b2D4) y se queda; a las 05:29 Zanon pasa su llave en la 173 (b22) en la base, a 20 km.
+{
+  const T = s => Date.parse(s + "Z");
+  const tr = (d, r, s, e, x, y, km, dh) => ({ d, r, s: T(s), e: T(e), x, y, km: km || 0, dh: dh || (T(e) - T(s)) / 3600000 });
+  const D = [
+    tr("b2E7", "b238", "2026-11-03T09:08:58", "2026-11-03T10:01:44", -68.72187, -38.30883, 13.5, 0.88),
+    tr("b2E7", "b238", "2026-11-03T13:49:41", "2026-11-03T14:43:18", -68.72227, -38.30891, 13.5, 0.89),
+    tr("b2E7", "b238", "2026-11-03T16:15:49", "2026-11-03T17:33:03", -68.60459, -38.35511, 19.3, 1.29),
+    tr("b2E7", "b238", "2026-11-03T18:18:59", "2026-11-03T19:32:32", -68.72182, -38.30893, 19.4, 1.23),
+    tr("b2E7", "b238", "2026-11-03T21:17:51", "2026-11-03T21:18:17", -68.72180, -38.30897, 0.02, 0.01),
+    tr("b2E7", "b238", "2026-11-03T22:39:09", "2026-11-03T23:19:18", -68.60458, -38.35521, 19.1, 0.67),
+    tr("b2E7", "b238", "2026-11-04T00:40:13", "2026-11-04T01:49:14", -68.72160, -38.30911, 19.5, 1.15),
+    tr("b2E7", "b238", "2026-11-04T03:24:07", "2026-11-04T04:11:45", -68.60468, -38.35518, 19.1, 0.79),
+    tr("b2E7", "b238", "2026-11-04T04:57:57", "2026-11-04T05:57:53", -68.72168, -38.30921, 19.2, 1.0),
+    tr("b2E7", "b238", "2026-11-04T07:21:05", "2026-11-04T08:29:08", -68.59926, -38.34817, 18.0, 1.13),
+    tr("b2E7", null, "2026-11-04T08:29:49", "2026-11-04T08:36:24", -68.60441, -38.35517, 1.3, 0.1),
+    tr("b2E7", "b238", "2026-11-04T11:02:57", "2026-11-04T11:07:56", -68.60555, -38.35535, 0.15, 0.08),
+  ];
+  const tbd = new Map([
+    ["b2E7", D],
+    ["b22", [tr("b22", "b238", "2026-11-03T08:30:42", "2026-11-03T08:59:20", -68.63569, -38.34860, 20.7), tr("b22", "b11FC", "2026-11-03T18:09:17", "2026-11-03T22:51:38", -68.82513, -38.35262, 202),
+      tr("b22", "b238", "2026-11-04T08:29:36", "2026-11-04T09:05:56", -68.60442, -38.35521, 26), tr("b22", "b946", "2026-11-04T09:14:49", "2026-11-04T09:49:13", -68.82517, -38.35131, 26)]],
+    ["b2D4", [tr("b2D4", "b946", "2026-11-03T21:17:51", "2026-11-03T22:17:41", -68.72229, -38.30900, 33.9), tr("b2D4", "b279", "2026-11-03T22:21:16", "2026-11-03T22:42:27", -68.81575, -38.33740, 14.9)]],
+  ]);
+  const keys = [["2026-11-03T09:08:00", "b2E7", "b238"], ["2026-11-03T20:18:26", "b2D4", "b946"], ["2026-11-03T22:21:00", "b2D4", "b279"],
+    ["2026-11-04T08:29:15", "b22", "b238"], ["2026-11-04T09:14:32", "b22", "b946"], ["2026-11-04T09:14:49", "b2E7", "b238"]].map(([t, d, r]) => ({ t: T(t), d, r }));
+  const j = { key: "z", drv: "b238", s: T("2026-11-03T08:27:23"), e: T("2026-11-04T12:29:00"), devices: ["b22", "b2E7"], trips: D.filter(t => t.r === "b238").map(t => ({ ...t })) };
+  const inf = GI.identInfer(j, tbd, keys, {});
+  assert.strictEqual(inf.D, "b2E7");
+  assert.strictEqual(inf.other, "b946");
+  assert.strictEqual(new Date(inf.from).toISOString(), "2026-11-03T22:39:09.000Z"); // 19:39
+  assert.ok(inf.to >= T("2026-11-04T08:29:15") && inf.to <= T("2026-11-04T09:14:49"), "fin " + new Date(inf.to).toISOString());
+  assert.strictEqual(inf.conf, "alta");
+  assert.deepStrictEqual(inf.proofs.map(p => p.kind).join(), "llegada,lejos,salida,vuelve,estilo");
+  assert.strictEqual(inf.n, 5);
+  // sin llegada ni llaves en otro lado: no hay pruebas
+  const none = GI.identInfer(j, new Map([["b2E7", D]]), [keys[0]], {});
+  assert.strictEqual(none.conf, "baja");
 }
 console.log("OK");

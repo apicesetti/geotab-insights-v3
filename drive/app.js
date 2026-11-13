@@ -25,9 +25,9 @@
 
   let api = null, wapi = null, state = null, root = null;
   let me = null, cfg = D.settingsFrom(null);
-  let trips = [], rawEvents = [], vehicle = null, phone = null, away = { status: "—" }, awayState = null;
+  let trips = [], rawEvents = [], rides = { records: [], vtrips: [] }, vehicle = null, phone = null, away = { status: "—" }, awayState = null;
   let last = { config: 0, trips: 0, events: 0, away: 0, fullTrips: 0 };
-  let timer = null, busy = false, listening = false, bound = false, error = null;
+  let timer = null, busy = false, listening = false, error = null;
   let view = null; // resultados calculados
   let ui = { mode: null, q: "", busy: false, msg: null }; // mode: null | "unassign" | "relief"
   let drivers = null;
@@ -49,6 +49,7 @@
     rawEvents = lsGet("events", []);
     last = Object.assign(last, lsGet("last", {}));
     awayState = lsGet("away", null);
+    rides = lsGet("rides", rides);
   }
   function saveCache() {
     lsSet("trips", trips); lsSet("events", rawEvents); lsSet("last", last); lsSet("away", awayState);
@@ -118,6 +119,34 @@
     });
   }
 
+  // Tramos como acompañante: tripulaciones de Horas de trabajo (AddInData) de los últimos
+  // fatigue_days días y los viajes de esos vehículos en esos tramos.
+  const WH = () => window.WorkingHoursShared || null;
+  function loadRides(force) {
+    const S = WH();
+    const now = Date.now();
+    if (!S || (!force && now - (last.rides || 0) < cfg.drive.trips_refresh_min * MIN)) return Promise.resolve();
+    const dates = [];
+    for (let i = cfg.drive.fatigue_days; i >= 0; i--) dates.push(S.addDays(S.dayKey(now), -i));
+    const store = new S.Store((m, p) => wapi.call(m, p), calls => wapi.multiCall(calls));
+    return store.recordsByDates(dates).then(recs => {
+      // tripulaciones, confirmaciones, detecciones por posición y bajadas (las tripulaciones efectivas se arman en rideIntervals)
+      const records = (recs || []).filter(r => r.type === S.ACK || r.type === S.CLAIM || r.type === S.LEAVE || r.type === S.CREW);
+      const ivs = D.rideIntervals(records, me.id, now, S);
+      const byDev = new Map();
+      for (const iv of ivs) for (const d of iv.devices) {
+        const cur = byDev.get(d) || { from: iv.from, to: iv.to };
+        cur.from = Math.min(cur.from, iv.from); cur.to = Math.max(cur.to, iv.to); byDev.set(d, cur);
+      }
+      if (!byDev.size) { rides = { records, vtrips: [] }; return; }
+      const devs = [...byDev.keys()];
+      return wapi.multiCall(devs.map(d => ["Get", { typeName: "Trip",
+        search: { deviceSearch: { id: d }, fromDate: iso(byDev.get(d).from - 6 * H), toDate: iso(byDev.get(d).to) },
+        propertySelector: { fields: ["id", "device", "driver", "start", "stop", "distance", "drivingDuration"], isIncluded: true } }]))
+        .then(res => { rides = { records, vtrips: [].concat(...(res || []).map(x => (x || []).map(D.compactTrip))) }; });
+    }).then(() => { last.rides = now; lsSet("rides", rides); }).catch(() => { /* sin permiso o sin red: se mantiene la caché */ });
+  }
+
   // Vehículo en el que estoy identificado: el de Drive y el del último cambio de conductor.
   function loadVehicle() {
     const now = Date.now();
@@ -140,6 +169,8 @@
             }));
             vehicle = st.find(v => v.driver === me.id) || st[0] || null;
             if (!vehicle) return;
+            // desde cuándo estoy identificado en este vehículo (último cambio de conductor a mi nombre)
+            if (vehicle.driver === me.id && lastCh && GI.idOf(lastCh.device) === vehicle.d) vehicle.identFrom = new Date(lastCh.dateTime).getTime();
             const names = lsGet("devNames", {});
             if (names[vehicle.d]) { vehicle.name = names[vehicle.d]; return; }
             return wapi.call("Get", { typeName: "Device", search: { id: vehicle.d }, propertySelector: { fields: ["id", "name", "licensePlate"], isIncluded: true } })
@@ -168,8 +199,11 @@
     if (!me) return;
     const now = Date.now();
     const evs = D.myEvents(rawEvents, trips, me.id, cfg);
-    const live = vehicle && vehicle.driver === me.id ? { d: vehicle.d, driving: vehicle.driving || !!(state && state.driving), since: vehicle.since } : null;
-    view = { at: now, risk: D.riskSummary(trips, evs, cfg, now), fat: D.fatigueState(trips, evs, cfg, me.id, now, live) };
+    const live = vehicle && vehicle.driver === me.id ? { d: vehicle.d, driving: vehicle.driving || !!(state && state.driving), since: vehicle.since, identFrom: vehicle.identFrom || null } : null;
+    // jornada y fatiga: lo que manejé + lo que viajé de acompañante (sin manejo)
+    const ivs = D.rideIntervals(rides.records, me.id, now, WH());
+    const rideT = D.rideTrips(ivs, rides.vtrips, me.id, trips, now, cfg.fatigue.rest_split);
+    view = { at: now, rides: ivs, risk: D.riskSummary(trips, evs, cfg, now), fat: D.fatigueState(trips.concat(rideT), evs, cfg, me.id, now, live) };
   }
 
   // ---------- avisos ----------
@@ -246,12 +280,14 @@
     if (ui.busy) return;
     const vn = (vehicle && vehicle.name) || "el vehículo";
     if (name === "cancel") { ui = { mode: null, q: "", busy: false, msg: null }; return render(); }
+    if (name === "drive-assets") { try { api.mobile.navigate("assets"); } catch (e) { /* versión de Drive sin navigate */ } return; }
     if (name === "ask-unassign") { ui.mode = "unassign"; ui.msg = null; return render(); }
     if (name === "ask-relief") { ui.mode = "relief"; ui.q = ""; ui.msg = null; render(); return loadDrivers().then(render); }
     ui.busy = true; render();
     let p;
     if (name === "unassign") {
-      p = unassign().then(() => ({ ok: "Te desvinculaste de " + vn + "." }), e => ({ err: errMsg(e, "No se pudo desvincular") }));
+      const dev = vehicle && vehicle.d;
+      p = unassign().then(() => ({ ok: "Te desvinculaste de " + vn + ".", dev }), e => ({ err: errMsg(e, "No se pudo desvincular") }));
     } else if (name === "relief") {
       const u = (drivers || []).find(x => x.id === arg);
       if (!u) { ui.busy = false; return render(); }
@@ -259,7 +295,7 @@
       p = sendRelief(u).then(() => null, e => errMsg(e, "No se pudo avisar a " + u.name))
         .then(e1 => unassign().then(() => null, e => errMsg(e, "No se pudo desvincular"))
           .then(e2 => (e1 || e2 ? { err: [e1, e2].filter(Boolean).join(" ") + (e1 ? "" : " A " + u.name + " le llegó el aviso.") }
-            : { ok: "Le avisamos a " + u.name + " y te desvinculaste de " + vn + "." })));
+            : { ok: "Le avisamos a " + u.name + " y te desvinculaste de " + vn + ".", dev: vehicle && vehicle.d })));
     }
     return p.then(r => { ui = { mode: null, q: "", busy: false, msg: r }; render(); });
   }
@@ -274,6 +310,7 @@
       if (!me) throw new Error("No se pudo identificar al usuario de Drive.");
       return loadConfig(o.full);
     }).then(() => loadTrips(o.full ? "full" : o.force))
+      .then(() => loadRides(o.full || o.force))
       .then(() => loadEvents(o.full || o.force))
       .then(() => (o.full || o.force || Date.now() - last.away >= cfg.drive.away.poll_min * MIN - 5000 ? checkAway().catch(() => {}) : null))
       .then(() => { error = null; compute(); sendLimitAlerts(); saveCache(); })
@@ -310,12 +347,20 @@
     </div>`;
   }
 
+  function rideNote(o) {
+    const iv = (view.rides || []).filter(r => r.crewKey === o.ride.crewKey).pop();
+    if (!iv) return "";
+    const st = iv.status === "pending" ? " (sin confirmar)" : "";
+    return `<p class="mj-ride">${o.ride.only ? "Como acompañante" : "Parte como acompañante"} de ${esc(iv.driverName || "otro chofer")}${iv.deviceName ? " en " + esc(iv.deviceName) : ""}${st}. Cuenta como jornada, no como manejo.</p>`;
+  }
   function cardTime(f) {
     if (f.open) {
       const p = f.open.progress;
       return `<section class="mj-card"><h2>Te queda</h2>
         <p class="mj-sub">Jornada desde las ${D.hm(f.open.shift.s)}${p.driving ? " · manejando" : p.sinceLast > 1 ? " · detenido hace " + D.dur(p.sinceLast / 60) : ""}</p>
-        ${p.items.map(bar).join("")}
+        ${f.open.ride ? rideNote(f.open) : ""}
+        ${f.open.ident ? `<p class="mj-ride">Identificado en ${esc((vehicle && vehicle.name) || "el vehículo")} desde las ${D.hm(f.open.ident.from)}${f.open.ident.noTrips ? " · todavía sin viajes" : ""}. La jornada cuenta desde la identificación.</p>` : ""}
+        ${p.items.filter(x => !(f.open.ride && f.open.ride.only) || x.key === "span").map(bar).join("")}
         ${f.open.daysRow > f.limits.max_days_row ? `<p class="mj-warn">Llevás ${f.open.daysRow} días seguidos de trabajo (máximo ${f.limits.max_days_row}).</p>` : ""}
         ${p.nightAhead ? `<p class="mj-warn">Tu jornada sigue de madrugada (02–05 h): es el horario de más riesgo de sueño.</p>` : ""}
       </section>`;
@@ -351,6 +396,8 @@
   }
 
   function cardRisk(r) {
+    // sin kilómetros manejados (por ejemplo, solo acompañante): no hay índice que mostrar
+    if (!r.cur.km && !r.prev.km) return "";
     const vals = r.series.map(b => b.risk || 0), mx = Math.max(0.001, ...vals);
     const ch = r.change;
     const chTxt = ch == null ? "" : `<span class="mj-tag ${ch <= 0 ? "mj-okt" : "mj-badt"}">${ch <= 0 ? "▼" : "▲"} ${Math.abs(Math.round(ch * 100))} % vs ${r.days} días anteriores</span>`;
@@ -387,6 +434,14 @@
   function cardVehicle() {
     const mine = vehicle && vehicle.driver === me.id;
     const vn = mine ? vehicle.name || vehicle.d : null;
+    // acompañante: en lugar de "Sin identificación", con quién va
+    const ride = !mine && view && (view.rides || []).filter(r => r.to >= Date.now() - 2 * MIN).pop();
+    if (ride) {
+      return `<section class="mj-card" id="mj-vehicle"><h2>Vehículo</h2>
+        <p class="mj-big-s">${esc(ride.deviceName || "Vehículo")}</p>
+        <p class="mj-sub">Vas de acompañante con ${esc(ride.driverName || "otro chofer")} desde las ${D.hm(ride.from)}.</p>
+        <p class="mj-hint">Si te bajás, tu teléfono lo detecta solo (o tocá "Me bajé" en Tripulación).</p></section>`;
+    }
     const f = AWAY_TXT[away.status];
     const far = away.status === "lejos";
     let actions = "";
@@ -397,7 +452,11 @@
     else if (mine) {
       actions = `<div class="mj-btns"><button class="mj-btn ${far ? "" : "mj-btn-2"}" data-act="ask-unassign">Me desvinculo</button><button class="mj-btn mj-btn-2" data-act="ask-relief">Me relevaron</button></div>`;
     }
-    const msg = ui.msg ? `<p class="${ui.msg.ok ? "mj-okm" : "mj-msg"}">${esc(ui.msg.ok || ui.msg.err)}</p>` : "";
+    // Drive tiene su propia selección de vehículo: si sigue elegido el que se dejó, se ofrece quitarlo
+    const driveSel = state && GI.idOf(state.device);
+    const offerAssets = ui.msg && ui.msg.ok && ui.msg.dev && driveSel === ui.msg.dev && hasMobile();
+    const msg = ui.msg ? `<p class="${ui.msg.ok ? "mj-okm" : "mj-msg"}">${esc(ui.msg.ok || ui.msg.err)}</p>`
+      + (offerAssets ? `<p class="mj-hint">En Drive todavía figura ese vehículo como elegido.</p><div class="mj-btns"><button class="mj-btn mj-btn-2" data-act="drive-assets">Quitar el vehículo en Drive</button></div>` : "") : "";
     return `<section class="mj-card ${far && mine ? "mj-card-alert" : ""}" id="mj-vehicle"><h2>Vehículo</h2>
       <p class="mj-big-s">${vn ? esc(vn) : "Sin identificación"}</p>
       <p class="mj-sub ${far ? "mj-badc" : ""}">${f ? f(away.dist) : "Revisando…"}</p>
@@ -407,12 +466,13 @@
   }
 
   function render() {
+    root = document.getElementById("mjDrive") || root;
     if (!root) return;
     const who = $("#mj-who");
     if (who) who.textContent = me ? me.name : "";
     const body = $("#mj-view");
     if (!body) return;
-    const foot = `<p class="mj-foot">${cfg.fromInsights ? "Límites de Insights by Cesetti" : "Límites por defecto (no se pudo leer la configuración de Insights)"} · actualizado ${view ? D.hm(view.at) : "–"}${isOnline() ? "" : " · sin conexión"}</p>`;
+    const foot = `<p class="mj-foot">${window.CESETTI_VERSION ? "v" + window.CESETTI_VERSION + " · " : ""}${cfg.fromInsights ? "Límites de Insights by Cesetti" : "Límites por defecto (no se pudo leer la configuración de Insights)"} · actualizado ${view ? D.hm(view.at) : "–"}${isOnline() ? "" : " · sin conexión"}</p>`;
     const err = error ? `<div class="mj-msg">${esc(error)}</div>` : "";
     if (!me || !view) { body.innerHTML = err + `<p class="mj-sub mj-loading">Cargando tus datos…</p>`; return; }
     // con el conductor lejos del vehículo (o eligiendo relevo) la tarjeta del vehículo va primero
@@ -427,20 +487,38 @@
     if (!me) loadCache();
   }
 
+  // Drive puede volver a insertar el HTML del add-in cada vez que se abre la
+  // página (initialize corre una sola vez, focus cada vez). Por eso los eventos
+  // se escuchan en el documento, no en un elemento que puede ser reemplazado.
+  function onClick(e) {
+    const t = e.target && e.target.nodeType === 1 ? e.target : e.target && e.target.parentElement;
+    const el = t && t.closest ? t.closest("#mjDrive [data-act], #mj-refresh") : null;
+    if (!el || el.disabled) return;
+    root = document.getElementById("mjDrive") || root;
+    try {
+      if (el.id === "mj-refresh") { el.disabled = true; check({ force: true }).then(() => { el.disabled = false; render(); }); return; }
+      const r = act(el.getAttribute("data-act"), el.getAttribute("data-arg"));
+      if (r && r.catch) r.catch(showActError);
+    } catch (err) { showActError(err); }
+  }
+  function showActError(err) {
+    ui = { mode: null, q: "", busy: false, msg: { err: "Error: " + ((err && err.message) || err) } };
+    render();
+  }
+  function onInput(e) {
+    if (!e.target || e.target.id !== "mj-q") return;
+    ui.q = e.target.value;
+    const l = document.querySelector("#mjDrive .mj-users");
+    if (l) l.innerHTML = usersHtml();
+  }
   function bindEvents() {
-    const b = $("#mj-refresh");
-    if (b) b.addEventListener("click", () => { b.disabled = true; check({ force: true }).then(() => { b.disabled = false; render(); }); });
-    root.addEventListener("click", e => {
-      const el = e.target.closest && e.target.closest("[data-act]");
-      if (el && !el.disabled) act(el.getAttribute("data-act"), el.getAttribute("data-arg"));
-    });
-    // al buscar solo se redibuja la lista (no se pierde el teclado)
-    root.addEventListener("input", e => { if (e.target.id === "mj-q") { ui.q = e.target.value; const l = $(".mj-users"); if (l) l.innerHTML = usersHtml(); } });
+    if (window.__mjBound) return;   // una sola vez por documento
+    window.__mjBound = true;
+    document.addEventListener("click", onClick, true);
+    document.addEventListener("input", onInput, true);
   }
 
-  window.geotab = window.geotab || {};
-  window.geotab.addin = window.geotab.addin || {};
-  window.geotab.addin.cesettiMiJornada = function () {
+  const factory = function () {
     return {
       // onStartup: al iniciar sesión en Drive, sin interfaz.
       startup(freshApi, freshState, callback) {
@@ -453,13 +531,14 @@
       initialize(freshApi, freshState, callback) {
         setup(freshApi, freshState);
         root = document.getElementById("mjDrive");
-        if (root && !bound) { bindEvents(); bound = true; }
+        bindEvents();
         compute(); render();
         callback();
       },
       focus(freshApi, freshState) {
         setup(freshApi, freshState);
         root = document.getElementById("mjDrive") || root;
+        bindEvents();
         if (root) root.hidden = false;
         if (!ui.busy) ui = { mode: null, q: "", busy: false, msg: null };
         render();
@@ -473,5 +552,13 @@
       },
     };
   };
+  // Dentro del add-in unificado (shell.js) lo registra el contenedor; suelto, se registra solo.
+  window.CesettiModules = window.CesettiModules || {};
+  window.CesettiModules.miJornada = factory;
+  if (!window.CESETTI_SHELL) {
+    window.geotab = window.geotab || {};
+    window.geotab.addin = window.geotab.addin || {};
+    window.geotab.addin.cesettiMiJornada = factory;
+  }
   GI._mj = { get view() { return view; }, get away() { return away; }, get ui() { return ui; }, check, render, act };
 })(window.GI);

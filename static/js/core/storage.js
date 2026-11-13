@@ -187,7 +187,7 @@
   // Seguimiento de casos de fatiga: un registro por jornada revisada
   // ({kind:"fcase", key: "conductor|inicio", status, owner, action, notes}).
   async function saveFatigueCase(api, c) {
-    const details = { kind: "fcase", ...c, updated_at: new Date().toISOString() };
+    const details = { kind: "fcase", ...c, updated_at: new Date().toISOString(), first_at: c.first_at || new Date().toISOString() };
     delete details.id;
     const entity = { addInId: ADDIN_ID, groups: await shareGroups(api), details };
     if (c.id) { await api.call("Set", { typeName: "AddInData", entity: { id: c.id, ...entity } }); return { ...details, id: c.id }; }
@@ -201,6 +201,67 @@
       const d = parseDetails(rec);
       if (d && d.kind === "fcase") out.push({ ...d, id: rec.id });
     }
+    return out;
+  }
+
+  // Diagrama de trabajo fijado a mano para un conductor ({kind:"roster", drv, work, off} o {none:true}).
+  async function saveRoster(api, r) {
+    const details = { kind: "roster", drv: r.drv, work: r.work || 0, off: r.off || 0, none: !!r.none, by: r.by || "", updated_at: new Date().toISOString() };
+    const entity = { addInId: ADDIN_ID, groups: await shareGroups(api), details };
+    if (r.id) { await api.call("Set", { typeName: "AddInData", entity: { id: r.id, ...entity } }); return { ...details, id: r.id }; }
+    const id = await api.call("Add", { typeName: "AddInData", entity });
+    return { ...details, id };
+  }
+  async function removeRoster(api, id) { await api.call("Remove", { typeName: "AddInData", entity: { id } }); }
+  async function loadRosters(api) {
+    const out = [];
+    for (const rec of await getAll(api)) { const d = parseDetails(rec); if (d && d.kind === "roster") out.push({ ...d, id: rec.id }); }
+    return out;
+  }
+
+  // Revisión de identificación de una jornada dudosa (relevo sin identificar / doble turno).
+  // {kind:"ident", key, drv, d, s, e, outcome: "relevo"|"doble"|"nose", other, at, by}
+  async function saveIdent(api, r) {
+    const details = { kind: "ident", ...r, updated_at: new Date().toISOString() };
+    delete details.id;
+    const entity = { addInId: ADDIN_ID, groups: await shareGroups(api), details };
+    if (r.id) { await api.call("Set", { typeName: "AddInData", entity: { id: r.id, ...entity } }); return { ...details, id: r.id }; }
+    const id = await api.call("Add", { typeName: "AddInData", entity });
+    return { ...details, id };
+  }
+  async function loadIdents(api) {
+    const out = [];
+    for (const rec of await getAll(api)) { const d = parseDetails(rec); if (d && d.kind === "ident") out.push({ ...d, id: rec.id }); }
+    return out;
+  }
+
+
+  // Coaching: intervención asignada a un conductor (motivo, tipo, responsable, fecha) y su estado.
+  // El resultado (antes y después) se calcula en el add-in; no se guarda.
+  async function saveCoach(api, r) {
+    const details = { kind: "coach", ...r, updated_at: new Date().toISOString() };
+    delete details.id;
+    const entity = { addInId: ADDIN_ID, groups: await shareGroups(api), details };
+    if (r.id) { await api.call("Set", { typeName: "AddInData", entity: { id: r.id, ...entity } }); return { ...details, id: r.id }; }
+    const id = await api.call("Add", { typeName: "AddInData", entity });
+    return { ...details, id };
+  }
+  async function loadCoaches(api) {
+    const out = [];
+    for (const rec of await getAll(api)) { const d = parseDetails(rec); if (d && d.kind === "coach") out.push({ ...d, id: rec.id }); }
+    return out;
+  }
+
+  // Intervenciones por alertas de fatiga (quién, cuándo, qué se hizo). Las ven todos los supervisores.
+  async function saveAlertAck(api, r) {
+    const details = { kind: "falert", ...r, updated_at: new Date().toISOString() };
+    delete details.id;
+    const id = await api.call("Add", { typeName: "AddInData", entity: { addInId: ADDIN_ID, groups: await shareGroups(api), details } });
+    return { ...details, id };
+  }
+  async function loadAlertAcks(api, sinceMs) {
+    const out = [];
+    for (const rec of await getAll(api)) { const d = parseDetails(rec); if (d && d.kind === "falert" && (!sinceMs || d.at >= sinceMs)) out.push({ ...d, id: rec.id }); }
     return out;
   }
 
@@ -237,5 +298,5 @@
     return saved;
   }
 
-  Object.assign(GI, { _deepestOnly: deepestOnly, shareGroups, ADDIN_ID, loadShared, saveSettings, saveBenchmark, currentUser, sharingStatus, shareWithAll, addMilestone, updateMilestone, removeMilestone, resolveIsAdmin, saveFatigueCase, loadFatigueCases });
+  Object.assign(GI, { saveCoach, loadCoaches, saveAlertAck, loadAlertAcks, _deepestOnly: deepestOnly, shareGroups, ADDIN_ID, loadShared, saveSettings, saveBenchmark, currentUser, sharingStatus, shareWithAll, addMilestone, updateMilestone, removeMilestone, resolveIsAdmin, saveFatigueCase, loadFatigueCases, saveRoster, removeRoster, loadRosters, saveIdent, loadIdents });
 })(window.GI);

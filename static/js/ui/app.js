@@ -11,9 +11,9 @@
     ["combustible", "Combustible y ralentí"],
     ["seguridad", "Seguridad"],
     ["conductores", "Conductores"],
-    ["recorridos", "Recorridos"],
+    // ["recorridos", "Recorridos"], — sacada por ahora (poco útil); el código queda para retomarla
+    ["mapa", "Mapa de calor"],
     ["fatiga", "Fatiga"],
-    ["exposicion", "Exposición"],
     ["corredores", "Corredores"],
     ["hitos", "Hitos"],
     ["config", "Configuración"],
@@ -27,7 +27,7 @@
   function mergeDefaults(saved, defaults) {
     if (!saved) return defaults;
     const out = { ...defaults, ...saved };
-    for (const k of ["service", "fuel", "journeys", "drivers", "ui", "fatigue", "severity"]) out[k] = { ...defaults[k], ...(saved[k] || {}) };
+    for (const k of ["service", "fuel", "journeys", "drivers", "ui", "fatigue", "severity", "fatigue_alerts", "speed_sev"]) out[k] = { ...defaults[k], ...(saved[k] || {}) };
     out.service.group_ids = { ...defaults.service.group_ids, ...((saved.service || {}).group_ids || {}) };
     out.category_weights = { ...defaults.category_weights, ...(saved.category_weights || {}) };
     out.categories = saved.categories && saved.categories.length ? saved.categories : defaults.categories;
@@ -38,9 +38,22 @@
 
   const LARGE_FLEET = window.GI_LARGE_FLEET || 300; // vehículos: a partir de acá el grupo filtra en la API
 
-  function rangeFor(days) {
-    const to = GI.dayKey(new Date());
-    return { from: GI.dayKey(GI.addDays(new Date(), -(days - 1))), to };
+  // Períodos como en MyGeotab: meses calendario completos (sin meses cortados).
+  const PRESETS = [
+    ["month", "Este mes"], ["last_month", "Mes pasado"], ["3m", "Últimos 3 meses"], ["6m", "Últimos 6 meses"], ["12m", "Últimos 12 meses"],
+  ];
+  function rangeFor(preset) {
+    const now = new Date(), y = now.getFullYear(), m = now.getMonth();
+    const first = k => GI.dayKey(new Date(y, m - k, 1));
+    if (preset === "last_month") return { from: first(1), to: GI.dayKey(new Date(y, m, 0)) };
+    const back = { month: 0, "3m": 2, "6m": 5, "12m": 11 }[preset];
+    return { from: first(back != null ? back : 2), to: GI.dayKey(now) };
+  }
+  // Configuraciones guardadas con "días" (versiones anteriores) → período por meses.
+  function presetFrom(ui) {
+    if (ui && PRESETS.some(([k]) => k === ui.default_period)) return ui.default_period;
+    const d = ui && ui.default_days;
+    return !d ? "3m" : d <= 31 ? "month" : d <= 95 ? "3m" : d <= 185 ? "6m" : "12m";
   }
 
   function App({ api, database, userName }) {
@@ -53,7 +66,7 @@
     // Conductor (no administrador): ve solo "Mi desempeño" con sus datos.
     const [me, setMe] = useState(null);
     const [benchmark, setBenchmark] = useState(null);
-    const [period, setPeriod] = useState({ preset: 90, ...rangeFor(90) });
+    const [period, setPeriod] = useState({ preset: "3m", ...rangeFor("3m") });
     const [customDraft, setCustomDraft] = useState(null);
     const [gran, setGran] = useState("week");
     const [filter, setFilter] = useState({ vtype: "", stype: "" });
@@ -63,6 +76,8 @@
     const [raw, setRaw] = useState(null);
     const [loading, setLoading] = useState(null);
     const [tab, setTab] = useState("resumen");
+    const [fatigueDrv, setFatigueDrv] = useState(null); // conductor a abrir en Fatiga
+    const [mapPreset, setMapPreset] = useState(null); // filtro con el que se abre el Mapa de calor
     const [detail, setDetail] = useState(null);
     const loadId = useRef(0);
     const zonesAreaRef = useRef(false);
@@ -102,8 +117,12 @@
           // elegido arriba pasa a filtrar en la API (no en el navegador).
           const large = cat.devices.length > LARGE_FLEET;
           setLargeFleet(large);
-          const days = large && !(s.scope_group_ids || []).length ? Math.min(30, s.ui.default_days) : s.ui.default_days;
-          const p = { preset: days, ...rangeFor(days) };
+          // Si un administrador eligió el período por defecto, se respeta siempre; "Este mes" solo es
+          // el arranque automático de las flotas grandes cuando nadie lo eligió.
+          const su = (shared.settings && shared.settings.ui) || {};
+          const chosen = su.default_period_set || (su.default_period && su.default_period !== "3m");
+          const pre = large && !(s.scope_group_ids || []).length && !chosen ? "month" : presetFrom(s.ui);
+          const p = { preset: pre, ...rangeFor(pre) };
           setPeriod(p);
           setPhase("ready");
           if (!s.configured && admin) setTab("config");
@@ -123,7 +142,7 @@
       setLoading(0); setError(null);
       try {
         if (force) { zonesAreaRef.current = false; await GI.loadCatalogs(api, database, true).then(c => { setCatalogs(c); cat = c; }); }
-        const ruleIds = GI.riskRuleIds(s.rule_mapping);
+        const ruleIds = GI.loadRuleIds(s.rule_mapping);
         const large = cat.devices.length > LARGE_FLEET;
         const scope = large && groupRef.current.length ? groupRef.current : s.scope_group_ids;
         const t0 = performance.now();
@@ -212,6 +231,8 @@
       } catch (e) { console.error("[Geotab Insights] view", e); setTimeout(() => setCalcError(e), 0); return null; }
     }, [model, filter, mgGroups, gran, milestones, driverMode, benchmark]);
 
+    // contexto para paneles que guardan datos propios (coaching) o abren el informe
+    GI._ctx = { api, userName, isAdmin, database };
     async function publishBenchmark() {
       const b = GI.buildBenchmark(model);
       const saved = await GI.saveBenchmark(api, b);
@@ -224,7 +245,7 @@
       setNoShared(false);
       GI.loadShared(api).then(sh => GI.sharingStatus(api, sh._settingsRecords)).then(st => setSharing(st)).catch(() => {});
       const prevRules = raw ? raw.ruleIds : new Set();
-      const needsReload = GI.riskRuleIds(saved.rule_mapping).some(r => !prevRules.has(r));
+      const needsReload = GI.loadRuleIds(saved.rule_mapping).some(r => !prevRules.has(r));
       setSettings(saved);
       if (needsReload) load(saved, period, catalogs);
       return saved;
@@ -244,11 +265,13 @@
     function applyPreset(v) {
       if (v === "custom") { setCustomDraft({ from: period.from, to: period.to }); return; }
       if (v === "range") return; // el rango personalizado ya aplicado
-      const p = { preset: +v, ...rangeFor(+v) };
+      const p = { preset: v, ...rangeFor(v) };
       setPeriod(p); setCustomDraft(null);
       load(settings, p, catalogs);
     }
 
+    const mapOn = !!GI.MapTab && !driverMode;
+    const openMap = p => { setDetail(null); setMapPreset(p); setTab("mapa"); };
     if (phase === "init") return html`<div className="splash"><div className="spinner"></div>Cargando configuración de ${database}…</div>`;
     if (phase === "error") return html`<div className="splash"><${Info} tone="error">${error}<//></div>`;
 
@@ -260,11 +283,11 @@
     if (filter.stype) activeFilters.push({ key: "s", label: filter.stype === "larga" ? "Larga distancia" : "Corta distancia", clear: () => setFilter(f => ({ ...f, stype: "" })) });
     return html`<div className="app">
       <header className="topbar">
-        <div className="brand"><h1>Geotab Insights</h1><span className="sub">Base ${database}${isAdmin ? ", con permisos de administrador" : ""}</span></div>
+        <div className="brand"><h1>Insights <span className="by">by Cesetti</span></h1><span className="sub">Base ${database}${isAdmin ? ", con permisos de administrador" : ""}</span></div>
         <div className="controls">
           <label className="ctl">Período
             <select value=${customDraft ? "custom" : period.preset || "range"} onChange=${e => applyPreset(e.target.value)}>
-              ${[30, 60, 90, 180, 365].map(d => html`<option key=${d} value=${d}>Últimos ${d} días</option>`)}
+              ${PRESETS.map(([k, l]) => html`<option key=${k} value=${k}>${l}</option>`)}
               ${!period.preset ? html`<option value="range">Del ${period.from} al ${period.to}</option>` : null}
               <option value="custom">Personalizado…</option>
             </select></label>
@@ -297,8 +320,9 @@
         <button className="btn link small" onClick=${() => setFilter({ vtype: "", stype: "" })}>Quitar filtros</button>
       </div>` : null}
       ${loading != null ? html`<${Progress} value=${loading} label=${loadingLabel || "Descargando datos"} />` : null}
-      <nav className="tabs">${(driverMode ? [["mi", "Mi desempeño"]] : TABS.filter(([k]) => !BETA_ONLY.has(k) || showBetaTabs())).map(([k, l]) => html`<button key=${k} className=${tab === k ? "on" : ""} onClick=${() => setTab(k)}>${l}</button>`)}</nav>
+      <nav className="tabs">${(driverMode ? [["mi", "Mi desempeño"]] : TABS.filter(([k]) => !BETA_ONLY.has(k) || showBetaTabs())).map(([k, l]) => html`<button key=${k} className=${tab === k ? "on" : ""} onClick=${() => setTab(k)}>${GI.headline ? GI.headline(l) : l}</button>`)}</nav>
       <div className="gi-main">
+        ${view && !driverMode && GI.FatigueAlerts ? html`<${ErrorBoundary}><${GI.FatigueAlerts} view=${view} api=${api} settings=${settings} userName=${userName} /><//>` : null}
         ${error ? html`<${Info} tone="error">${error}<//>` : null}
         ${noShared && !isAdmin && !driverMode ? html`<${Info} tone="warn">Estás viendo la configuración por defecto: un administrador todavía no la configuró, o la guardó antes de que se compartiera con tu grupo. Pedile que abra el add-in y guarde la configuración (o use "Compartir con todos").<//>` : null}
         ${isAdmin && sharing && sharing.missingUsers.length ? html`<${Info} tone="warn">
@@ -326,10 +350,13 @@
           : tab === "combustible" ? html`<${GI.FuelTab} view=${view} onVehicle=${id => setDetail({ type: "v", id })} />`
           : tab === "seguridad" ? html`<${GI.SafetyTab} view=${view} onVehicle=${id => setDetail({ type: "v", id })} onDriver=${(id, mode) => setDetail({ type: "d", id, mode: mode || "safety" })} />`
           : tab === "conductores" ? html`<${GI.DriversTab} view=${view} onDriver=${id => setDetail({ type: "d", id })} />`
-          : tab === "recorridos" ? html`<${GI.RoutesTab} view=${view} api=${api} />`
-          : tab === "fatiga" ? (GI.FatigueTab ? html`<${GI.FatigueTab} view=${view} api=${api} userName=${userName} onDriver=${id => setDetail({ type: "d", id, mode: "safety" })} />` : html`<${Info} tone="warn">Se está terminando de cargar la nueva versión. Recargá la página (Ctrl + F5).<//>`)
+          : tab === "recorridos" ? html`<${GI.RoutesTab} view=${view} api=${api} onMap=${mapOn ? openMap : null} />`
+          : tab === "mapa" ? html`<${GI.MapTab} view=${view} api=${api} preset=${mapPreset} onPresetUsed=${() => setMapPreset(null)} onDriver=${id => setDetail({ type: "d", id, mode: "safety" })}
+              isAdmin=${isAdmin} onSaveSettings=${showBetaTabs() ? saveSettings : null} onCorridors=${showBetaTabs() ? () => setTab("corredores") : null}
+              period=${period} presets=${PRESETS} onPeriod=${applyPreset} />`
+          : tab === "fatiga" ? (GI.FatigueTab ? html`<${GI.FatigueTab} view=${view} api=${api} userName=${userName} isAdmin=${isAdmin} onSaveSettings=${saveSettings} openDriverId=${fatigueDrv} onOpened=${() => setFatigueDrv(null)} onDriver=${id => setDetail({ type: "d", id, mode: "safety" })} />` : html`<${Info} tone="warn">Se está terminando de cargar la nueva versión. Recargá la página (Ctrl + F5).<//>`)
           : tab === "exposicion" ? html`<${GI.ExposureTab} view=${view} onDriver=${id => setDetail({ type: "d", id })} />`
-          : tab === "corredores" && showBetaTabs() ? (GI.RoadsTab ? html`<${GI.RoadsTab} view=${view} api=${api} database=${database} />` : html`<${Info} tone="warn">Se está terminando de cargar la nueva versión de Corredores. Recargá la página (Ctrl + F5).<//>`)
+          : tab === "corredores" && showBetaTabs() ? (GI.CorridorsTab ? html`<${GI.CorridorsTab} view=${view} api=${api} isAdmin=${isAdmin} onSaveSettings=${saveSettings} />` : html`<${Info} tone="warn">Se está terminando de cargar la nueva versión de Corredores. Recargá la página (Ctrl + F5).<//>`)
           : tab === "hitos" ? html`<${GI.MilestonesTab} view=${view} milestones=${milestones} isAdmin=${isAdmin} groups=${groupsFlat}
               onAdd=${async m => { const r = await GI.addMilestone(api, m); setMilestones(ms => [...ms, r]); }}
               onUpdate=${async m => { await GI.updateMilestone(api, m); setMilestones(ms => ms.map(x => (x.id === m.id ? m : x))); }}
@@ -338,8 +365,9 @@
         <//>
         ${raw ? html`<footer className="foot">Datos del ${raw.fromKey} al ${raw.toKey}${raw.complete ? "" : " (completando el resto del período)"}: ${GI.fmtNum(raw.trips.length)} viajes y ${GI.fmtNum(raw.exceptions.length)} eventos, cargados en ${GI.fmtNum(raw.loadedMs / 1000, 1)} s.${model && model.excludedUnknown ? " Sin conductor identificado (excluidos por configuración): " + GI.fmtNum(model.excludedUnknown.trips) + " viajes, " + GI.fmtNum(model.excludedUnknown.km, 0) + " km y " + GI.fmtNum(model.excludedUnknown.events) + " eventos." : ""}</footer>` : null}
       </div>
-      ${detail && view && detail.type === "v" ? html`<${GI.VehicleDetail} view=${view} id=${detail.id} onClose=${() => setDetail(null)} />` : null}
-      ${detail && view && detail.type === "d" ? html`<${GI.DriverDetail} view=${view} id=${detail.id} mode=${detail.mode} onClose=${() => setDetail(null)} />` : null}
+      ${detail && view && detail.type === "v" ? html`<${GI.VehicleDetail} view=${view} id=${detail.id} onClose=${() => setDetail(null)} onMap=${mapOn ? openMap : null} />` : null}
+      ${detail && view && detail.type === "d" ? html`<${GI.DriverDetail} view=${view} id=${detail.id} mode=${detail.mode} onClose=${() => setDetail(null)}
+        onFatigue=${GI.FatigueTab && !driverMode ? id => { setDetail(null); setFatigueDrv(id); setTab("fatiga"); } : null} onMap=${mapOn ? openMap : null} />` : null}
     </div>`;
   }
 
@@ -352,7 +380,10 @@
     render() {
       if (!this.state.err) return this.props.children;
       const e = this.state.err;
+      // "x is not a function": el navegador mezcló archivos de dos versiones (caché).
+      const stale = /is not a function|is not defined/.test(String(e && e.message || ""));
       return html`<${Info} tone="error"><b>No se pudo mostrar esta pestaña.</b> ${String(e && e.message || e)}
+        ${stale ? html`<div style=${{ marginTop: "6px" }}>Puede ser que el navegador haya mezclado archivos de una versión anterior. Recargá la página forzando la actualización (Ctrl + F5).</div>` : null}
         <details style=${{ marginTop: "8px" }}><summary>Detalle técnico (para soporte)</summary><pre style=${{ whiteSpace: "pre-wrap", fontSize: "12px" }}>${String(e && e.stack || "")}</pre></details>
         <button className="btn small" style=${{ marginTop: "8px" }} onClick=${() => this.setState({ err: null })}>Reintentar</button><//>`;
     }
@@ -382,7 +413,9 @@
     if (drvs) parts.push("driversFilter:" + risonList(drvs));
     if (rules) parts.push("exceptionRulesFilter:" + risonList(rules));
     parts.push("groupByFilter:" + (drvs ? "Driver" : "Device"));
-    window.location.hash = parts.join(",");
+    // Fuera de MyGeotab (página independiente) se abre MyGeotab en otra pestaña.
+    if (GI.MG_BASE_URL) window.open(GI.MG_BASE_URL + "#" + parts.join(","), "_blank", "noopener");
+    else window.location.hash = parts.join(",");
   };
 
   GI.App = App;
@@ -398,6 +431,8 @@
   if (!SRC) { try { throw new Error("x"); } catch (e) { SRC = String(e.stack || ""); } }
   const BUILD = /githack|\/beta\/|\/exposicion\//.test(SRC) ? "beta" : "main";
   GI.BUILD = BUILD;
+  // Carpeta static/ de esta versión (para páginas auxiliares como live.html)
+  GI.STATIC_BASE = (SRC.match(/(https?:\/\/[^\s)'"]*?\/)js\/ui\/app\.js/) || [])[1] || "";
   // Cada versión toma su propio contenedor #gi3-root (si las dos están en la
   // página, getElementById devolvería siempre el primero).
   function claimRoot() {
@@ -413,6 +448,8 @@
       initialize: function (api, state, done) {
         GI._mgState = state;
         api.getSession(function (credentials, server) {
+          // sesión para el reproductor de video de Geotab (se pasa por postMessage al iframe de video)
+          GI._mgSession = { database: credentials.database, userName: credentials.userName, sessionId: credentials.sessionId, server: (typeof server === "string" && server) || window.location.hostname };
           if (!root) {
             const el = claimRoot();
             el.dataset.giOwner = BUILD;

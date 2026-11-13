@@ -19,7 +19,7 @@
 
   function riskFactors(model, ids, driverOk, routeIdxMap, fleetIdx) {
     const s = model.settings;
-    const fz = Object.assign({ max_drive_day: 9, max_span: 12, min_rest: 8, max_continuous: 4, max_days_row: 6, rest_split: 4 }, s.fatigue || {});
+    const fz = Object.assign({}, GI.FATIGUE_DEFAULT || { max_drive_day: 9, max_span: 12, min_rest: 8, max_continuous: 4, pause_min: 15, max_days_row: 6, rest_split: 4 }, s.fatigue || {});
     // Jornada = viajes separados por pausas de menos de rest_split horas (no por
     // día calendario: un turno noche de 19 a 7 h es UNA jornada, asignada al
     // día en que empezó). Una pausa de rest_split h o más cierra la jornada y es
@@ -156,7 +156,7 @@
       // Manejo continuo (pausas < 15 min) sobre todos sus viajes.
       let stint = 0, maxStint = 0, longStints = 0, lastE = null;
       for (const t of trips) {
-        if (lastE != null && t.s - lastE > 15 * 60000) { if (stint >= fz.max_continuous) longStints++; stint = 0; }
+        if (lastE != null && t.s - lastE > (fz.pause_min || 15) * 60000) { if (stint >= fz.max_continuous) longStints++; stint = 0; }
         stint += t.dh || 0; maxStint = Math.max(maxStint, stint); lastE = t.e;
       }
       if (stint >= fz.max_continuous) longStints++;

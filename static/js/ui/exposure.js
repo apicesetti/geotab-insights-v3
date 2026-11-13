@@ -12,10 +12,10 @@
 
   // Escalas (paleta validada): secuencial azul para magnitudes; divergente
   // azul ↔ rojo con gris al medio para "respecto del promedio de la flota".
-  const SEQ = ["#cde2fb", "#9ec5f4", "#6da7ec", "#3987e5", "#256abf", "#184f95"];
-  const DIV_LOW = ["#256abf", "#5598e7", "#9ec5f4"];
-  const DIV_MID = "#f0efec";
-  const DIV_HIGH = ["#f4c3c2", "#ec8a89", "#e34948", "#b02f2e"];
+  const SEQ = ["#cce4f6", "#99c9ed", "#4da1e0", "#3393dc", "#0078d3", "#25477b"];
+  const DIV_LOW = ["#0078d3", "#3393dc", "#99c9ed"];
+  const DIV_MID = "#eff2f7";
+  const DIV_HIGH = ["#edbbb2", "#fe8b78", "#fe5a3f", "#fe5a3f"];
   const NODATA = "#ffffff";
 
   function seqColor(v, max) {
@@ -85,7 +85,7 @@
       <${ChartView} height=${220} config=${{
         type: "bar",
         data: { labels: ex.byHour.map(x => hh(x.h) + " h"), datasets: [{ label: "Infracciones cada 100 km", data: ex.byHour.map(x => (x.rate == null ? null : GI.round(x.rate, 2))),
-          backgroundColor: ex.byHour.map(x => (x.rate != null && ex.fleetRate && x.rate / ex.fleetRate >= 1.5 ? "#e34948" : "#2a78d6")), borderRadius: 4, borderSkipped: "start" }] },
+          backgroundColor: ex.byHour.map(x => (x.rate != null && ex.fleetRate && x.rate / ex.fleetRate >= 1.5 ? "#fe5a3f" : "#0078d3")), borderRadius: 4, borderSkipped: "start" }] },
         options: { plugins: { legend: { display: false }, tooltip: { callbacks: { afterLabel: c => { const x = ex.byHour[c.dataIndex]; return n0(x.n) + " infracciones en " + n0(x.km) + " km"; } } } },
           scales: { y: { beginAtZero: true, title: { display: true, text: "infracciones / 100 km" } } } },
       }} />
@@ -179,7 +179,7 @@
           <${ChartView} height=${210} config=${{
             type: "bar",
             data: { labels: x.hours.map(h => hh(h.h)), datasets: [{ label: "km", data: x.hours.map(h => GI.round(h.km, 0)),
-              backgroundColor: x.hours.map(h => (h.high ? "#e34948" : "#2a78d6")), borderRadius: 3, borderSkipped: "start" }] },
+              backgroundColor: x.hours.map(h => (h.high ? "#fe5a3f" : "#0078d3")), borderRadius: 3, borderSkipped: "start" }] },
             options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, title: { display: true, text: "km" } } } },
           }} />
           <p className="muted small">En rojo, las horas de mayor riesgo de la flota.</p></div>
@@ -187,7 +187,7 @@
           <${ChartView} height=${210} config=${{
             type: "bar",
             data: { labels: x.hours.map(h => hh(h.h)), datasets: [{ label: "infracciones / 100 km", data: x.hours.map(h => (h.rate == null ? null : GI.round(h.rate, 2))),
-              backgroundColor: x.hours.map(h => (h.rate != null && h.fleet && h.rate >= h.fleet * 1.5 ? "#e34948" : "#2a78d6")), borderRadius: 3, borderSkipped: "start" }] },
+              backgroundColor: x.hours.map(h => (h.rate != null && h.fleet && h.rate >= h.fleet * 1.5 ? "#fe5a3f" : "#0078d3")), borderRadius: 3, borderSkipped: "start" }] },
             options: { plugins: { legend: { display: false }, tooltip: { callbacks: { afterLabel: c => { const h = x.hours[c.dataIndex]; return n0(h.n) + " infracciones en " + n0(h.km) + " km · flota " + (h.fleet == null ? "–" : n2(h.fleet)); } } } },
               scales: { y: { beginAtZero: true, title: { display: true, text: "infracciones / 100 km" } } } },
           }} />
@@ -287,7 +287,7 @@
           <${ChartView} height=${220} config=${{
             type: "bar",
             data: { labels: days.map(x => fmtDay(x.dk)), datasets: [{ label: "Horas de manejo", data: days.map(x => GI.round(x.dh, 1)),
-              backgroundColor: days.map(x => (x.dh > L.max_drive_day ? "#e34948" : "#2a78d6")), borderRadius: 3, borderSkipped: "start" }] },
+              backgroundColor: days.map(x => (x.dh > L.max_drive_day ? "#fe5a3f" : "#0078d3")), borderRadius: 3, borderSkipped: "start" }] },
             options: { plugins: { legend: { display: false }, tooltip: { callbacks: { afterLabel: c => { const x = days[c.dataIndex]; return "Jornada " + n1(x.span) + " h · " + n0(x.n) + " infracciones" + (x.restBefore != null ? " · descanso previo " + n1(x.restBefore) + " h" : ""); } } } },
               scales: { y: { beginAtZero: true, title: { display: true, text: "h de manejo" } } } },
           }} />
@@ -296,7 +296,7 @@
           <${ChartView} height=${220} config=${{
             type: "scatter",
             data: { datasets: [{ label: "Días", data: days.filter(x => x.rate != null).map(x => ({ x: GI.round(x.dh, 1), y: GI.round(x.rate, 2), dk: x.dk })),
-              backgroundColor: "#2a78d6cc", pointRadius: 5, pointHoverRadius: 7 }] },
+              backgroundColor: "#0078d3cc", pointRadius: 5, pointHoverRadius: 7 }] },
             options: { plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => fmtDay(c.raw.dk) + ": " + n1(c.raw.x) + " h, " + n2(c.raw.y) + " pts/100 km" } } },
               scales: { x: { beginAtZero: true, title: { display: true, text: "h de manejo en el día" } }, y: { beginAtZero: true, title: { display: true, text: "pts/100 km" } } } },
           }} /></div>
@@ -304,7 +304,7 @@
       <h3 style=${{ marginTop: "14px" }}>Su riesgo según horas acumuladas al volante en el día</h3>
       <${ChartView} height=${180} config=${{
         type: "bar",
-        data: { labels: d.cumBuckets.map(fatigueLabel), datasets: [{ label: "pts/100 km", data: d.cumBuckets.map(b => (b.rate == null ? null : GI.round(b.rate, 2))), backgroundColor: "#2a78d6", borderRadius: 3, borderSkipped: "start" }] },
+        data: { labels: d.cumBuckets.map(fatigueLabel), datasets: [{ label: "pts/100 km", data: d.cumBuckets.map(b => (b.rate == null ? null : GI.round(b.rate, 2))), backgroundColor: "#0078d3", borderRadius: 3, borderSkipped: "start" }] },
         options: { plugins: { legend: { display: false }, tooltip: { callbacks: { afterLabel: c => { const b = d.cumBuckets[c.dataIndex]; return n0(b.n) + " infracciones en " + n0(b.km) + " km"; } } } },
           scales: { y: { beginAtZero: true, title: { display: true, text: "pts/100 km" } } } },
       }} />
@@ -342,13 +342,13 @@
         <${ChartView} height=${220} config=${{
           type: "bar",
           data: { labels: f.buckets.map(fatigueLabel), datasets: [{ label: "pts/100 km", data: f.buckets.map(b => (b.rate == null ? null : GI.round(b.rate, 2))),
-            backgroundColor: f.buckets.map(b => (b.factor != null && b.factor >= 1.3 ? "#e34948" : "#2a78d6")), borderRadius: 4, borderSkipped: "start" }] },
+            backgroundColor: f.buckets.map(b => (b.factor != null && b.factor >= 1.3 ? "#fe5a3f" : "#0078d3")), borderRadius: 4, borderSkipped: "start" }] },
           options: { plugins: { legend: { display: false }, tooltip: { callbacks: { afterLabel: c => { const b = f.buckets[c.dataIndex]; return n0(b.n) + " infracciones en " + n0(b.km) + " km" + (b.factor != null ? " (" + factorTxt(b.factor) + ")" : ""); } } } },
             scales: { x: { title: { display: true, text: "horas de manejo acumuladas en el día" } }, y: { beginAtZero: true, title: { display: true, text: "pts/100 km" } } } },
         }} />
       <//>
       <${Panel} title="Jornada y descanso por conductor"
-        hint=${"Límites de referencia (se cambian en Configuración → Fatiga y gravedad): manejo máximo " + L.max_drive_day + " h por día, jornada máxima " + L.max_span + " h (del primer arranque al último corte), descanso mínimo " + L.min_rest + " h entre jornadas, hasta " + L.max_days_row + " días seguidos y manejo continuo de hasta " + L.max_continuous + " h (pausas de menos de 15 min no cortan). Nivel: Alta si incumple 3 o más, Media si incumple alguno."}>
+        hint=${"Límites de referencia (se cambian en Configuración → Fatiga y gravedad): manejo máximo " + L.max_drive_day + " h por día, jornada máxima " + L.max_span + " h (del primer arranque al último corte), descanso mínimo " + L.min_rest + " h entre jornadas, hasta " + L.max_days_row + " días seguidos y manejo continuo de hasta " + L.max_continuous + " h (pausas de menos de " + (L.pause_min || 15) + " min no cortan). Nivel: Alta si incumple 3 o más, Media si incumple alguno."}>
         <div className="readouts compact inset">
           <${Kpi} label="Fatiga alta" value=${n0(rows.filter(d => d.level === "alta").length)} sub=${html`<span>3 o más límites superados</span>`} />
           <${Kpi} label=${"Días con más de " + L.max_drive_day + " h de manejo"} value=${n0(GI.sum(rows, d => d.longDays))} sub=${html`<span>en ${n0(rows.filter(d => d.longDays).length)} conductores</span>`} />
@@ -398,7 +398,7 @@
         <${ChartView} height=${200} config=${{
           type: "bar",
           data: { labels: fm.buckets.map(b => b.label), datasets: [{ label: "Real ÷ esperado", data: fm.buckets.map(b => (b.ratio == null ? null : GI.round(b.ratio, 2))),
-            backgroundColor: fm.buckets.map(b => (b.ratio != null && b.ratio >= 1.3 ? "#e34948" : "#2a78d6")), borderRadius: 4, borderSkipped: "start" }] },
+            backgroundColor: fm.buckets.map(b => (b.ratio != null && b.ratio >= 1.3 ? "#fe5a3f" : "#0078d3")), borderRadius: 4, borderSkipped: "start" }] },
           options: { plugins: { legend: { display: false }, tooltip: { callbacks: { afterLabel: c => { const b = fm.buckets[c.dataIndex]; return n0(b.n) + " pasadas, " + n0(b.km) + " km"; } } } },
             scales: { x: { title: { display: true, text: "número de pasada por el recorrido" } }, y: { beginAtZero: true, title: { display: true, text: "real ÷ esperado (1 = normal del tramo)" } } } },
         }} />

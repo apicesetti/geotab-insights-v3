@@ -14,10 +14,10 @@
   const EV_CAP = 4000;
 
   const LV = {
-    ok: { label: "Bien", color: "#3f8f5f", bg: "#e3f0e8", fg: "#24603d" },
-    at: { label: "Atención", color: "#e3a33b", bg: "#fbefd7", fg: "#6e4a05" },
-    cr: { label: "Crítico", color: "#c63f2f", bg: "#c63f2f", fg: "#ffffff" },
-    nd: { label: "Pocos datos", color: "#c9d1d9", bg: "#eef1f4", fg: "#4d5864" },
+    ok: { label: "Bien", color: "#00aa00", bg: "#e5f6e5", fg: "#3c5164" },
+    at: { label: "Atención", color: "#f9ba00", bg: "#fff5d6", fg: "#3c5164" },
+    cr: { label: "Crítico", color: "#fe5a3f", bg: "#fe5a3f", fg: "#ffffff" },
+    nd: { label: "Pocos datos", color: "#d1d6dd", bg: "#eff2f7", fg: "#3c5164" },
   };
   const pill = l => html`<span className="rd-pill" style=${{ background: LV[l].bg, color: LV[l].fg }}>${LV[l].label}</span>`;
   const FRANJA_OPTS = [{ value: "all", label: "Todo el día", h: null }, ...GI.ROAD_FRANJAS.map(f => ({ value: f.key, label: f.label, h: f.h }))];
@@ -204,7 +204,7 @@
           const lv = levelOf(x, lens), col = LV[lv].color, on = x.id === sel;
           for (const c of x.cells) {
             const b = GI._road.cellBounds(c), ctr = GI._road.cellCenter(c);
-            const st = { stroke: on, color: "#18212b", weight: 2, fillColor: col, fillOpacity: lv === "nd" ? 0.45 : 0.85 };
+            const st = { stroke: on, color: "#21325e", weight: 2, fillColor: col, fillOpacity: lv === "nd" ? 0.45 : 0.85 };
             const shp = cellPx >= 9 ? L.rectangle(b, st) : L.circleMarker(ctr, { ...st, radius: Math.max(3, cellPx / 2 + 1) });
             layers.push(shp.bindTooltip("<b>" + x.name + "</b><br>" + LV[lv].label + (lens === "camino" ? " · riesgo del camino " + fx(x.envIdx) : " · conducta " + fx(x.condIdx)), { sticky: true }).on("click", () => onPick(x.id)));
           }
@@ -267,9 +267,9 @@
       <${ChartView} height=${220} config=${{
         type: "bar",
         data: { labels: hours.map(h => hh(h.h)), datasets: [
-          { type: "bar", label: "Km por día de la flota", data: hours.map(h => GI.round(h.km, 1)), backgroundColor: "#c9d6e5", borderRadius: 3, yAxisID: "y" },
-          { type: "line", label: "Velocidad mediana (km/h)", data: hours.map(h => (h.vmed == null ? null : GI.round(h.vmed, 0))), borderColor: "#18212b", backgroundColor: "#18212b", spanGaps: false, yAxisID: "y1" },
-          { type: "line", label: "Riesgo del camino (×)", data: hours.map(h => (h.expEnv >= 1 && h.env != null ? GI.round(h.env * 50, 0) : null)), borderColor: "#c63f2f", backgroundColor: "#c63f2f", borderDash: [4, 3], spanGaps: false, yAxisID: "y1" },
+          { type: "bar", label: "Km por día de la flota", data: hours.map(h => GI.round(h.km, 1)), backgroundColor: "#d1d6dd", borderRadius: 3, yAxisID: "y" },
+          { type: "line", label: "Velocidad mediana (km/h)", data: hours.map(h => (h.vmed == null ? null : GI.round(h.vmed, 0))), borderColor: "#21325e", backgroundColor: "#21325e", spanGaps: false, yAxisID: "y1" },
+          { type: "line", label: "Riesgo del camino (×)", data: hours.map(h => (h.expEnv >= 1 && h.env != null ? GI.round(h.env * 50, 0) : null)), borderColor: "#fe5a3f", backgroundColor: "#fe5a3f", borderDash: [4, 3], spanGaps: false, yAxisID: "y1" },
         ] },
         options: { plugins: { tooltip: { callbacks: { label: c => (c.dataset.label.startsWith("Riesgo") ? "Riesgo del camino " + fx(c.raw / 50) : c.dataset.label + ": " + c.formattedValue) } } },
           scales: { y: { beginAtZero: true, title: { display: true, text: "km por día" } }, y1: { beginAtZero: true, position: "right", grid: { drawOnChartArea: false }, title: { display: true, text: "km/h · riesgo ×50" } } } },

@@ -12,17 +12,17 @@
   if (window.Chart) {
     Chart.defaults.font.family = "'Barlow', system-ui, sans-serif";
     Chart.defaults.font.size = 12.5;
-    Chart.defaults.color = "#4f5866";
-    Chart.defaults.borderColor = "#e9ecf0";
-    Chart.defaults.scale.grid.color = "#eef0f3";
+    Chart.defaults.color = "#3c5164";
+    Chart.defaults.borderColor = "#e4e8ee";
+    Chart.defaults.scale.grid.color = "#eff2f7";
     Chart.defaults.scale.border = { display: false };
     Chart.defaults.elements.bar.borderRadius = 3;
     Chart.defaults.elements.line.borderWidth = 2;
     Chart.defaults.elements.point.radius = 2.5;
     Chart.defaults.elements.point.hoverRadius = 5;
     Object.assign(Chart.defaults.plugins.tooltip, {
-      backgroundColor: "#ffffff", titleColor: "#1f2a37", bodyColor: "#1c2430", footerColor: "#4f5866",
-      borderColor: "#cdd3db", borderWidth: 1, padding: 10, cornerRadius: 6, boxWidth: 9, boxHeight: 9,
+      backgroundColor: "#ffffff", titleColor: "#25477b", bodyColor: "#3c5164", footerColor: "#3c5164",
+      borderColor: "#b3bcc7", borderWidth: 1, padding: 10, cornerRadius: 6, boxWidth: 9, boxHeight: 9,
       boxPadding: 4, usePointStyle: true, caretSize: 5,
       titleFont: { weight: "600", size: 13 }, bodyFont: { size: 13 },
     });
@@ -75,10 +75,21 @@
       <button key=${o.value} className=${value === o.value ? "on" : ""} onClick=${() => onChange(o.value)}>${o.label}</button>`)}</div>`;
   }
 
+  // Guía de marca: títulos en tipo oración y sin punto final; con 3 palabras o menos, cada palabra
+  // con mayúscula salvo artículos, preposiciones y conjunciones.
+  const SMALL = new Set(["a", "al", "con", "de", "del", "el", "en", "la", "las", "los", "o", "por", "sin", "su", "un", "una", "y", "e", "u", "vs", "×"]);
+  function headline(t) {
+    if (typeof t !== "string") return t;
+    let s = t.trim().replace(/\.$/, "");
+    const w = s.split(/\s+/);
+    if (w.length <= 3) s = w.map((x, i) => (i > 0 && SMALL.has(x.toLowerCase()) ? x.toLowerCase() : /^[a-záéíóúñü¿¡]/.test(x) ? x.charAt(0).toUpperCase() + x.slice(1) : x)).join(" ");
+    return s;
+  }
+  GI.headline = headline;
   function Panel({ title, sub, hint, actions, children, className }) {
     return html`<section className=${"panel " + (className || "")}>
       ${title || actions ? html`<div className="panel-head">
-        <div><h2>${title}<${Hint}>${hint}<//></h2>${sub ? html`<p className="panel-sub">${sub}</p>` : null}</div>
+        <div><h2>${headline(title)}<${Hint}>${hint}<//></h2>${sub ? html`<p className="panel-sub">${sub}</p>` : null}</div>
         ${actions ? html`<div className="panel-actions">${actions}</div>` : null}
       </div>` : null}
       ${children}
@@ -148,12 +159,12 @@
       for (const m of ms) {
         const px = x.getPixelForValue(m.index);
         if (px == null || Number.isNaN(px)) continue;
-        ctx.strokeStyle = "#f2b705";
+        ctx.strokeStyle = "#f9ba00";
         ctx.setLineDash([5, 4]);
         ctx.lineWidth = 2;
         ctx.beginPath(); ctx.moveTo(px, chartArea.top); ctx.lineTo(px, chartArea.bottom); ctx.stroke();
         ctx.setLineDash([]);
-        ctx.fillStyle = "#7a5a00";
+        ctx.fillStyle = "#3c5164";
         ctx.font = "600 12px Barlow, system-ui, sans-serif";
         const text = m.label;
         const w = ctx.measureText(text).width;
@@ -173,7 +184,7 @@
       const cfg = { ...config, plugins: [...(config.plugins || []), milestonePlugin] };
       cfg.options = {
         responsive: true, maintainAspectRatio: false, animation: false,
-        interaction: { mode: "index", intersect: false },
+        interaction: config.type === "scatter" || config.type === "bubble" ? { mode: "nearest", intersect: true } : { mode: "index", intersect: false },
         ...(config.options || {}),
         plugins: {
           legend: { position: "bottom", labels: { boxWidth: 12, usePointStyle: true } },

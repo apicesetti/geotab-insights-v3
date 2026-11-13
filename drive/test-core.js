@@ -103,4 +103,50 @@ ok(D.filterUsers(cands, "alvarez").length === 1 && D.filterUsers(cands, "").leng
 const msg = D.reliefMessage("Juan Pérez", { name: "Camión 12", lat: -38.95, lon: -68.06 }, now);
 ok(/Juan Pérez te entregó Camión 12 a las 14:00/.test(msg) && /maps\.google\.com\/\?q=-38\.95,-68\.06/.test(msg), "mensaje de relevo");
 
+// acompañante: tramos de tripulación de Horas de trabajo (repo hermano ../workinghours)
+const whPath = path.join(__dirname, "..", "..", "workinghours", "scripts", "shared.js");
+if (fs.existsSync(whPath)) {
+  vm.runInContext(fs.readFileSync(whPath, "utf8"), ctx);
+  const S = ctx.WorkingHoursShared;
+  const jw = { key: "k1", date: GI.dayKey(now), driverId: "chofer", deviceId: "b2", firstAt: at(6, 0), segments: [] };
+  const crew = S.newCrewRecord(jw, { driverName: "Mauricio Falcon", deviceName: "OE" });
+  crew.members = [{ userId: "me", name: "Yo", from: new Date(at(6, 0)).toISOString(), to: new Date(at(12, 0)).toISOString() }];
+  const vtrips = [
+    { i: "v1", d: "b2", r: "chofer", s: at(6, 10), e: at(9, 0), km: 200, dh: 2.8 },
+    { i: "v2", d: "b2", r: "chofer", s: at(10, 0), e: at(13, 0), km: 210, dh: 3 },   // se corta a las 12:00
+    { i: "v3", d: "b9", r: "otro", s: at(7, 0), e: at(8, 0), km: 50, dh: 1 },        // otro vehículo
+  ];
+  let ivs = D.rideIntervals([crew], "me", now, S);
+  ok(ivs.length === 1 && ivs[0].status === "pending" && ivs[0].deviceName === "OE", "tramo como acompañante (sin confirmar)");
+  let rt = D.rideTrips(ivs, vtrips, "me", [], at(12, 30), 4);
+  ok(rt.length === 1 && rt[0].s === at(6, 0) && rt[0].e === at(12, 0) && rt[0].dh === 0 && Math.abs(rt[0].km - 340) < 1e-6, "todo el tiempo a bordo cuenta (también detenido), sin manejo");
+  const fsR = D.fatigueState(rt, [], cfg, "me", at(12, 30), null);
+  const itR = Object.fromEntries(fsR.open.progress.items.map(x => [x.key, x]));
+  ok(fsR.open && fsR.open.ride && fsR.open.ride.only && Math.abs(itR.span.v - 6.5) < 0.01 && itR.drive.v === 0, "jornada del acompañante: desde que subió, sin manejo (" + itR.span.v + ")");
+  // subió y el vehículo todavía no se movió: igual cuenta
+  const crew2 = S.newCrewRecord(jw, {}); crew2.members = [{ userId: "me", name: "Yo", from: new Date(at(6, 0)).toISOString(), to: null, deviceId: "b2" }];
+  const rt0 = D.rideTrips(D.rideIntervals([crew2], "me", at(6, 20), S), [], "me", [], at(6, 20), 4);
+  ok(rt0.length === 1 && rt0[0].e === at(6, 20), "sin viajes todavía: cuenta desde que subió");
+  // lo que manejé yo gana sobre lo que viajé de acompañante
+  ok(D.rideTrips(ivs, vtrips, "me", [{ s: at(10, 30), e: at(11, 0) }], at(12, 30), 4).length === 2, "superposición con manejo propio: gana el manejo");
+  // tramo abierto y el chofer no maneja hace más de 4 h: se corta en su último viaje
+  const rt4 = D.rideTrips(D.rideIntervals([crew2], "me", at(20, 0), S), vtrips, "me", [], at(20, 0), 4);
+  ok(rt4.length === 1 && rt4[0].e === at(13, 0), "chofer sin manejar hace más de 4 h: se corta (" + new Date(rt4[0].e).toTimeString().slice(0, 5) + ")");
+  // dijo "No viajo": no cuenta
+  const ack = S.newAck(crew, { id: "me", name: "Yo" }, "no", "yo");
+  ok(D.rideIntervals([crew, ack], "me", now, S).length === 0, "rechazado: no cuenta");
+} else console.log("(sin ../workinghours: se saltean las pruebas de acompañante)");
+
+// identificado en el vehículo sin viajes todavía: la jornada empieza al identificarse
+{
+  const n2 = at(15, 40);
+  const fsI = D.fatigueState([], [], cfg, "me", n2, { d: "b42", driving: false, since: at(12, 0), identFrom: at(15, 36) });
+  ok(fsI.open && fsI.open.ident && fsI.open.ident.noTrips && Math.abs(fsI.open.progress.items[0].v - 4 / 60) < 1e-6, "identificado sin viajes: jornada abierta desde la identificación");
+  const it3 = Object.fromEntries(fsI.open.progress.items.map(x => [x.key, x]));
+  ok(it3.drive.v === 0 && it3.stint.v === 0 && !fsI.open.progress.driving, "sin manejo ni manejo continuo");
+  // con viajes: cuenta desde la identificación (05:55), no desde el primer viaje (06:00)
+  const fsJ = D.fatigueState(trips, evs, cfg, "me", now, { d: "b1", driving: false, since: at(13, 0), identFrom: at(5, 55) });
+  ok(Math.abs(fsJ.open.progress.items[0].v - (8 + 5 / 60)) < 1e-6 && !fsJ.open.ident.noTrips, "con viajes: la jornada arranca en la identificación");
+}
+
 console.log("OK " + pass + " pruebas");
